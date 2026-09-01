@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+asyncpg
+pydantic
+pydantic-settings
+strawberry-graphql[fastapi]==0.326.0
+structlog
+pytest
+pytest-asyncio
+httpx
