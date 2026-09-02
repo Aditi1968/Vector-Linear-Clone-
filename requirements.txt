@@ -1,4 +1,5 @@
 fastapi
+starlette>=1.6.0  # app.http_limits needs starlette.middleware.body_limit
 uvicorn[standard]
 asyncpg
 pydantic
