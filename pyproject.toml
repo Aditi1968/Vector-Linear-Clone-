@@ -1,3 +1,5 @@
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["db: requires a PostgreSQL container (deselected by default)"]
+addopts = "-m 'not db'"

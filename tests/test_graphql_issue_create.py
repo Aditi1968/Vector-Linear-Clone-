@@ -8,11 +8,15 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from app.domain.issues import IssueEntity
-from app.graphql.schema import schema
+from app.graphql.schema import build_schema
 from app.repositories.issues import IssueRepository
 from app.services.issues import IssueService
 
 from tests.conftest import ExplodingPool
+
+
+# Built directly rather than imported, so these tests need no DATABASE_URL.
+schema = build_schema("test")
 
 
 ISSUE_CREATE_MUTATION = """

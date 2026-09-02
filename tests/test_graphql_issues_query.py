@@ -2,9 +2,13 @@
 
 from app.domain.errors import ValidationError, ValidationIssue
 from app.domain.pagination import IssuePage, encode_issue_cursor
-from app.graphql.schema import schema
+from app.graphql.schema import build_schema
 
 from tests.conftest import make_entity
+
+
+# Built directly rather than imported, so these tests need no DATABASE_URL.
+schema = build_schema("test")
 
 
 ISSUES_QUERY = """

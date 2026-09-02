@@ -3,24 +3,7 @@
 from app.domain.issues import IssueEntity
 from app.repositories.issues import IssueRepository
 
-from tests.conftest import FakeConnection, make_entity
-
-
-def as_record(entity: IssueEntity) -> dict:
-    """asyncpg.Record supports __getitem__, which a dict models well enough."""
-    return {
-        "id": entity.id,
-        "title": entity.title,
-        "description": entity.description,
-        "priority": entity.priority,
-        "completed_at": entity.completed_at,
-        "created_at": entity.created_at,
-        "updated_at": entity.updated_at,
-    }
-
-
-def normalize(sql: str) -> str:
-    return " ".join(sql.split())
+from tests.conftest import FakeConnection, as_record, make_entity, normalize
 
 
 async def test_no_cursor_uses_query_without_where_clause():
