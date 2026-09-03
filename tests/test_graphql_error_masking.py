@@ -20,9 +20,9 @@ import pytest
 from graphql import GraphQLError, ValidationRule
 
 from app.config import Environment
-from app.graphql import limits
 from app.domain.errors import ValidationError, ValidationIssue
 from app.domain.pagination import IssuePage
+from app.graphql import limits
 from app.graphql.schema import MASKED_ERROR_MESSAGE, build_schema
 
 from tests.conftest import make_entity
@@ -315,9 +315,7 @@ def fragment_chain(links: int) -> str:
     for link in range(links):
         definitions.append(f"fragment F{link} on Query {{ ...F{link + 1} }}")
 
-    definitions.append(
-        f"fragment F{links} on Query {{ issues {{ nodes {{ id }} }} }}"
-    )
+    definitions.append(f"fragment F{links} on Query {{ issues {{ nodes {{ id }} }} }}")
 
     return "\n".join(definitions)
 

@@ -3,3 +3,98 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = ["db: requires a PostgreSQL container (deselected by default)"]
 addopts = "-m 'not db'"
+
+
+[tool.ruff]
+# 88 is the formatter's own default and the width this code already fits:
+# outside comments, four lines in the repository exceed it. Narrowing to 79
+# would make the formatter re-split 20 files instead of 15 for no gain.
+line-length = 88
+target-version = "py312"
+
+
+[tool.ruff.lint]
+# Deliberately a small set. Every family here either reports a defect or
+# reports something that hides one; nothing here is enabled to enforce taste.
+select = [
+    "E4",    # pycodestyle: import form -- multiple imports on a line, imports after code
+    "E7",    # pycodestyle: real statement errors -- `== None`, bare `except`, `l` as a name
+    "E9",    # pycodestyle: the file does not parse or cannot be read
+    "F",     # pyflakes: undefined names, unused imports, unused locals, shadowed definitions
+    "I",     # isort: import order, so that import blocks stop being diff noise
+    "B",     # flake8-bugbear: mutable defaults, late-binding closures, swallowed contexts
+    "ASYNC", # flake8-async: blocking calls inside `async def` -- this whole service is async
+]
+
+# Not enabled, on purpose:
+#
+# E501 (line too long) -- the formatter owns line width, and it cannot split a
+#   comment. Selecting E501 would report `app/graphql/schema.py:140` and three
+#   test lines that no tool can fix, so the gate would ship already red.
+# PL (pylint) -- PLR2004 wants a named constant for every literal in an
+#   assertion (34 hits in the tests) and PLW0603 reports the module-level pool
+#   and probe handles in `app/db.py` and `app/rest/health.py`, both of which
+#   are deliberate.
+# A (builtins) -- reports `IssueService.list` / `IssueRepository.list`, which
+#   are the API's names.
+# ARG -- 41 hits, nearly all fakes matching a real signature.
+# UP, SIM, C4, RET, PIE, D, ANN -- style. They would buy a large diff and no
+#   defect; this codebase is already written in modern Python.
+
+[tool.ruff.lint.isort]
+# The codebase separates its import block from module-level code with two
+# blank lines, everywhere. That is a style, not an accident, so it is
+# configured rather than reformatted away.
+lines-after-imports = 2
+
+# `tests` is a package in this repository but is not the application. Ruff
+# would otherwise merge `from tests.conftest import ...` into the `app`
+# block; the existing files keep it in a section of its own.
+known-local-folder = ["tests"]
+
+[tool.ruff.format]
+# Defaults, stated because they are decisions: double quotes and spaces match
+# the existing code, and magic trailing commas are honoured, which is what
+# preserves every call the author deliberately exploded one-argument-per-line.
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+
+[tool.mypy]
+python_version = "3.12"
+files = ["app"]
+
+# Pin the package base to the repository root. Without it mypy derives module
+# names by walking up from the file, which walks straight out of the project:
+# on a checkout under a directory that happens to contain an `__init__.py`,
+# `app/domain/issues.py` resolves as both `app.domain.issues` and
+# `<parent>.vector.app.domain.issues` and mypy refuses to check anything. The
+# module names are a property of this repository, not of where it is cloned.
+mypy_path = "."
+explicit_package_bases = true
+
+# Progressively strict, which for an existing codebase means: report mistakes
+# in the annotations that are already there, and do not fail a file for
+# annotations that are not. `disallow_untyped_defs` is therefore off -- turning
+# it on today would report strawberry resolvers and the two schema overrides
+# and buy no defect for it.
+check_untyped_defs = true
+disallow_incomplete_defs = true
+no_implicit_optional = true
+strict_equality = true
+extra_checks = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unused_configs = true
+warn_return_any = true
+warn_unreachable = true
+
+plugins = ["pydantic.mypy"]
+
+# asyncpg ships neither stubs nor a py.typed marker, so mypy cannot see into
+# it. Scoped to the one library rather than set globally: a typo in a
+# strawberry or pydantic import must still be an error.
+[[tool.mypy.overrides]]
+module = ["asyncpg.*"]
+ignore_missing_imports = true

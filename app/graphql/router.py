@@ -1,8 +1,19 @@
+from typing import TYPE_CHECKING
+
 import strawberry
 from strawberry.fastapi import GraphQLRouter
 
 from app.config import Environment
 from app.graphql.context import get_context
+
+
+if TYPE_CHECKING:
+    # Type-checking only. GraphQL_IDE is a typing.Literal alias with no
+    # runtime role, and `strawberry.http.ides` is an internal module path --
+    # importing it at runtime would put a symbol the application never uses
+    # on create_app()'s import path, where a strawberry release that moved
+    # it would break startup rather than type checking.
+    from strawberry.http.ides import GraphQL_IDE
 
 
 def build_graphql_router(
@@ -15,7 +26,9 @@ def build_graphql_router(
     passed in rather than read from settings so that this module, like the
     schema it wraps, imports without requiring configuration.
     """
-    graphql_ide = None if environment == "production" else "graphiql"
+    graphql_ide: "GraphQL_IDE | None" = (
+        None if environment == "production" else "graphiql"
+    )
 
     return GraphQLRouter(
         schema,

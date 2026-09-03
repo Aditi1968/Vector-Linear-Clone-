@@ -12,13 +12,13 @@ import inspect
 import pytest
 from pydantic import ValidationError as SettingsValidationError
 
+import app.db
 from app.config import Environment, get_settings
 from app.domain.pagination import IssuePage
 from app.graphql.context import get_context
 from app.graphql.router import build_graphql_router
 from app.graphql.schema import build_schema
 
-import app.db
 from tests.conftest import make_entity
 
 
@@ -136,9 +136,7 @@ async def test_building_requires_no_configuration(unconfigured):
     result = await schema.execute(
         ISSUES_QUERY,
         context_value=Context(
-            FakeIssueService(
-                IssuePage(nodes=[], has_next_page=False, end_cursor=None)
-            )
+            FakeIssueService(IssuePage(nodes=[], has_next_page=False, end_cursor=None))
         ),
     )
 

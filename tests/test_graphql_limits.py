@@ -399,7 +399,7 @@ def test_the_reference_walk_really_does_expand_everything():
     counting repeated spreads repeatedly, and that the memoised walk agrees
     with it rather than with a shortcut.
     """
-    (memoised, naive), = measure_both(diamond(12))
+    ((memoised, naive),) = measure_both(diamond(12))
 
     assert naive.selections == 2**12 + 2
     assert memoised.selections == naive.selections
@@ -547,9 +547,7 @@ async def test_a_query_over_the_alias_limit_is_rejected():
         context_value=context(),
     )
 
-    assert rejected_for(
-        result, f"Query uses 16 aliases; the maximum is {ALIAS_LIMIT}."
-    )
+    assert rejected_for(result, f"Query uses 16 aliases; the maximum is {ALIAS_LIMIT}.")
     assert result.data is None
 
 
@@ -557,17 +555,13 @@ async def test_aliases_hidden_in_a_fragment_are_still_rejected():
     document = (
         "query Issues { issues(first: 1) { ...Amplified } }\n"
         "fragment Amplified on IssueConnection { "
-        + " ".join(
-            f"n{index}: nodes {{ id }}" for index in range(ALIAS_LIMIT + 1)
-        )
+        + " ".join(f"n{index}: nodes {{ id }}" for index in range(ALIAS_LIMIT + 1))
         + " }"
     )
 
     result = await build_schema("test").execute(document, context_value=context())
 
-    assert rejected_for(
-        result, f"Query uses 16 aliases; the maximum is {ALIAS_LIMIT}."
-    )
+    assert rejected_for(result, f"Query uses 16 aliases; the maximum is {ALIAS_LIMIT}.")
 
 
 async def test_a_query_over_the_selection_limit_is_rejected():

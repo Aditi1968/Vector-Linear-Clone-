@@ -77,9 +77,7 @@ class FakeDocker:
         command = argv[1]
 
         if command == "run":
-            return completed(
-                argv, self.run_returncode, "deadbeef\n", self.run_stderr
-            )
+            return completed(argv, self.run_returncode, "deadbeef\n", self.run_stderr)
 
         if command == "inspect":
             if self.inspect_returncode != 0:
@@ -201,9 +199,7 @@ def test_published_port_waits_for_a_binding_that_arrives_late(docker):
     assert fake.count("inspect") == 3
 
 
-def test_unpublished_port_raises_a_diagnostic_not_an_indexerror(
-    docker, monkeypatch
-):
+def test_unpublished_port_raises_a_diagnostic_not_an_indexerror(docker, monkeypatch):
     """The regression test for the reported failure.
 
     A running container that never gets a binding must produce a message

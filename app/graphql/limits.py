@@ -115,7 +115,15 @@ def _as_page_size(value: object) -> int:
     than waved through.
     """
     try:
-        return max(1, int(value))  # type: ignore[call-overload]
+        # The coercion is the point, not an accident: graphql-core carries an
+        # IntValueNode's value as a *string*, so `first: 50` arrives here as
+        # "50" and an isinstance(int) test would send every page size the
+        # document states down the ASSUMED_PAGE_SIZE path. `int(object)` has
+        # no matching overload, hence the ignore; the annotation is what stops
+        # that ignore from leaking Any out of a function declared to return int.
+        parsed: int = int(value)  # type: ignore[call-overload]
+
+        return max(1, parsed)
     except (TypeError, ValueError):
         return ASSUMED_PAGE_SIZE
 
@@ -162,7 +170,7 @@ def _field_definition(
     may raise from here -- the whole document would fail as an internal
     error instead of as the validation error it is.
     """
-    fields = getattr(parent_type, "fields", None)
+    fields: dict[str, GraphQLField] | None = getattr(parent_type, "fields", None)
 
     if fields is None:
         return None

@@ -71,9 +71,7 @@ async def test_invalid_input_returns_structured_payload():
 
     result = await schema.execute(
         ISSUE_CREATE_MUTATION,
-        variable_values={
-            "input": {"title": "", "description": None, "priority": 99}
-        },
+        variable_values={"input": {"title": "", "description": None, "priority": 99}},
         context_value=context,
     )
 

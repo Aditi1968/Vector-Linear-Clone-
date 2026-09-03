@@ -1,0 +1,32 @@
+# Direct RUNTIME dependencies.
+#
+# This file lists only what the application imports. Transitive
+# dependencies and exact versions live in the compiled lock,
+# requirements.txt, which is generated -- never edit that file by hand.
+#
+# Regenerate with:
+#   uv pip compile requirements.in -o requirements.txt \
+#       --universal --python-version 3.12 --generate-hashes
+#
+# Recompiling keeps the versions already pinned in requirements.txt;
+# pass --upgrade (or --upgrade-package NAME) to move them deliberately.
+
+fastapi
+
+# Floor, not a preference. app/http_limits.py imports
+# starlette.middleware.body_limit, which arrived in starlette 1.6.0.
+# FastAPI's own floor is starlette>=0.46.0 and so does not guarantee it.
+starlette>=1.6.0
+
+uvicorn[standard]
+
+asyncpg
+
+# Used directly (app/config.py imports SecretStr), not merely inherited
+# from fastapi, so it is named here rather than left to the resolver.
+pydantic
+pydantic-settings
+
+strawberry-graphql[fastapi]==0.326.0
+
+structlog

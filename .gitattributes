@@ -1,0 +1,16 @@
+# Dependency locks are pinned to LF, and nothing else is.
+#
+# core.autocrlf is true on the Windows development machines, so without
+# this the locks are written LF by `uv pip compile` and checked back out
+# CRLF. Recompiling then rewrites all ~1700 lines to LF, so the drift
+# check that proves the locks match their .in files -- recompile, diff --
+# reports the whole file as changed on a Windows runner, and Windows
+# developers see the same phantom diff on a clean tree.
+#
+# Deliberately scoped to these four files rather than a repository-wide
+# `* text=auto eol=lf`. Line-ending policy for the whole tree is a
+# decision to take on purpose, not a side effect of adding a lock file:
+# the wider rule would renormalise every tracked file and bury the
+# engineering gates in a whole-tree diff.
+requirements*.in    text eol=lf
+requirements*.txt   text eol=lf

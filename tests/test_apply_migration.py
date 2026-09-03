@@ -183,9 +183,7 @@ class FakeConnection:
         # Both constraint queries read pg_constraint, so contype decides
         # which one this is; the primary key branch has to come first.
         if "contype = 'p'" in query:
-            return [
-                {"attname": name} for name in self._introspect("primary_key")
-            ]
+            return [{"attname": name} for name in self._introspect("primary_key")]
 
         if "pg_constraint" in query:
             return [
@@ -311,8 +309,7 @@ async def test_the_command_tag_is_labelled_as_the_final_statement(
     )
 
     assert message == (
-        "Applied migration 002 from 002_tenancy.sql "
-        "(final statement: CREATE INDEX)"
+        "Applied migration 002 from 002_tenancy.sql (final statement: CREATE INDEX)"
     )
 
 
@@ -340,9 +337,7 @@ async def test_applied_version_short_circuits_without_executing(
     migrations_dir: Path,
 ):
     path = write_migration(migrations_dir, "002_tenancy.sql", TENANTS_SQL)
-    connection = FakeConnection(
-        rows=[ledger_row("002", compute_checksum(TENANTS_SQL))]
-    )
+    connection = FakeConnection(rows=[ledger_row("002", compute_checksum(TENANTS_SQL))])
 
     message = await apply_migration(
         connection,
@@ -360,9 +355,7 @@ async def test_checksum_mismatch_aborts_before_executing(migrations_dir: Path):
     write_migration(migrations_dir, "001_issues.sql", ISSUES_SQL + "-- edited\n")
     path = write_migration(migrations_dir, "002_tenancy.sql", TENANTS_SQL)
 
-    connection = FakeConnection(
-        rows=[ledger_row("001", compute_checksum(ISSUES_SQL))]
-    )
+    connection = FakeConnection(rows=[ledger_row("001", compute_checksum(ISSUES_SQL))])
 
     with pytest.raises(MigrationError) as error:
         await apply_migration(connection, path, migrations_dir=migrations_dir)
@@ -376,9 +369,7 @@ async def test_matching_checksum_does_not_abort(migrations_dir: Path):
     write_migration(migrations_dir, "001_issues.sql", ISSUES_SQL)
     path = write_migration(migrations_dir, "002_tenancy.sql", TENANTS_SQL)
 
-    connection = FakeConnection(
-        rows=[ledger_row("001", compute_checksum(ISSUES_SQL))]
-    )
+    connection = FakeConnection(rows=[ledger_row("001", compute_checksum(ISSUES_SQL))])
 
     await apply_migration(connection, path, migrations_dir=migrations_dir)
 
@@ -488,9 +479,7 @@ async def test_adoption_refuses_on_wrong_nullability(migrations_dir: Path):
     write_migration(migrations_dir, "001_issues.sql", ISSUES_SQL)
     connection = FakeConnection(
         rows=[],
-        schema=issues_schema(
-            columns=ISSUES_COLUMNS | {"title": ("text", "YES", None)}
-        ),
+        schema=issues_schema(columns=ISSUES_COLUMNS | {"title": ("text", "YES", None)}),
     )
 
     with pytest.raises(MigrationError) as error:
@@ -512,9 +501,7 @@ async def test_adoption_refuses_on_a_wrong_data_type(migrations_dir: Path):
     with pytest.raises(MigrationError) as error:
         await migration_status(connection, migrations_dir=migrations_dir)
 
-    assert "column priority has type integer, expected smallint" in str(
-        error.value
-    )
+    assert "column priority has type integer, expected smallint" in str(error.value)
     assert connection.inserts() == []
 
 
@@ -536,9 +523,7 @@ async def test_adoption_refuses_when_the_primary_key_is_on_another_column(
     migrations_dir: Path,
 ):
     write_migration(migrations_dir, "001_issues.sql", ISSUES_SQL)
-    connection = FakeConnection(
-        rows=[], schema=issues_schema(primary_key=("title",))
-    )
+    connection = FakeConnection(rows=[], schema=issues_schema(primary_key=("title",)))
 
     with pytest.raises(MigrationError) as error:
         await migration_status(connection, migrations_dir=migrations_dir)
@@ -559,9 +544,7 @@ async def test_adoption_refuses_on_a_composite_primary_key(
     with pytest.raises(MigrationError) as error:
         await apply_migration(connection, path, migrations_dir=migrations_dir)
 
-    assert "primary key is on (id, workspace_id), expected (id)" in str(
-        error.value
-    )
+    assert "primary key is on (id, workspace_id), expected (id)" in str(error.value)
     assert connection.inserts() == []
     assert connection.executed(ISSUES_SQL) == 0
 
@@ -763,9 +746,7 @@ async def test_adoption_refuses_when_the_check_constraint_is_absent(
     with pytest.raises(MigrationError) as error:
         await migration_status(connection, migrations_dir=migrations_dir)
 
-    assert "check constraint issues_priority_range is missing" in str(
-        error.value
-    )
+    assert "check constraint issues_priority_range is missing" in str(error.value)
     assert connection.inserts() == []
 
 
@@ -895,9 +876,7 @@ async def test_status_reports_a_mismatch_instead_of_raising(
     """Diagnosis is what status is for, so it renders the bad row."""
     write_migration(migrations_dir, "001_issues.sql", ISSUES_SQL + "-- edited\n")
 
-    connection = FakeConnection(
-        rows=[ledger_row("001", compute_checksum(ISSUES_SQL))]
-    )
+    connection = FakeConnection(rows=[ledger_row("001", compute_checksum(ISSUES_SQL))])
 
     report = await migration_status(connection, migrations_dir=migrations_dir)
 

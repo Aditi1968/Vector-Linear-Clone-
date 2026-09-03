@@ -91,9 +91,7 @@ async def test_the_server_is_given_a_deadline_of_its_own(recorded_pool_kwargs):
     """
     await connect()
 
-    assert recorded_pool_kwargs["server_settings"] == {
-        "statement_timeout": "9500"
-    }
+    assert recorded_pool_kwargs["server_settings"] == {"statement_timeout": "9500"}
 
 
 def test_the_server_gives_up_before_the_client_does():
@@ -149,9 +147,7 @@ async def test_postgres_reports_the_statement_timeout_on_pooled_connections(
     rather than passing vacuously.
     """
     monkeypatch.setattr(app.db, "_pool", None)
-    monkeypatch.setattr(
-        app.db, "get_settings", lambda: StubSettings(postgres_dsn)
-    )
+    monkeypatch.setattr(app.db, "get_settings", lambda: StubSettings(postgres_dsn))
 
     await connect()
 

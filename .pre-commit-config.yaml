@@ -1,0 +1,51 @@
+# Fast local gates. Everything here runs on the changed files in well under a
+# second; nothing here touches PostgreSQL or Docker. The database suite
+# (`pytest -m db`) spins up a container and belongs in CI, not in a hook that
+# developers will start passing `--no-verify` to avoid.
+#
+# Every `rev` is a tag, never a branch: a floating rev means two developers
+# and CI can run three different versions of the same linter and disagree
+# about whether the tree is clean.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.14
+    hooks:
+      # Lint and format read their configuration from pyproject.toml, so the
+      # hook and a bare `ruff check .` cannot drift apart.
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # `migrations/` is excluded from both file-rewriting hooks, and the
+      # exclusion is load-bearing rather than tidy-minded.
+      #
+      # `scripts/apply_migration.py` records the sha256 of each migration as
+      # applied, and 001 is already applied in production. The digest is taken
+      # over the file's *text* (`read_migration`), so line endings are already
+      # normalized -- but a trailing newline is content, not whitespace, and
+      # `001_issues.sql` currently ends without one. end-of-file-fixer adding
+      # a newline would change the checksum of an immutable, already-applied
+      # migration, and the next `--status` would report the ledger as tampered
+      # with. CLAUDE.md's "never modify an already-applied migration" applies
+      # to hooks as much as to people.
+      - id: trailing-whitespace
+        exclude: ^migrations/
+      - id: end-of-file-fixer
+        exclude: ^migrations/
+
+      - id: check-yaml
+      # pyproject.toml carries the ruff, mypy and pytest configuration. A
+      # syntax error in it does not fail loudly -- tools fall back to their
+      # defaults and the gates quietly stop being the gates that were agreed.
+      - id: check-toml
+      - id: check-merge-conflict
+
+# mypy is deliberately absent. Running it under pre-commit means either a
+# hook environment that reinstalls the project's dependencies (slow, and a
+# second place for versions to drift) or one that has none of them and so
+# checks against stubs the application does not use. It belongs in CI, where
+# it runs against the same environment as the tests: `mypy app/`.

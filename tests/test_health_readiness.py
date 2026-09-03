@@ -308,9 +308,7 @@ async def test_readiness_holds_when_the_database_answers(client, monkeypatch):
     assert connection.queries == ["SELECT 1"]
 
 
-async def test_readiness_fails_when_the_database_is_out_of_reach(
-    client, monkeypatch
-):
+async def test_readiness_fails_when_the_database_is_out_of_reach(client, monkeypatch):
     def unavailable():
         raise RuntimeError("Database pool has not been initialized")
 
@@ -322,9 +320,7 @@ async def test_readiness_fails_when_the_database_is_out_of_reach(
     assert response.json() == {"detail": "Service unavailable"}
 
 
-async def test_readiness_failures_say_nothing_about_the_database(
-    client, monkeypatch
-):
+async def test_readiness_failures_say_nothing_about_the_database(client, monkeypatch):
     """503 is a status, not a diagnostic channel.
 
     Driver exceptions carry hosts, ports and DSNs, and /readyz is reachable
@@ -367,9 +363,7 @@ async def test_readiness_answers_promptly_when_the_pool_is_exhausted(
     assert elapsed < READINESS_TIMEOUT_SECONDS + PROMPTNESS_SLACK_SECONDS
 
 
-async def test_readiness_answers_when_the_query_will_not_unwind(
-    client, monkeypatch
-):
+async def test_readiness_answers_when_the_query_will_not_unwind(client, monkeypatch):
     """The probe must not wait on asyncpg's cancellation to complete.
 
     A bound that works by cancelling the query is no bound at all here: the
@@ -398,9 +392,7 @@ async def test_readiness_answers_when_the_query_will_not_unwind(
     assert connection.cancellations >= 1
 
 
-async def test_a_stalled_probe_is_joined_rather_than_started_again(
-    client, monkeypatch
-):
+async def test_a_stalled_probe_is_joined_rather_than_started_again(client, monkeypatch):
     """Abandoned probes must not accumulate, one per request.
 
     Every probe in flight holds one of the pool's five connections until it
@@ -417,9 +409,7 @@ async def test_a_stalled_probe_is_joined_rather_than_started_again(
     pool = ProbePool(connection)
     monkeypatch.setattr(health, "get_pool", lambda: pool)
 
-    first, second = await asyncio.gather(
-        get_readyz(client), get_readyz(client)
-    )
+    first, second = await asyncio.gather(get_readyz(client), get_readyz(client))
 
     await retire(connection)
 
@@ -492,9 +482,7 @@ class _StubSettings:
 
 
 @pytest.mark.db
-async def test_readiness_holds_against_a_real_pool(
-    client, postgres_dsn, monkeypatch
-):
+async def test_readiness_holds_against_a_real_pool(client, postgres_dsn, monkeypatch):
     """Every pool above is a fake; this one is asyncpg.
 
     Handing the check to a task and waiting on it rather than awaiting it is
@@ -503,9 +491,7 @@ async def test_readiness_holds_against_a_real_pool(
     once. get_pool is deliberately not patched here.
     """
     monkeypatch.setattr(app.db, "_pool", None)
-    monkeypatch.setattr(
-        app.db, "get_settings", lambda: _StubSettings(postgres_dsn)
-    )
+    monkeypatch.setattr(app.db, "get_settings", lambda: _StubSettings(postgres_dsn))
 
     await app.db.connect()
 
@@ -639,9 +625,7 @@ async def test_an_abandoned_probe_gives_its_connection_back(
         )
 
         monkeypatch.setattr(app.db, "_pool", None)
-        monkeypatch.setattr(
-            app.db, "get_settings", lambda: _StubSettings(relayed)
-        )
+        monkeypatch.setattr(app.db, "get_settings", lambda: _StubSettings(relayed))
 
         await app.db.connect()
 

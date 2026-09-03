@@ -151,9 +151,7 @@ async def test_a_body_under_the_limit_reaches_graphql(client, recording_service)
 
     assert response.status_code == 200
     assert response.json() == {
-        "data": {
-            "issues": {"nodes": [{"id": str(entity.id), "title": entity.title}]}
-        }
+        "data": {"issues": {"nodes": [{"id": str(entity.id), "title": entity.title}]}}
     }
     assert recording_service.calls == 1
 
@@ -209,7 +207,9 @@ async def test_an_oversized_body_without_a_content_length_is_rejected(
     body = graphql_body(MAX_REQUEST_BODY_BYTES + MARGIN_BYTES)
     stream = CountingStream(body)
 
-    request = client.build_request("POST", "/graphql", content=stream, headers=JSON_HEADERS)
+    request = client.build_request(
+        "POST", "/graphql", content=stream, headers=JSON_HEADERS
+    )
 
     assert "content-length" not in request.headers
     assert request.headers["transfer-encoding"] == "chunked"

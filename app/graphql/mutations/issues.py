@@ -27,9 +27,7 @@ class Mutation:
             # through GraphQL's normal error mechanism.
             return IssueCreatePayload(
                 issue=None,
-                errors=[
-                    ValidationErrorType.from_domain(issue) for issue in exc.issues
-                ],
+                errors=[ValidationErrorType.from_domain(issue) for issue in exc.issues],
             )
 
         return IssueCreatePayload(

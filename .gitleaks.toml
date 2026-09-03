@@ -1,0 +1,70 @@
+# gitleaks configuration for Vector.
+#
+# The default ruleset is kept in full and one rule is added on top of it.
+# Nothing here disables, narrows or replaces a default rule.
+#
+# Why an extension is needed: gitleaks' defaults recognise vendor-shaped
+# credentials (GitHub PATs, AWS keys, Stripe keys) and were verified to do
+# so against this config. They do not recognise a PostgreSQL connection
+# string carrying a password, because a DSN has no vendor-specific shape.
+# That is the one secret this repository actually handles -- DATABASE_URL,
+# a Neon DSN with the password inline -- so a scan without this rule would
+# pass over the only credential the project owns.
+
+title = "Vector"
+
+# Floor, not a preference: `[[rules.allowlists]]` with `regexTarget` is what
+# keeps the allowlist below scoped to one rule and matched against the
+# password. An older gitleaks that ignored either would silently scan with a
+# different meaning, so it is made to refuse instead. CI pins this version.
+minVersion = "8.30.1"
+
+[extend]
+# Keep every upstream rule. Detection is added to, never subtracted from.
+useDefault = true
+
+[[rules]]
+id = "vector-postgres-dsn-password"
+description = "PostgreSQL connection string with an embedded password"
+
+# postgres:// or postgresql://, a username, then the password up to the @.
+# The password is captured on its own so that `secretGroup` reports and
+# redacts the credential rather than the whole URL -- and so that the
+# allowlist below can be matched against the password alone.
+#
+# Bounded character classes (no ":", "@", "/" or whitespace) keep the match
+# inside a single URL authority section. The 4-character floor skips
+# fragments too short to be a credential; every placeholder this repository
+# actually uses is longer than that and is allowlisted by value instead.
+regex = '''(?i)\bpostgres(?:ql)?://[^\s:@/]{1,64}:([^\s:@/]{4,128})@'''
+secretGroup = 1
+
+# Lowercase substring shared by postgres:// and postgresql:// (and by any
+# postgresql+driver:// variant). Only fragments containing it are matched
+# against the regex above.
+keywords = ["postgres"]
+
+  # Scoped to this rule, so it can never suppress a finding from a default
+  # rule -- an allowlist at the top level could.
+  #
+  # Matched against the captured password, not against a file path. A value
+  # that is a known non-secret is a non-secret wherever it appears, whereas
+  # a path-scoped allowlist would also hide a real credential committed by
+  # accident into one of those files.
+  [[rules.allowlists]]
+  description = "Documented placeholder passwords that are not credentials"
+  regexTarget = "secret"
+  regexes = [
+    # .env.example: the illustrative DSN shipped for developers to copy.
+    # The file exists precisely so that no real DSN is ever committed.
+    '''^password$''',
+
+    # tests/conftest.py: POSTGRES_PASSWORD for the throwaway postgres:18
+    # container the db-marked tests start. The container is published on
+    # 127.0.0.1 with an ephemeral port and is deleted with the session, so
+    # the value guards nothing that outlives the test run.
+    '''^vector$''',
+
+    # The literal word used in test fixtures to stand in for a DSN password.
+    '''^PLACEHOLDER$''',
+  ]

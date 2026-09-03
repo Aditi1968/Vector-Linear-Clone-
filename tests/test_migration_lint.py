@@ -273,7 +273,7 @@ def _matches_at_top_level(pattern: re.Pattern, text: str) -> bool:
 
 
 def _report(text: str, index: int, matched: str) -> str:
-    """"line N: <matched text>", so a failure names the offending SQL."""
+    """ "line N: <matched text>", so a failure names the offending SQL."""
     line = text.count("\n", 0, index) + 1
 
     return f"line {line}: {' '.join(matched.split())}"
@@ -946,8 +946,7 @@ def test_destructive_statements_are_reported(sql):
         "ALTER TABLE public.issues DROP description;",
         "ALTER TABLE issues DROP description CASCADE;",
         # Mixed with a legitimate action: the drop must still surface.
-        "ALTER TABLE issues DROP CONSTRAINT issues_priority_range, "
-        "DROP description;",
+        "ALTER TABLE issues DROP CONSTRAINT issues_priority_range, DROP description;",
     ],
 )
 def test_dropping_a_column_without_the_keyword_is_reported(sql):
@@ -962,9 +961,9 @@ def test_a_bare_column_drop_names_the_column_it_discards():
 
 def test_a_spelled_out_column_drop_is_reported_once():
     """DROP COLUMN must not be counted by both scanners."""
-    assert find_destructive_statements("ALTER TABLE issues DROP COLUMN description;") == [
-        "line 1: DROP COLUMN"
-    ]
+    assert find_destructive_statements(
+        "ALTER TABLE issues DROP COLUMN description;"
+    ) == ["line 1: DROP COLUMN"]
 
 
 @pytest.mark.parametrize(

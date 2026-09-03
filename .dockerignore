@@ -1,0 +1,27 @@
+# Allowlist, not a denylist.
+#
+# Everything is excluded first and the few paths the image actually needs
+# are added back. A denylist protects exactly the files someone thought of
+# on the day they wrote it, and silently starts shipping whatever gets
+# added to the repository root afterwards -- which, in a repository whose
+# root already holds a .env, is the wrong default to pick.
+*
+
+!app
+!requirements.txt
+
+# Re-excluded inside the allowed paths above: build artefacts are rebuilt
+# by the interpreter and would otherwise bust the layer cache on every
+# build and ship stale bytecode compiled by a different interpreter.
+app/**/__pycache__
+**/*.pyc
+
+# Named explicitly for the reader, though `*` above already excludes them.
+# These are the paths that must never reach an image: local secrets, the
+# developer virtualenv (Windows binaries, useless and large in a Linux
+# image), version control history and test caches.
+.env
+.env.*
+.venv
+.git
+.pytest_cache

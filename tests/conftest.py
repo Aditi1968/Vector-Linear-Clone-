@@ -64,9 +64,7 @@ class ExplodingPool:
     def acquire(self):
         self.acquire_count += 1
 
-        raise AssertionError(
-            "pool.acquire() must not be called for invalid input"
-        )
+        raise AssertionError("pool.acquire() must not be called for invalid input")
 
 
 class FakeConnection:
@@ -246,8 +244,7 @@ def _inspect_container(container: str) -> tuple[str, dict]:
         ports = json.loads(raw) if raw else None
     except ValueError:
         raise RuntimeError(
-            f"docker inspect {container} returned an unreadable port map: "
-            f"{raw!r}"
+            f"docker inspect {container} returned an unreadable port map: {raw!r}"
         ) from None
 
     return status, ports or {}
@@ -272,9 +269,7 @@ def _container_logs(container: str) -> str:
     return (logs.stdout + logs.stderr).strip() or "<no container output>"
 
 
-def _no_port_error(
-    container: str, status: str, ports: dict, why: str
-) -> RuntimeError:
+def _no_port_error(container: str, status: str, ports: dict, why: str) -> RuntimeError:
     """The report that an unpublished port used to make as an IndexError."""
     return RuntimeError(
         f"Docker published no host port for {CONTAINER_PORT} on container "
@@ -385,9 +380,7 @@ def postgres_dsn():
         )
 
         if started.returncode != 0:
-            pytest.skip(
-                f"could not start {POSTGRES_IMAGE}: {started.stderr.strip()}"
-            )
+            pytest.skip(f"could not start {POSTGRES_IMAGE}: {started.stderr.strip()}")
 
         port = _published_port(container)
         dsn = (

@@ -101,9 +101,7 @@ async def test_the_runner_adopts_the_schema_001_actually_creates(migrated):
     async with migrated.transaction():
         report = await migration_status(migrated, migrations_dir=MIGRATIONS_DIR)
 
-    ledger = await migrated.fetch(
-        "SELECT version, checksum FROM schema_migrations"
-    )
+    ledger = await migrated.fetch("SELECT version, checksum FROM schema_migrations")
 
     assert [(row["version"], row["checksum"]) for row in ledger] == [
         ("001", compute_checksum(MIGRATION.read_text(encoding="utf-8")))

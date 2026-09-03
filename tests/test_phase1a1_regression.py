@@ -28,7 +28,6 @@ failure mode this file exists to prevent.
 
 import asyncio
 import hashlib
-import json
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -36,9 +35,7 @@ from urllib.parse import urlparse
 import asyncpg
 import httpx
 import pytest
-import strawberry
 from fastapi import FastAPI
-from graphql import parse, validate
 from pydantic import SecretStr
 from starlette.middleware.body_limit import RequestBodyLimitMiddleware
 
@@ -47,9 +44,8 @@ import app.rest.health as health
 from app.db import COMMAND_TIMEOUT_SECONDS, STATEMENT_TIMEOUT_MS, connect, disconnect
 from app.domain.pagination import IssuePage
 from app.graphql.context import VectorContext, get_context
-from app.graphql.limits import MAX_COMPLEXITY, OperationLimitsRule
-from app.graphql.mutations.issues import Mutation
-from app.graphql.queries.issues import DEFAULT_FIRST, Query
+from app.graphql.limits import MAX_COMPLEXITY
+from app.graphql.queries.issues import DEFAULT_FIRST
 from app.graphql.schema import MASKED_ERROR_MESSAGE, build_schema
 from app.http_limits import MAX_REQUEST_BODY_BYTES
 from app.main import create_app
@@ -89,9 +85,7 @@ ALIASED_FAN_OUT = 15
 # Every scalar on Issue, as one selection set. Costs SCALARS_PER_ROW per row,
 # so two copies of it on a page of OVER_BUDGET_PAGE_SIZE rows is over budget
 # and one copy is not -- which is what makes a missed spread visible.
-ISSUE_NODES = (
-    "nodes { id title description priority completedAt createdAt updatedAt }"
-)
+ISSUE_NODES = "nodes { id title description priority completedAt createdAt updatedAt }"
 
 # The largest page any service serves. Two copies of ISSUE_NODES at this page
 # size cost 1400 of the 1000 budget; one costs 700 and would be accepted.
@@ -115,9 +109,7 @@ class RecordingIssueService:
     async def list(self, *, first: int, after: str | None) -> IssuePage:
         self.firsts.append(first)
 
-        return IssuePage(
-            nodes=[make_entity(1)], has_next_page=False, end_cursor=None
-        )
+        return IssuePage(nodes=[make_entity(1)], has_next_page=False, end_cursor=None)
 
 
 class Context:
@@ -638,9 +630,7 @@ async def test_reusing_a_fragment_measurement_still_charges_every_spread(
         " ".join([ISSUE_NODES] * copies),
     )
 
-    fragmented = await schema.execute(
-        through_fragments, context_value=Context(service)
-    )
+    fragmented = await schema.execute(through_fragments, context_value=Context(service))
     inlined = await schema.execute(written_out, context_value=Context(service))
 
     assert fragmented.errors is not None, label

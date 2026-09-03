@@ -307,9 +307,7 @@ def verify_checksums(
 
 
 def _raise_on_mismatch(results: list[VerifiedMigration]) -> None:
-    mismatched = [
-        item.version for item in results if item.state == CHECKSUM_MISMATCH
-    ]
+    mismatched = [item.version for item in results if item.state == CHECKSUM_MISMATCH]
 
     if mismatched:
         raise MigrationError(
@@ -415,9 +413,7 @@ def _primary_key_discrepancies(rows) -> list[str]:
         return [f"primary key is missing, expected one on ({expected})"]
 
     if columns != INITIAL_PRIMARY_KEY:
-        return [
-            f"primary key is on ({', '.join(columns)}), expected ({expected})"
-        ]
+        return [f"primary key is on ({', '.join(columns)}), expected ({expected})"]
 
     return []
 
@@ -447,8 +443,7 @@ def _column_discrepancies(rows) -> list[str]:
 
         if row["data_type"] != expected_type:
             problems.append(
-                f"column {name} has type {row['data_type']}, "
-                f"expected {expected_type}"
+                f"column {name} has type {row['data_type']}, expected {expected_type}"
             )
 
         nullable = row["is_nullable"] == "YES"
@@ -485,9 +480,7 @@ def _index_discrepancies(rows) -> list[str]:
     index = rows[0]
 
     if index["is_unique"]:
-        problems.append(
-            f"index {INITIAL_INDEX} is UNIQUE, expected a non-unique index"
-        )
+        problems.append(f"index {INITIAL_INDEX} is UNIQUE, expected a non-unique index")
 
     if index["is_partial"]:
         problems.append(
@@ -497,13 +490,10 @@ def _index_discrepancies(rows) -> list[str]:
 
     if index["has_expressions"]:
         problems.append(
-            f"index {INITIAL_INDEX} is over an expression, expected plain "
-            "columns"
+            f"index {INITIAL_INDEX} is over an expression, expected plain columns"
         )
 
-    columns = tuple(
-        (row["column_name"], bool(row["is_desc"])) for row in rows
-    )
+    columns = tuple((row["column_name"], bool(row["is_desc"])) for row in rows)
 
     if columns != INITIAL_INDEX_COLUMNS:
         problems.append(
@@ -527,9 +517,7 @@ def _check_constraint_discrepancies(rows) -> list[str]:
     definition = found.pop(INITIAL_CHECK_CONSTRAINT, None)
 
     if definition is None:
-        problems.append(
-            f"check constraint {INITIAL_CHECK_CONSTRAINT} is missing"
-        )
+        problems.append(f"check constraint {INITIAL_CHECK_CONSTRAINT} is missing")
     elif _normalize_sql(definition) != _normalize_sql(INITIAL_CHECK_DEFINITION):
         problems.append(
             f"check constraint {INITIAL_CHECK_CONSTRAINT} is {definition}, "
@@ -674,9 +662,7 @@ async def apply_migration(
     sql = read_migration(path)
 
     applied = await _prepare_ledger(connection, migrations_dir)
-    _raise_on_mismatch(
-        verify_checksums(applied, discover_migrations(migrations_dir))
-    )
+    _raise_on_mismatch(verify_checksums(applied, discover_migrations(migrations_dir)))
 
     if any(migration.version == version for migration in applied):
         return f"Migration {version} is already applied; nothing to do."
@@ -716,9 +702,7 @@ async def migration_status(
 
     applied_versions = {migration.version for migration in applied}
     pending = tuple(
-        files[version]
-        for version in sorted(files)
-        if version not in applied_versions
+        files[version] for version in sorted(files) if version not in applied_versions
     )
 
     return StatusReport(
@@ -811,4 +795,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main(sys.argv[1:]))
     except MigrationError as error:
-        raise SystemExit(f"error: {error}")
+        raise SystemExit(f"error: {error}") from error

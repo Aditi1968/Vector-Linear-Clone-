@@ -1,0 +1,441 @@
+name: CI
+
+# Every gate in this file is blocking, and every gate fails closed. There is
+# no `continue-on-error`, no `|| true`, and no step that reports success
+# because the tool it needed was absent: a missing tool is a broken gate, and
+# a broken gate has to look exactly like a failing one.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Read-only, and only what `actions/checkout` needs.
+#
+# Nothing here writes to the repository, comments on a pull request,
+# publishes a package or deploys, so no other scope is granted. The scope
+# matters beyond tidiness: every job runs third-party code -- dependency
+# installs, hook environments, a Docker build -- and a token that cannot
+# write is not worth stealing.
+permissions:
+  contents: read
+
+# A superseded pull request run is verifying a commit nobody will merge.
+# Pushes to main are never cancelled: every commit that lands on the default
+# branch has to be verified on its own.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+defaults:
+  run:
+    # `shell: bash` runs steps under `bash --noprofile --norc -eo pipefail`.
+    # The `-o pipefail` half is the reason it is set explicitly: without it a
+    # gate piped into anything reports the exit status of the tail of the
+    # pipe, which is how a failing check silently becomes a passing step.
+    shell: bash
+
+env:
+  # Settings.environment has no default and is a closed set of
+  # development | test | production, so it is supplied here as a deliberate,
+  # non-production value rather than being left to whatever a runner happens
+  # to have. The tests that care about configuration override it in-process
+  # (tests/test_settings.py::use_environment clears every settings variable
+  # and chdirs away from the repository), so this neither satisfies nor
+  # subverts them -- it just means no code path can read an unset value.
+  #
+  # DATABASE_URL is deliberately absent. The unit suite never opens a
+  # connection, and the db-marked suite builds its own DSN from the
+  # throwaway container it starts. Nothing in CI reads a .env file: none is
+  # created, and a checkout cannot contain one because .env is gitignored.
+  # No repository secret is referenced by any job below.
+  ENVIRONMENT: test
+
+jobs:
+  lint:
+    name: Lint, format and types
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The workflow never pushes, so leaving a credential in
+          # .git/config for later steps to find would be a gift to a
+          # compromised dependency and useful to nothing.
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          # Matches the interpreter the project targets and the locks were
+          # compiled for (`uv pip compile --python-version 3.12`).
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install locked development dependencies
+        # One file, never two. requirements-dev.in opens with
+        # `-r requirements.in`, so the dev lock is a superset of the runtime
+        # lock and installing both would be redundant.
+        #
+        # --require-hashes turns a lock that lost its hashes into an install
+        # failure rather than a silent downgrade in supply-chain integrity.
+        #
+        # --no-deps is deliberately NOT passed. Letting pip walk the
+        # dependency graph while in hash-checking mode makes the install
+        # assert that the lock is *complete*: a transitive dependency missing
+        # from the file has no hash, so pip refuses instead of resolving one
+        # for itself. --no-deps would skip that check and let an incomplete
+        # lock install quietly.
+        #
+        # pip itself is deliberately not upgraded first. That would be an
+        # unpinned, unverified download on every run -- the precise thing
+        # --require-hashes exists to prevent -- to gain nothing the pip
+        # shipped with setup-python cannot already do.
+        #
+        # Nothing is ever pip-installed on top of this. Every tool the gates
+        # need (ruff, mypy, pre-commit, uv) is in the lock, and an unpinned
+        # extra would fail hash-checking anyway.
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Ruff lint
+        run: ruff check --output-format github .
+
+      - name: Ruff format
+        # --diff prints what reformatting would change, so a failure is
+        # actionable from the log without rerunning anything locally.
+        run: ruff format --check --diff .
+
+      - name: mypy
+        run: mypy app/
+
+      - name: Cache pre-commit hook environments
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/pre-commit
+          # Keyed on the hook configuration: any change to a hook or its
+          # pinned revision builds fresh environments instead of reusing
+          # environments built for a different configuration.
+          key: pre-commit-${{ runner.os }}-py3.12-${{ hashFiles('.pre-commit-config.yaml') }}
+
+      - name: pre-commit
+        # Runs the same hooks a developer gets locally, over every file
+        # rather than only the staged ones. Hooks that rewrite files (a
+        # formatter, a whitespace fixer) fail the run here, which is correct:
+        # the committed tree is supposed to already be in that state.
+        run: pre-commit run --all-files --show-diff-on-failure
+
+  locks:
+    name: Dependency locks are up to date
+    runs-on: ubuntu-24.04
+
+    # Catches the failure mode where a .in file is edited and the lock is not
+    # recompiled: the install still succeeds, against pins that no longer
+    # describe the declared dependencies, and the drift is invisible until
+    # something breaks in production. Recompiling and diffing is the only
+    # check that ties the two files together.
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install locked development dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Recompile the locks
+        # uv comes from the lock it is about to regenerate (uv==0.12.9), so
+        # the check cannot be quietly invalidated by whichever uv a runner
+        # image happens to ship. Its version is printed for the log.
+        #
+        # Argument order matters and is not cosmetic: uv records the exact
+        # invocation in the header of the file it writes, so a differently
+        # ordered command rewrites that line and reports drift that is not
+        # there. These two lines match the headers in the committed locks
+        # character for character.
+        #
+        # Runtime lock first. requirements-dev.in inherits its pins through
+        # `-r requirements.in`, so compiling the dev lock against a stale
+        # runtime lock would produce a consistent-looking pair built on the
+        # wrong half.
+        #
+        # Recompiling holds the existing pins rather than reaching for the
+        # newest release of everything -- uv reads the current output file as
+        # preferences -- so this reports drift between the .in files and the
+        # locks, not the ordinary fact that PyPI moved. Moving a pin stays a
+        # deliberate `--upgrade`.
+        run: |
+          uv --version
+
+          uv pip compile requirements.in -o requirements.txt \
+            --universal --python-version 3.12 --generate-hashes
+          uv pip compile requirements-dev.in -o requirements-dev.txt \
+            --universal --python-version 3.12 --generate-hashes
+
+      - name: Fail if recompiling changed anything
+        # Scoped to the two locks so the failure names the actual problem
+        # rather than whatever else a step might have left in the tree.
+        #
+        # This comparison is only meaningful because .gitattributes pins
+        # `requirements*` to `text eol=lf`: uv writes LF, and without that
+        # pin a checkout on a machine with core.autocrlf would hand this step
+        # CRLF files and report every line as drift.
+        run: |
+          if ! git diff --exit-code -- requirements.txt requirements-dev.txt; then
+            echo "::error::Dependency locks are out of date. Recompile them with the pinned uv and commit the result: uv pip compile requirements.in -o requirements.txt --universal --python-version 3.12 --generate-hashes (then the same for requirements-dev)."
+            exit 1
+          fi
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install locked development dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: pytest
+        # `addopts = "-m 'not db'"` in pyproject.toml deselects the tests that
+        # need a database, so this job needs neither Docker nor PostgreSQL.
+        run: python -m pytest -q
+
+  integration:
+    name: PostgreSQL 18 integration tests
+    runs-on: ubuntu-24.04
+
+    # Deliberately no `services:` block.
+    #
+    # The postgres_dsn fixture in tests/conftest.py starts its own
+    # postgres:18 container through the Docker CLI, on an ephemeral host
+    # port bound to 127.0.0.1, and removes it with the session. A service
+    # container would be a second database that nothing connects to, and its
+    # presence on the conventional port 5432 is exactly the condition that
+    # would let a test appear to pass against the wrong server.
+    #
+    # Docker is preinstalled on GitHub-hosted Ubuntu runners, and the job
+    # below proves the daemon answers before pytest is allowed to decide
+    # otherwise.
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install locked development dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Pull the PostgreSQL image the fixture starts
+        # Two jobs in one step. It warms the image so the fixture's
+        # CONTAINER_START_TIMEOUT is spent starting a container rather than
+        # waiting on a pull, and it is a hard precondition: the fixture skips
+        # the whole suite when `docker info` fails, so an unreachable daemon
+        # has to fail here, before a skip can be mistaken for a pass.
+        #
+        # The tag is the one tests/conftest.py pins. uuidv7() in
+        # migrations/001_issues.sql is native to PostgreSQL 18 and 16/17
+        # reject the migration outright, so the major version is part of what
+        # is under test, not an implementation detail.
+        run: docker pull postgres:18
+
+      - name: pytest -m db
+        run: python -m pytest -q -m db --junitxml="${RUNNER_TEMP}/db-tests.xml"
+
+      - name: Fail if the integration tests skipped instead of running
+        # The fixture answers an unusable Docker with pytest.skip, which is
+        # right on a developer's laptop and wrong here: a skipped suite is a
+        # green job that tested nothing. Locally that is an environment fact;
+        # in CI it is the failure.
+        #
+        # Asserted from the JUnit report rather than by matching counts in
+        # the log, so adding a test does not need a change here.
+        run: |
+          python - "${RUNNER_TEMP}/db-tests.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ElementTree
+
+          report = ElementTree.parse(sys.argv[1]).getroot()
+          suite = report.find("testsuite") if report.tag == "testsuites" else report
+
+          if suite is None:
+              sys.exit(f"no testsuite element in {sys.argv[1]}")
+
+          total = int(suite.get("tests", "0"))
+          skipped = int(suite.get("skipped", "0"))
+
+          if skipped or total == 0:
+              sys.exit(
+                  f"db-marked tests did not run: tests={total}, skipped={skipped}. "
+                  "The fixture skips when the Docker daemon is unreachable or the "
+                  "postgres:18 container will not start. In CI that is a broken "
+                  "gate, not an environment fact."
+              )
+
+          print(f"{total} db-marked tests ran")
+          PY
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-24.04
+
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      # sha256 of gitleaks_8.30.1_linux_x64.tar.gz, taken from the release's
+      # published checksums file. Pinned here rather than downloaded
+      # alongside the asset, because a checksum fetched from the same place
+      # as the file it vouches for only detects a corrupted download -- it
+      # cannot detect a replaced release.
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # A secret that was committed and later deleted is still leaked;
+          # only the history still holds it. The history scan below is
+          # worthless against a shallow clone.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install gitleaks
+        # Installed from a pinned release verified against a pinned digest,
+        # rather than through gitleaks-action: the action is versioned by a
+        # mutable tag and requires a licence key for organisation-owned
+        # repositories, which would make the security gate depend on a secret
+        # and fail for a reason that has nothing to do with the code.
+        #
+        # Unpacked into RUNNER_TEMP, outside the workspace, so that the 30 MB
+        # binary is not itself part of the tree the directory scan walks.
+        run: |
+          install_dir="${RUNNER_TEMP}/gitleaks"
+          mkdir -p "${install_dir}"
+
+          curl --fail --location --silent --show-error \
+            --output "${install_dir}/gitleaks.tar.gz" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+
+          echo "${GITLEAKS_SHA256}  ${install_dir}/gitleaks.tar.gz" \
+            | sha256sum --check --strict -
+
+          tar --extract --gzip \
+            --file "${install_dir}/gitleaks.tar.gz" \
+            --directory "${install_dir}" \
+            gitleaks
+
+          "${install_dir}/gitleaks" version
+
+      - name: Prove the scanner detects a planted secret
+        # A clean scan is only evidence of anything if the scanner would have
+        # spoken up. `gitleaks git` exits 0 when it scans nothing at all --
+        # verified against a directory that is not a repository, where it
+        # logs an error, reports "0 commits scanned" and still exits 0 -- so
+        # "no leaks found" on its own is indistinguishable from "no scan
+        # happened".
+        #
+        # Two canaries are planted in RUNNER_TEMP, outside the workspace and
+        # discarded with the runner, and both must be found:
+        #
+        #   * a credentialed PostgreSQL DSN, which only the repository's own
+        #     rule detects, so the finding proves .gitleaks.toml was loaded;
+        #   * a GitHub token, which only the upstream ruleset detects, so the
+        #     finding proves `useDefault` still brings those rules in.
+        #
+        # Both are generated here from random bytes. Nothing secret-shaped is
+        # written down in this file, so scanning this workflow cannot trip
+        # over the canaries it plants.
+        #
+        # --exit-code 0 makes "leaks found" the expected outcome for this
+        # scan alone; a genuine failure -- an unreadable config, a rule that
+        # no longer parses -- still exits non-zero and still fails the step.
+        run: |
+          canary_dir="${RUNNER_TEMP}/gitleaks-canary"
+          report="${RUNNER_TEMP}/gitleaks-canary.json"
+          mkdir -p "${canary_dir}"
+
+          printf 'DATABASE_URL=postgresql://vector_owner:%s@ep-canary-0000.example.neon.tech/vector\n' \
+            "$(openssl rand -hex 12)" > "${canary_dir}/dsn.txt"
+          printf 'token = "ghp_%s"\n' \
+            "$(openssl rand -hex 18)" > "${canary_dir}/token.txt"
+
+          "${RUNNER_TEMP}/gitleaks/gitleaks" dir "${canary_dir}" \
+            --config .gitleaks.toml \
+            --report-format json \
+            --report-path "${report}" \
+            --redact --no-banner --no-color --exit-code 0
+
+          for rule in vector-postgres-dsn-password github-pat; do
+            if ! grep -q "\"RuleID\":[[:space:]]*\"${rule}\"" "${report}"; then
+              echo "::error::gitleaks did not detect the ${rule} canary; a clean scan cannot be trusted"
+              exit 1
+            fi
+
+            echo "canary detected by ${rule}"
+          done
+
+      - name: Scan the working tree
+        # Covers every file in the checkout, including anything a build step
+        # might have produced. Nothing is installed into the workspace in
+        # this job, so the tree scanned here is repository content only.
+        run: |
+          "${RUNNER_TEMP}/gitleaks/gitleaks" dir . \
+            --config .gitleaks.toml \
+            --redact --no-banner --no-color --exit-code 1
+
+      - name: Scan the git history
+        # --redact so that a finding names the file, the rule and the line
+        # without reprinting the credential into a log that is often more
+        # widely readable than the repository.
+        #
+        # The commit count is asserted afterwards because of the silent-zero
+        # behaviour described above: an empty scan must not be allowed to
+        # read as a clean one.
+        run: |
+          log="${RUNNER_TEMP}/gitleaks-git.log"
+
+          "${RUNNER_TEMP}/gitleaks/gitleaks" git . \
+            --config .gitleaks.toml \
+            --redact --no-banner --no-color --exit-code 1 2>&1 | tee "${log}"
+
+          if ! grep -qE '[1-9][0-9]* commits scanned' "${log}"; then
+            echo "::error::gitleaks scanned no commits; the history was not checked"
+            exit 1
+          fi
+
+  docker-build:
+    name: Docker image build
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Build the runtime image
+        # Build only. The image is never tagged for a registry, never pushed
+        # and no registry credential exists in this workflow: this is a gate
+        # that the Dockerfile still builds against the pinned runtime lock,
+        # not a release step.
+        #
+        # --pull refuses a base image the runner may already have cached, so
+        # the build is against the base the Dockerfile actually names.
+        run: docker build --pull --file Dockerfile --tag vector:ci .

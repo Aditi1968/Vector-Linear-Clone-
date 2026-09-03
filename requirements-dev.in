@@ -1,0 +1,33 @@
+# Direct DEVELOPMENT and TEST dependencies.
+#
+# Includes the runtime set, because the tests import the application. The
+# compiled lock requirements-dev.txt is therefore a superset of
+# requirements.txt and a single `pip install -r requirements-dev.txt`
+# gives a complete development environment.
+#
+# The runtime image installs requirements.txt only, so nothing below ships
+# to production.
+#
+# Regenerate with:
+#   uv pip compile requirements-dev.in -o requirements-dev.txt \
+#       --universal --python-version 3.12 --generate-hashes
+#
+# Recompile requirements.txt first: this file inherits its pins through
+# the -r below, so the two locks stay consistent by construction.
+
+-r requirements.in
+
+# Tests.
+pytest
+pytest-asyncio
+httpx  # ASGI transport for the FastAPI test client
+
+# Lint, format and type checks.
+ruff
+mypy
+pre-commit
+
+# The lock tool itself, pinned so that regenerating the locks is
+# reproducible rather than dependent on whatever uv a developer happens
+# to have on PATH.
+uv
