@@ -1071,58 +1071,99 @@ def test_migration_has_no_destructive_statements(path):
     assert find_destructive_statements(read_migration(path)) == []
 
 
-# --- the shape 002 is expected to have --------------------------------
+# --- 002's statement shapes, as a lint fixture ------------------------
 
 
+# The statements of migrations/002_tenancy.sql, verbatim and in order, with
+# that file's prose stripped. The name predates the file: 002 is written, and
+# this is no longer a plan. See the docstring below for what it is instead.
 _PLANNED_002 = """
--- Tenancy: workspaces and teams, with issues backfilled into the
--- default workspace before either column is made NOT NULL.
-
 CREATE TABLE workspaces (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
+
     slug TEXT NOT NULL,
     name TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT workspaces_slug_key UNIQUE (slug),
+    CONSTRAINT workspaces_slug_format
+        CHECK (slug ~ '^[a-z0-9]([a-z0-9-]*[a-z0-9])?$')
 );
 
 CREATE TABLE teams (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
-    workspace_id UUID NOT NULL REFERENCES workspaces (id),
-    slug TEXT NOT NULL,
+
+    workspace_id UUID NOT NULL,
     name TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    CONSTRAINT teams_workspace_fk
+        FOREIGN KEY (workspace_id)
+        REFERENCES workspaces (id)
+        ON DELETE RESTRICT ON UPDATE RESTRICT,
+
+    CONSTRAINT teams_workspace_id_key UNIQUE (workspace_id, id)
 );
 
-INSERT INTO workspaces (slug, name)
-    SELECT 'vector', 'Vector';
+INSERT INTO workspaces (id, slug, name)
+VALUES ('00000000-0000-7000-8000-000000000001'::UUID, 'vector', 'Vector');
 
-INSERT INTO teams (workspace_id, slug, name)
-    SELECT id, 'core', 'Core' FROM workspaces WHERE slug = 'vector';
+INSERT INTO teams (id, workspace_id, name)
+VALUES (
+    '00000000-0000-7000-8000-000000000002'::UUID,
+    '00000000-0000-7000-8000-000000000001'::UUID,
+    'Core'
+);
 
 ALTER TABLE issues ADD COLUMN workspace_id UUID;
 ALTER TABLE issues ADD COLUMN team_id UUID;
 
 UPDATE issues
-   SET workspace_id = (SELECT id FROM workspaces WHERE slug = 'vector'),
-       team_id = (SELECT id FROM teams WHERE slug = 'core')
- WHERE workspace_id IS NULL;
+SET workspace_id = '00000000-0000-7000-8000-000000000001'::UUID,
+    team_id = '00000000-0000-7000-8000-000000000002'::UUID;
 
 ALTER TABLE issues ALTER COLUMN workspace_id SET NOT NULL;
 ALTER TABLE issues ALTER COLUMN team_id SET NOT NULL;
+
+ALTER TABLE issues ADD CONSTRAINT issues_team_fk
+    FOREIGN KEY (workspace_id, team_id)
+    REFERENCES teams (workspace_id, id)
+    ON DELETE RESTRICT ON UPDATE RESTRICT;
 
 DROP INDEX issues_created_at_id_idx;
 
 CREATE INDEX issues_workspace_created_at_id_idx
     ON issues (workspace_id, created_at DESC, id DESC);
+
+CREATE INDEX issues_workspace_team_idx ON issues (workspace_id, team_id);
 """
 
 
 def test_the_planned_002_passes_every_rule():
-    """The linter must not reject the migration it exists to protect.
+    """A LINT FIXTURE. Not a template, and not the migration itself.
 
-    Rules tightened against holes #1-#3 all touch statements this file
-    contains -- a cross-table UPDATE with subselects in its SET clause,
-    two ADD COLUMNs, a bare DROP INDEX -- so a fix that over-fires would
-    show up here rather than the day 002 is written.
+    `MIGRATION_FILES` already parametrizes migrations/002_tenancy.sql into
+    the five file tests above, so the real file is linted whatever this
+    constant says.  What this adds is a *named* copy of the statement
+    shapes 002 relies on being allowed: a composite FK whose REFERENCES
+    clause carries a parenthesised column list, an ADD CONSTRAINT that
+    must not read as an ADD COLUMN, two bare ADD COLUMNs, one UPDATE
+    licensing two SET NOT NULLs, a CHECK holding a regex literal full of
+    characters the scanners have to skip, and a bare DROP INDEX.
+
+    Every rule here was tightened at least once against a hole it missed,
+    and each tightening risks over-firing on exactly these shapes.  With
+    this fixture, a tightening that does so fails on a test that says what
+    it broke; without it, the failure surfaces as migration 003 being
+    rejected for no stated reason, by which point the rule change is old
+    and the connection is not obvious.
+
+    Do NOT copy this when writing 003.  It is 002's statements with 002's
+    reasoning deleted, and that reasoning -- why the bootstrap ids are
+    literals, why the backfill is unguarded, why SET NOT NULL precedes the
+    FK -- is the part that stops someone reproducing the shape in a place
+    where it is wrong.  Copy migrations/002_tenancy.sql, or nothing.
     """
     assert_clean_under_every_rule(_PLANNED_002)

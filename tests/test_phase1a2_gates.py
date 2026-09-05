@@ -51,6 +51,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 MIGRATIONS_DIR = REPO_ROOT / "migrations"
 INITIAL_MIGRATION = MIGRATIONS_DIR / "001_issues.sql"
+TENANCY_MIGRATION = MIGRATIONS_DIR / "002_tenancy.sql"
+
+# Every migration in the repository, in ledger order. Asserted as an exact
+# list rather than a subset; see `test_no_second_migration_appeared`.
+EXPECTED_MIGRATIONS = ["001_issues.sql", "002_tenancy.sql"]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the
 # migration's text. 001 is applied in production, so this value is a fact
@@ -59,6 +64,24 @@ INITIAL_MIGRATION = MIGRATIONS_DIR / "001_issues.sql"
 # changes it, and the next `--status` reports the ledger as tampered with.
 INITIAL_MIGRATION_CHECKSUM = (
     "a6f6c3aacae861255c1685f0c3e9444fd286dc01aab4d073f4512162e1b46879"
+)
+
+# The same pin for 002, and it means something different, which is worth being
+# exact about. 002 has been applied to no database: this value is not a fact
+# about production, it is this repository's own discipline, written down while
+# 002 is still trivially checkable.
+#
+# It is here *before* the apply rather than after it because there is no moment
+# afterwards at which it can be added honestly. The instant 002 reaches a real
+# database its text becomes immutable, and that instant will not be one in
+# which anyone thinks to edit this file -- which is how 001 came to have its
+# checksum recovered from a file nobody could prove had not already drifted.
+#
+# So a legitimate pre-apply edit to 002 does fail here, on purpose: updating
+# this constant is the one moment left to look twice at a file that is about
+# to stop being editable at all.
+TENANCY_MIGRATION_CHECKSUM = (
+    "a84e0de9607bdb3c4d1ad6903dbe527007fd8944c4efa527b1d466be14bfdc71"
 )
 
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -191,10 +214,41 @@ def test_the_applied_migration_still_hashes_to_what_the_ledger_recorded():
     )
 
 
+def test_the_tenancy_migration_still_hashes_to_what_was_reviewed():
+    """002 is pinned too, for the reason stated at its constant above.
+
+    Not yet a claim about any database -- 002 is unapplied. It is the pin
+    put in place while putting it in place is still cheap.
+    """
+    assert compute_checksum(read_migration(TENANCY_MIGRATION)) == (
+        TENANCY_MIGRATION_CHECKSUM
+    )
+
+
 def test_no_second_migration_appeared():
+    """A migration must not arrive without someone noticing it arrive.
+
+    A `.sql` file dropped into `migrations/` is picked up by the runner, by
+    the lint suite's glob and by CI, all of them silently: nothing else in
+    the repository has to change for a new migration to become part of the
+    schema. That is the right behaviour for a runner and the wrong
+    behaviour for a review, so this is the one place the set is stated by
+    hand. Adding a migration means editing this list, which means the
+    diff of any branch that adds one says so on a line a reviewer reads.
+
+    Exact equality, not `<=`. A subset check only catches a *deleted*
+    migration -- the one failure the ledger already catches on its own,
+    since a version it has applied with no file on disk is reported as
+    "no file" by `--status`. The failure worth catching here is the
+    opposite one, an unreviewed file appearing, and a subset check passes
+    for every one of those.
+
+    The name is now historical: the second migration has appeared, and
+    was reviewed. What the test guards is the third.
+    """
     versions = sorted(path.name for path in MIGRATIONS_DIR.glob("*.sql"))
 
-    assert versions == ["001_issues.sql"]
+    assert versions == EXPECTED_MIGRATIONS
 
 
 def test_the_migration_would_be_rewritten_without_the_pre_commit_exclusion():
