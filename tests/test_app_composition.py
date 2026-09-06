@@ -12,9 +12,10 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import Environment, get_settings
-from app.graphql.context import VectorContext, get_context
+from app.graphql.context import get_context
 from app.main import create_app
 
+from tests.conftest import graphql_context
 from tests.test_settings import (
     ALL_ENVIRONMENTS,
     PLACEHOLDER_DSN,
@@ -40,9 +41,10 @@ def build_client(application) -> httpx.AsyncClient:
     and nothing here reaches PostgreSQL. The GraphQL context is overridden
     for the same reason: the real one borrows a pool that does not exist.
     """
-    application.dependency_overrides[get_context] = lambda: VectorContext(
-        issue_service=None
-    )
+    # A lambda, not `graphql_context` itself: an override is a FastAPI
+    # dependency, so its signature is inspected, and this helper's
+    # `**services` would be read as request parameters and answered 422.
+    application.dependency_overrides[get_context] = lambda: graphql_context()
 
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=application),

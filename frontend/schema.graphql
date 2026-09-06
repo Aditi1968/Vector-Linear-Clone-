@@ -39,6 +39,23 @@ type PageInfo {
 type Query {
   issue(id: UUID!): Issue
   issues(first: Int! = 50, after: String = null): IssueConnection!
+
+  """
+  The teams in a workspace, each with the workflow states its issues can occupy.
+  """
+  teams(workspaceSlug: String!): [Team!]!
+}
+
+type Team {
+  id: UUID!
+
+  """
+  The prefix of this team's issue identifiers -- the ENG in ENG-42. Unique within the workspace, and not beyond it.
+  """
+  key: String!
+  name: String!
+  createdAt: DateTime!
+  workflowStates: [WorkflowState!]!
 }
 
 scalar UUID
@@ -47,4 +64,26 @@ type ValidationErrorType {
   field: String!
   code: String!
   message: String!
+}
+
+"""A status an issue can occupy on one team's board."""
+type WorkflowState {
+  id: UUID!
+  name: String!
+
+  """
+  The fixed category this state belongs to. Branch on this, never on the name, which the team owns and may change.
+  """
+  category: WorkflowStateCategory!
+  position: Int!
+  color: String
+}
+
+"""What a workflow state means, independent of what it is called."""
+enum WorkflowStateCategory {
+  BACKLOG
+  UNSTARTED
+  STARTED
+  COMPLETED
+  CANCELED
 }

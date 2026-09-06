@@ -18,11 +18,11 @@ import httpx
 import pytest
 
 from app.domain.pagination import IssuePage
-from app.graphql.context import VectorContext, get_context
+from app.graphql.context import get_context
 from app.http_limits import MAX_REQUEST_BODY_BYTES
 from app.main import create_app
 
-from tests.conftest import make_entity
+from tests.conftest import graphql_context, make_entity
 from tests.test_settings import PLACEHOLDER_DSN, use_environment
 
 
@@ -128,7 +128,7 @@ async def client(monkeypatch, tmp_path, recording_service):
     )
 
     application = create_app()
-    application.dependency_overrides[get_context] = lambda: VectorContext(
+    application.dependency_overrides[get_context] = lambda: graphql_context(
         issue_service=recording_service
     )
 

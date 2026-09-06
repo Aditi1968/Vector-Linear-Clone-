@@ -52,10 +52,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS_DIR = REPO_ROOT / "migrations"
 INITIAL_MIGRATION = MIGRATIONS_DIR / "001_issues.sql"
 TENANCY_MIGRATION = MIGRATIONS_DIR / "002_tenancy.sql"
+TEAM_WORKFLOWS_MIGRATION = MIGRATIONS_DIR / "005_team_workflows.sql"
 
 # Every migration in the repository, in ledger order. Asserted as an exact
 # list rather than a subset; see `test_no_second_migration_appeared`.
-EXPECTED_MIGRATIONS = ["001_issues.sql", "002_tenancy.sql"]
+#
+# The numbering has a hole in it: 003 and 004 are reserved for work in
+# progress on other branches, and 005 claims its number rather than taking the
+# next free one so that two branches cannot both land as 003. A gap is a
+# scheduling fact, not a defect -- the runner keys the ledger on the filename
+# prefix and never assumes the versions are contiguous.
+EXPECTED_MIGRATIONS = ["001_issues.sql", "002_tenancy.sql", "005_team_workflows.sql"]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the
 # migration's text. 001 is applied in production, so this value is a fact
@@ -82,6 +89,14 @@ INITIAL_MIGRATION_CHECKSUM = (
 # to stop being editable at all.
 TENANCY_MIGRATION_CHECKSUM = (
     "a84e0de9607bdb3c4d1ad6903dbe527007fd8944c4efa527b1d466be14bfdc71"
+)
+
+# And the same pin for 005, on the same terms as 002's: it is this
+# repository's discipline rather than a fact about any database, written down
+# while the file is still trivially checkable. There is no honest moment to
+# add it after the migration reaches a real server.
+TEAM_WORKFLOWS_MIGRATION_CHECKSUM = (
+    "9e085f1cc6ed65bd74514575674db673a432109f670e6a641190ce54a48c4334"
 )
 
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -222,6 +237,13 @@ def test_the_tenancy_migration_still_hashes_to_what_was_reviewed():
     """
     assert compute_checksum(read_migration(TENANCY_MIGRATION)) == (
         TENANCY_MIGRATION_CHECKSUM
+    )
+
+
+def test_the_team_workflows_migration_still_hashes_to_what_was_reviewed():
+    """005, pinned on the same terms as 002 and for the same reason."""
+    assert compute_checksum(read_migration(TEAM_WORKFLOWS_MIGRATION)) == (
+        TEAM_WORKFLOWS_MIGRATION_CHECKSUM
     )
 
 

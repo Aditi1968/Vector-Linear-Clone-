@@ -4,11 +4,24 @@ import strawberry
 from graphql import GraphQLError
 from strawberry.extensions import DisableIntrospection, MaskErrors
 from strawberry.extensions.base_extension import SchemaExtension
+from strawberry.tools import merge_types
 
 from app.config import Environment
 from app.graphql.limits import operation_limit_extensions
 from app.graphql.mutations.issues import Mutation
-from app.graphql.queries.issues import Query
+from app.graphql.queries.issues import Query as IssueQuery
+from app.graphql.queries.teams import TeamQuery
+
+
+# One GraphQL root assembled from one type per feature, rather than a single
+# growing `Query` class every feature has to edit. The GraphQL root is a
+# junction by nature -- everything the API exposes hangs off it -- and a
+# junction that is also a file is a file every branch conflicts in.
+#
+# `merge_types` produces a real Strawberry type named "Query"; the order of
+# the tuple is the order the fields appear in the SDL, so it stays stable
+# across exports and `frontend/schema.graphql` does not churn.
+Query = merge_types("Query", (IssueQuery, TeamQuery))
 
 
 # The public error vocabulary. An error reaches a client with its own

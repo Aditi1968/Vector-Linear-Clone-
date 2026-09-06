@@ -49,6 +49,8 @@ from scripts.apply_migration import (
     read_migration,
 )
 
+from tests.conftest import reset_schema
+
 
 pytestmark = pytest.mark.db
 
@@ -697,8 +699,7 @@ async def applied(postgres_dsn):
     connection = await asyncpg.connect(postgres_dsn)
 
     try:
-        await connection.execute("DROP TABLE IF EXISTS issues, teams, workspaces")
-        await connection.execute("DROP TABLE IF EXISTS schema_migrations")
+        await reset_schema(connection)
         await connection.execute(read_migration(MIGRATION_001))
         await connection.executemany(
             INSERT_ISSUE_SQL,
@@ -1277,8 +1278,7 @@ async def test_the_scoped_cursor_page_is_served_by_the_new_index_without_a_sort(
 
 async def _rebuild_with_neighbour(connection, neighbour_rows: int) -> None:
     """001 + 002 over a fixed tenant and a neighbour of the requested size."""
-    await connection.execute("DROP TABLE IF EXISTS issues, teams, workspaces")
-    await connection.execute("DROP TABLE IF EXISTS schema_migrations")
+    await reset_schema(connection)
     await connection.execute(read_migration(MIGRATION_001))
 
     async with connection.transaction():
@@ -1691,21 +1691,36 @@ async def test_the_ledger_timestamps_are_timezone_aware_and_from_the_server_cloc
         assert server_now - applied_at < timedelta(minutes=5), row["version"]
 
 
-async def test_migration_status_reports_both_versions_applied_and_nothing_pending(
+async def test_migration_status_reports_both_versions_applied_and_the_rest_pending(
     connection,
 ):
     """The runner's own view of the database it has just changed.
 
     `migration_status` writes -- the ledger prologue creates the table and can
     adopt 001 -- so it needs a transaction as much as applying does.
+
+    The pending set is derived from the directory rather than written out,
+    and that is the whole point of the assertion. This fixture applies 001 and
+    002 and stops, so every later migration in the repository is pending by
+    construction; what is being checked is that the ledger and the directory
+    agree about which those are, not how many files the directory happens to
+    hold. Spelled as `== ()`, this test asserted that 002 was the last
+    migration anyone would ever write, and failed the day one arrived.
     """
     async with connection.transaction():
         report = await migration_status(connection, migrations_dir=MIGRATIONS_DIR)
 
-    assert [item.version for item in report.applied] == ["001", "002"]
+    applied_versions = ["001", "002"]
+
+    assert [item.version for item in report.applied] == applied_versions
     assert [item.state for item in report.applied] == [CHECKSUM_OK, CHECKSUM_OK]
-    assert report.pending == ()
     assert report.has_mismatch is False
+
+    assert [path.name for path in report.pending] == sorted(
+        path.name
+        for path in MIGRATIONS_DIR.glob("*.sql")
+        if not path.name.startswith(tuple(applied_versions))
+    )
 
 
 async def test_re_applying_002_executes_nothing_and_changes_nothing(applied):

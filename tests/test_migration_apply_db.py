@@ -24,6 +24,8 @@ from scripts.apply_migration import (
     migration_status,
 )
 
+from tests.conftest import reset_schema
+
 
 pytestmark = pytest.mark.db
 
@@ -53,8 +55,7 @@ async def migrated(postgres_dsn):
     connection = await asyncpg.connect(postgres_dsn)
 
     try:
-        await connection.execute("DROP TABLE IF EXISTS issues")
-        await connection.execute("DROP TABLE IF EXISTS schema_migrations")
+        await reset_schema(connection)
         await connection.execute(MIGRATION.read_text(encoding="utf-8"))
 
         yield connection

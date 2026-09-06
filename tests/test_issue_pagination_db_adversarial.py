@@ -47,6 +47,8 @@ from app.domain.pagination import IssuePage
 from app.repositories.issues import IssueRepository
 from app.services.issues import IssueService
 
+from tests.conftest import reset_schema
+
 
 pytestmark = pytest.mark.db
 
@@ -199,8 +201,7 @@ async def _seed(dsn: str, *, analyze: bool) -> None:
     connection = await asyncpg.connect(dsn)
 
     try:
-        await connection.execute("DROP TABLE IF EXISTS issues")
-        await connection.execute("DROP TABLE IF EXISTS schema_migrations")
+        await reset_schema(connection)
         await connection.execute(MIGRATION.read_text(encoding="utf-8"))
         await connection.executemany(
             INSERT,

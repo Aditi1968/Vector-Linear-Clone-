@@ -43,7 +43,7 @@ import app.db
 import app.rest.health as health
 from app.db import COMMAND_TIMEOUT_SECONDS, STATEMENT_TIMEOUT_MS, connect, disconnect
 from app.domain.pagination import IssuePage
-from app.graphql.context import VectorContext, get_context
+from app.graphql.context import get_context
 from app.graphql.limits import MAX_COMPLEXITY
 from app.graphql.queries.issues import DEFAULT_FIRST
 from app.graphql.schema import MASKED_ERROR_MESSAGE, build_schema
@@ -51,7 +51,7 @@ from app.http_limits import MAX_REQUEST_BODY_BYTES
 from app.main import create_app
 from app.rest.health import READINESS_TIMEOUT_SECONDS, router
 
-from tests.conftest import make_entity
+from tests.conftest import graphql_context, make_entity
 from tests.test_settings import PLACEHOLDER_DSN, use_environment
 
 
@@ -203,7 +203,7 @@ async def test_batched_documents_are_refused_rather_than_amplified(
 
     service = RecordingIssueService()
     application = create_app()
-    application.dependency_overrides[get_context] = lambda: VectorContext(
+    application.dependency_overrides[get_context] = lambda: graphql_context(
         issue_service=service
     )
 
@@ -242,7 +242,7 @@ async def test_an_internal_failure_is_masked_over_the_real_http_stack(
     )
 
     application = create_app()
-    application.dependency_overrides[get_context] = lambda: VectorContext(
+    application.dependency_overrides[get_context] = lambda: graphql_context(
         issue_service=Exploding()
     )
 

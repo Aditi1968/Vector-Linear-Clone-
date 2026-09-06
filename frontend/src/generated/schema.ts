@@ -72,6 +72,8 @@ export type Query = {
   __typename?: 'Query';
   issue?: Maybe<Issue>;
   issues: IssueConnection;
+  /** The teams in a workspace, each with the workflow states its issues can occupy. */
+  teams: Array<Team>;
 };
 
 
@@ -85,9 +87,43 @@ export type QueryIssuesArgs = {
   first?: Scalars['Int']['input'];
 };
 
+
+export type QueryTeamsArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type Team = {
+  __typename?: 'Team';
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  /** The prefix of this team's issue identifiers -- the ENG in ENG-42. Unique within the workspace, and not beyond it. */
+  key: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+  workflowStates: Array<WorkflowState>;
+};
+
 export type ValidationErrorType = {
   __typename?: 'ValidationErrorType';
   code: Scalars['String']['output'];
   field: Scalars['String']['output'];
   message: Scalars['String']['output'];
 };
+
+/** A status an issue can occupy on one team's board. */
+export type WorkflowState = {
+  __typename?: 'WorkflowState';
+  /** The fixed category this state belongs to. Branch on this, never on the name, which the team owns and may change. */
+  category: WorkflowStateCategory;
+  color?: Maybe<Scalars['String']['output']>;
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  position: Scalars['Int']['output'];
+};
+
+/** What a workflow state means, independent of what it is called. */
+export type WorkflowStateCategory =
+  | 'BACKLOG'
+  | 'CANCELED'
+  | 'COMPLETED'
+  | 'STARTED'
+  | 'UNSTARTED';
