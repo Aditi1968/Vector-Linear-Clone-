@@ -12,9 +12,13 @@ from app.graphql.mutations.auth import AuthMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.issues import Query as IssueQuery
+from app.graphql.queries.teams import TeamQuery
 
 
-# The two root types, assembled from one class per feature.
+# The two root types, assembled from one class per feature, rather than a
+# single growing `Query` class every feature has to edit. The GraphQL root is
+# a junction by nature -- everything the API exposes hangs off it -- and a
+# junction that is also a file is a file every branch conflicts in.
 #
 # `merge_types` rather than plain inheritance for one property: it counts the
 # field names it is merging and warns on a collision instead of silently
@@ -22,7 +26,10 @@ from app.graphql.queries.issues import Query as IssueQuery
 # root field called `me` or `issues` is a mistake nobody would see in a
 # schema that still builds, and this is a repository where several people add
 # root fields at once.
-Query = merge_types("Query", (IssueQuery, AuthQuery))
+#
+# Tuple order is SDL field order, so it stays stable across exports and
+# `frontend/schema.graphql` does not churn.
+Query = merge_types("Query", (IssueQuery, AuthQuery, TeamQuery))
 Mutation = merge_types("Mutation", (IssueMutation, AuthMutation))
 
 

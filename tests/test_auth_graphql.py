@@ -28,10 +28,11 @@ from app.domain.auth import (
     UserEntity,
 )
 from app.domain.errors import AuthenticationError, ValidationError, ValidationIssue
-from app.graphql.context import VectorContext, get_context
+from app.graphql.context import get_context
 from app.http_cookies import SESSION_COOKIE_NAME
 from app.main import create_app
 
+from tests.conftest import graphql_context
 from tests.test_settings import PLACEHOLDER_DSN, use_environment
 
 
@@ -190,12 +191,11 @@ def build_client(
     )
 
     application = create_app()
-    application.dependency_overrides[get_context] = lambda: VectorContext(
-        issue_service=None,
+    # Through the helper rather than by hand: every slot VectorContext grows
+    # is filled in one place, and a resolver that reaches a service these
+    # tests never wired up fails loudly instead of on a None.
+    application.dependency_overrides[get_context] = lambda: graphql_context(
         auth_service=auth_service,
-        # These tests exercise the auth surface only; no resolver they reach
-        # asks for a workspace, so there is nothing for a tenant to answer.
-        tenant=None,
         environment=environment,
     )
 

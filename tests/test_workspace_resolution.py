@@ -43,7 +43,7 @@ from app.repositories.workspaces import WorkspaceRepository
 from app.services.workspaces import WorkspaceService
 from scripts.apply_migration import apply_migration, read_migration
 
-from tests.conftest import FakeConnection, FakePool, normalize
+from tests.conftest import FakeConnection, FakePool, normalize, reset_schema
 
 
 MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
@@ -601,8 +601,7 @@ async def resolved(postgres_dsn):
     connection = await asyncpg.connect(postgres_dsn)
 
     try:
-        await connection.execute("DROP TABLE IF EXISTS issues, teams, workspaces")
-        await connection.execute("DROP TABLE IF EXISTS schema_migrations")
+        await reset_schema(connection)
         await connection.execute(read_migration(MIGRATION_001))
 
         async with connection.transaction():

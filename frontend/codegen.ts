@@ -76,6 +76,25 @@ const SHARED = {
   strictScalars: true,
 
   /*
+   * GraphQL enums become string-literal unions, not TypeScript `enum`s.
+   *
+   * Not a preference: `erasableSyntaxOnly` is on in both tsconfigs, and a
+   * TypeScript `enum` is the canonical thing it forbids -- it is the one
+   * declaration that emits runtime code, so the generated file stopped
+   * compiling (TS1294) the moment the schema declared its first enum. A
+   * union of the literal values is erasable, ships nothing at runtime, and is
+   * the shape the data actually arrives in: the transport delivers
+   * `"BACKLOG"`, so a union can be compared and switched on directly rather
+   * than through an imported member.
+   *
+   * `enumsAsConst` is the other erasable option and would additionally give
+   * an importable value object. It is not used because nothing here needs
+   * one; a `Record<WorkflowStateCategory, T>` keyed by the literals is
+   * exhaustively checked either way.
+   */
+  enumsAsTypes: true,
+
+  /*
    * `import type`, because `verbatimModuleSyntax` is on.
    *
    * Without it the generated files emit *value* imports for things that are

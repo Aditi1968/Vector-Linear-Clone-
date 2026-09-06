@@ -48,6 +48,8 @@ from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
 from app.services.issues import IssueService
 
+from tests.conftest import reset_schema
+
 
 pytestmark = pytest.mark.db
 
@@ -213,20 +215,16 @@ async def _seed(dsn: str, *, analyze: bool) -> None:
     connection = await asyncpg.connect(dsn)
 
     try:
-        # Dropped in dependency order: issues references teams references
-        # workspaces, and RESTRICT means a drop out of order fails rather
-        # than cascading.
-        await connection.execute("DROP TABLE IF EXISTS issues")
-        await connection.execute("DROP TABLE IF EXISTS teams")
-        await connection.execute("DROP TABLE IF EXISTS workspaces")
-        await connection.execute("DROP TABLE IF EXISTS schema_migrations")
+        # `reset_schema` rather than a hand-written DROP list: the order
+        # has to follow the FK graph, and that graph grows with every
+        # migration. A list here goes stale silently.
+        await reset_schema(connection)
         await connection.execute(MIGRATION_001.read_text(encoding="utf-8"))
 
         # 002 as well as 001: the repository's SELECT leads with
-        # `workspace_id = $1`, and both the column and the bootstrap tenant
-        # the rows below are filed against arrive with it.
+        # `workspace_id = $1`, and both that column and the bootstrap tenant
+        # these rows are filed against arrive with it.
         await connection.execute(MIGRATION_002.read_text(encoding="utf-8"))
-
         await connection.executemany(
             INSERT,
             [

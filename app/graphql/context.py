@@ -26,6 +26,8 @@ class VectorContext(BaseContext):
         self,
         issue_service: IssueService,
         auth_service: AuthService,
+        team_service: TeamService,
+        workspace_service: WorkspaceService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -33,6 +35,13 @@ class VectorContext(BaseContext):
 
         self.issue_service = issue_service
         self.auth_service = auth_service
+
+        # The same two service objects `tenant` resolves through, exposed
+        # directly for the resolvers that ask about teams and workspaces as
+        # entities rather than as this request's scope. Shared instances,
+        # not second copies: one request gets one of each.
+        self.team_service = team_service
+        self.workspace_service = workspace_service
 
         # Required, not defaulted. A context that could be built without a
         # tenant would let a resolver reach the services with no workspace
@@ -98,6 +107,13 @@ async def get_context() -> VectorContext:
     # lru_cached, so this is a dict lookup after the first request.
     environment = get_settings().environment
 
+    # Constructed once and handed to both the context and the tenant. Two
+    # instances would be two objects answering the same question over the
+    # same pool, and any caching either one grows later would then be per
+    # copy rather than per request.
+    workspace_service = WorkspaceService(pool=pool, repository=WorkspaceRepository())
+    team_service = TeamService(pool=pool, repository=TeamRepository())
+
     return VectorContext(
         issue_service=IssueService(
             pool=pool,
@@ -109,20 +125,16 @@ async def get_context() -> VectorContext:
             sessions=SessionRepository(),
             hasher=Argon2PasswordHasher(),
         ),
+        team_service=team_service,
+        workspace_service=workspace_service,
         # Built here rather than resolved here: nothing in this function
         # touches the database. Constructing a context is on the path of
         # every request, including the malformed ones a query never runs
         # for, so the workspace lookup happens in the resolver that needs
         # it and not once per HTTP request regardless.
         tenant=RequestTenant(
-            workspace_service=WorkspaceService(
-                pool=pool,
-                repository=WorkspaceRepository(),
-            ),
-            team_service=TeamService(
-                pool=pool,
-                repository=TeamRepository(),
-            ),
+            workspace_service=workspace_service,
+            team_service=team_service,
         ),
         environment=environment,
     )

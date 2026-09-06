@@ -247,6 +247,13 @@ async def wired(postgres_dsn):
 
         pool = await asyncpg.create_pool(dsn=postgres_dsn, min_size=1, max_size=2)
 
+        # One instance of each, shared with the tenant, exactly as
+        # `get_context` builds them in production.
+        workspace_service = WorkspaceService(
+            pool=pool, repository=WorkspaceRepository()
+        )
+        team_service = TeamService(pool=pool, repository=TeamRepository())
+
         try:
             yield (
                 VectorContext(
@@ -255,15 +262,12 @@ async def wired(postgres_dsn):
                     # tenancy path only; no resolver it reaches resolves a
                     # viewer.
                     auth_service=None,
+                    team_service=team_service,
+                    workspace_service=workspace_service,
                     environment="test",
                     tenant=RequestTenant(
-                        workspace_service=WorkspaceService(
-                            pool=pool,
-                            repository=WorkspaceRepository(),
-                        ),
-                        team_service=TeamService(
-                            pool=pool, repository=TeamRepository()
-                        ),
+                        workspace_service=workspace_service,
+                        team_service=team_service,
                     ),
                 ),
                 connection,

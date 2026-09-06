@@ -53,10 +53,22 @@ MIGRATIONS_DIR = REPO_ROOT / "migrations"
 INITIAL_MIGRATION = MIGRATIONS_DIR / "001_issues.sql"
 TENANCY_MIGRATION = MIGRATIONS_DIR / "002_tenancy.sql"
 AUTH_MIGRATION = MIGRATIONS_DIR / "003_auth.sql"
+TEAM_WORKFLOWS_MIGRATION = MIGRATIONS_DIR / "005_team_workflows.sql"
 
 # Every migration in the repository, in ledger order. Asserted as an exact
 # list rather than a subset; see `test_no_second_migration_appeared`.
-EXPECTED_MIGRATIONS = ["001_issues.sql", "002_tenancy.sql", "003_auth.sql"]
+#
+# The numbering has a hole in it: 004 is reserved for work in progress on
+# another branch, and 005 claimed its number ahead of time so that two
+# branches could not both land as the same version. A gap is a scheduling
+# fact, not a defect -- the runner keys the ledger on the filename prefix and
+# never assumes the versions are contiguous.
+EXPECTED_MIGRATIONS = [
+    "001_issues.sql",
+    "002_tenancy.sql",
+    "003_auth.sql",
+    "005_team_workflows.sql",
+]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the
 # migration's text. 001 is applied in production, so this value is a fact
@@ -95,6 +107,14 @@ TENANCY_MIGRATION_CHECKSUM = (
 # rely on the moment 003 is applied anywhere.
 AUTH_MIGRATION_CHECKSUM = (
     "47e5631615660b4401ae58bb19d959c52dac284fb8182a58bfe6e9a0c2efab02"
+)
+
+# And the same pin for 005, on the same terms: this repository's discipline
+# rather than a fact about any database, written down while the file is still
+# trivially checkable. There is no honest moment to add it after the
+# migration reaches a real server.
+TEAM_WORKFLOWS_MIGRATION_CHECKSUM = (
+    "9e085f1cc6ed65bd74514575674db673a432109f670e6a641190ce54a48c4334"
 )
 
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -247,6 +267,13 @@ def test_the_auth_migration_still_hashes_to_what_was_reviewed():
     somebody makes on purpose.
     """
     assert compute_checksum(read_migration(AUTH_MIGRATION)) == AUTH_MIGRATION_CHECKSUM
+
+
+def test_the_team_workflows_migration_still_hashes_to_what_was_reviewed():
+    """005, pinned on the same terms as 002 and for the same reason."""
+    assert compute_checksum(read_migration(TEAM_WORKFLOWS_MIGRATION)) == (
+        TEAM_WORKFLOWS_MIGRATION_CHECKSUM
+    )
 
 
 def test_no_second_migration_appeared():

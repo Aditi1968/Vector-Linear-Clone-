@@ -13,6 +13,7 @@ import pytest
 
 from app.domain.issues import IssueEntity
 from app.domain.tenancy import WorkspaceScope
+from app.graphql.context import VectorContext
 from app.repositories.issues import IssueRepository
 from app.services.issues import IssueService
 
@@ -81,13 +82,15 @@ class ExplodingPool:
 class FakeConnection:
     """Records every query issued against it and replays canned rows.
 
-    `row` defaults to None so a repository's not-found path is the default
-    behaviour of the fake rather than something a test has to arrange.
+    `row` and `value` default to None so a repository's not-found path is
+    the default behaviour of the fake rather than something a test has to
+    arrange.
     """
 
-    def __init__(self, rows=None, row=None):
+    def __init__(self, rows=None, row=None, value=None):
         self.rows = rows if rows is not None else []
         self.row = row
+        self.value = value
         self.queries: list[dict] = []
 
     async def fetch(self, query, *args):
@@ -99,6 +102,107 @@ class FakeConnection:
         self.queries.append({"query": query, "args": args})
 
         return self.row
+
+    async def fetchval(self, query, *args):
+        self.queries.append({"query": query, "args": args})
+
+        return self.value
+
+
+# Every table in `public`, dropped in one statement, whatever they are.
+#
+# The alternative -- each db test naming the tables it expects -- is a list
+# that is correct until the next migration adds a table, and then fails in
+# whichever file happens to run second, on a `DROP TABLE` that leaves a
+# dangling foreign key. That failure names a table the file has never heard
+# of and has nothing to do with the test reporting it, which is how a
+# migration lands looking like it broke four unrelated suites.
+#
+# The identifiers are quoted by `format('%I')` on the server rather than
+# interpolated here: they come out of the catalog, so a table whose name
+# needs quoting is a name PostgreSQL is asked to render, not one this file
+# guesses at. CASCADE covers dependent objects a plain multi-table drop
+# would not resolve -- a view over one of them, say.
+DROP_ALL_TABLES_SQL = """
+SELECT 'DROP TABLE ' || string_agg(format('%I.%I', schemaname, tablename), ', ')
+       || ' CASCADE'
+FROM pg_tables
+WHERE schemaname = 'public'
+"""
+
+
+async def reset_schema(connection) -> None:
+    """Leave the test database with no tables at all.
+
+    Every db test in this suite rebuilds the schema from the migrations, and
+    every one of them has to start from nothing -- including nothing left
+    behind by whichever file ran before it, since the container is shared for
+    the whole session.
+    """
+    statement = await connection.fetchval(DROP_ALL_TABLES_SQL)
+
+    # None when the database is already empty: string_agg over no rows is
+    # NULL, so there is nothing to drop and nothing to run.
+    if statement is not None:
+        await connection.execute(statement)
+
+
+class UnusedService:
+    """A context slot the test under way must not touch.
+
+    Filling one with None makes an unexpected call fail as `AttributeError:
+    'NoneType' object has no attribute 'list'` from somewhere inside a
+    resolver, which says nothing about which service was reached or why that
+    was wrong. This fails with a sentence naming both.
+    """
+
+    def __init__(self, name: str):
+        self._name = name
+
+    def __getattr__(self, attribute):
+        raise AssertionError(
+            f"this test must not reach {self._name}.{attribute}; "
+            "pass a real fake for it if the behaviour is under test"
+        )
+
+
+def graphql_context(**services) -> VectorContext:
+    """A `VectorContext` with only the services a test actually uses.
+
+    Transport tests -- body limits, masking, composition -- exercise one
+    service and have no opinion about the others, but the context requires
+    every one of them, deliberately: a resolver that reaches a service the
+    request never wired up is a defect, and a None in the slot would hide it
+    behind an AttributeError.
+
+    So the unnamed slots are filled with `UnusedService` rather than None,
+    and adding a service to `VectorContext` means editing this function
+    rather than every test that builds a context.
+    """
+    slots = {
+        "issue_service",
+        "team_service",
+        "workspace_service",
+        "auth_service",
+    }
+    environment = services.pop("environment", "test")
+    tenant = services.pop("tenant", None) or FakeTenant()
+    unexpected = set(services) - slots
+
+    assert not unexpected, (
+        f"VectorContext has no {', '.join(sorted(unexpected))}; this helper "
+        "is out of date with app/graphql/context.py"
+    )
+
+    return VectorContext(
+        **{name: services.get(name) or UnusedService(name) for name in slots},
+        # Not services, so not `UnusedService` slots. `tenant` gets a working
+        # fake because almost every resolver path needs a scope to run at
+        # all, and `environment` is a plain value whose default only decides
+        # whether a Set-Cookie would carry Secure.
+        tenant=tenant,
+        environment=environment,
+    )
 
 
 class _AcquireContext:

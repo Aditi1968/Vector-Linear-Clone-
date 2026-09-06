@@ -70,6 +70,26 @@ class EmailAlreadyRegisteredError(Exception):
         super().__init__("Email already registered")
 
 
+class TeamNotFoundError(Exception):
+    """A team id did not resolve to a team in the workspace it was used in.
+
+    Deliberately one error for two situations that must stay externally
+    indistinguishable: the team does not exist at all, and the team exists
+    in some other workspace. Separating them would answer "does workspace B
+    have a team with this id?" for any caller holding an id and a workspace
+    they can reach, which is exactly the cross-tenant existence check
+    tenancy is meant to deny.
+
+    Neither the id nor the workspace is carried, for the reason
+    `WorkspaceNotFoundError` gives: whoever raises this holds both already
+    and can log them in the frame that knows how to bound them. Pure
+    application code -- no Strawberry, FastAPI, asyncpg or PostgreSQL.
+    """
+
+    def __init__(self):
+        super().__init__("Team not found")
+
+
 class WorkspaceNotFoundError(Exception):
     """A workspace slug did not resolve to a workspace.
 
@@ -88,23 +108,3 @@ class WorkspaceNotFoundError(Exception):
 
     def __init__(self):
         super().__init__("Workspace not found")
-
-
-class TeamNotFoundError(Exception):
-    """A workspace holds no team for work to be filed against.
-
-    Not a client error, and never to be answered as one. Every path that
-    raises this has already resolved a real workspace; what is missing is a
-    team inside it, which no request can supply and no input can be
-    corrected to avoid. Translating it into a validation failure would tell
-    a client to fix something on their side that is not theirs to fix, and
-    would hide a half-provisioned tenant behind a 200.
-
-    Distinct from WorkspaceNotFoundError, which says the tenant itself did
-    not resolve. Collapsing the two would report an unprovisioned workspace
-    as a nonexistent one. Pure application code -- no Strawberry, FastAPI,
-    asyncpg or PostgreSQL.
-    """
-
-    def __init__(self):
-        super().__init__("Team not found")
