@@ -54,11 +54,6 @@
 -- has lived under since 001.
 
 
--- Workspace-scoped rather than team-scoped: a label is a taxonomy that cuts
--- across teams -- the same "regression" applies to work in every one of them
--- -- so team-scoping would force a duplicate label per team and would make
--- the join below pin two keys instead of one for no isolation the workspace
--- key does not already provide.
 -- The FK target every composite reference to an issue needs.
 --
 -- Redundant as a uniqueness CLAIM -- `id` is already the primary key of
@@ -76,6 +71,11 @@
 ALTER TABLE issues ADD CONSTRAINT issues_workspace_id_key
     UNIQUE (workspace_id, id);
 
+-- Workspace-scoped rather than team-scoped: a label is a taxonomy that cuts
+-- across teams -- the same "regression" applies to work in every one of them
+-- -- so team-scoping would force a duplicate label per team and would make
+-- the join below pin two keys instead of one for no isolation the workspace
+-- key does not already provide.
 CREATE TABLE labels (
     id UUID PRIMARY KEY DEFAULT uuidv7(),
 
