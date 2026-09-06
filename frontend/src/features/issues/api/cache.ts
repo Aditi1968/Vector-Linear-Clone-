@@ -113,3 +113,54 @@ export function prependCreatedIssue(
     },
   )
 }
+
+/**
+ * Take an archived issue out of the cached list.
+ *
+ * The counterpart of `prependCreatedIssue`, and the only other hand-written
+ * cache write this feature has. Every *other* mutation -- update, set
+ * project, set cycle -- needs none, because each returns the issue and each
+ * selects a superset of the row fragment, so Apollo's normalisation of
+ * `Issue:<uuid>` updates the row the list already points at. Archiving
+ * cannot work that way: the issue is absent from every subsequent query, so
+ * there is no entity left to normalise and the pointer has to go.
+ *
+ * `pageInfo` is left alone for the same reason the prepend leaves it alone,
+ * and it is worth being explicit that this is a property of *keyset*
+ * pagination: `endCursor` marks the position of the last row fetched, and
+ * removing a row from the middle does not move that frontier. The next
+ * "load more" asks from the same cursor and gets exactly what it would have
+ * got. Under OFFSET pagination this same removal would shift every following
+ * page by one and skip a row at each boundary.
+ *
+ * Nothing is evicted from the normalised store. The open detail view is
+ * still rendering the issue at the moment it is archived, and evicting the
+ * entity under it would blank the panel before the screen has navigated
+ * away. The entry is unreachable once the row is gone, and `gc()` collects
+ * it whenever the application next runs one.
+ */
+export function removeArchivedIssue(
+  cache: ApolloCache,
+  issueId: string,
+  workspaceSlug: string,
+): void {
+  cache.updateQuery(
+    { query: IssueListDocument, variables: firstPageVariables(workspaceSlug) },
+    (existing) => {
+      if (existing === null) {
+        return
+      }
+
+      const nodes = existing.issues.nodes.filter((node) => node.id !== issueId)
+
+      // Returning undefined leaves the cache untouched, which is the right
+      // answer when the row was never in the list -- an issue opened by URL
+      // in a workspace whose list has not been read.
+      if (nodes.length === existing.issues.nodes.length) {
+        return
+      }
+
+      return { ...existing, issues: { ...existing.issues, nodes } }
+    },
+  )
+}

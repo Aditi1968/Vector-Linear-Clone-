@@ -24,6 +24,16 @@ const RELATIVE_FORMAT = new Intl.RelativeTimeFormat(undefined, {
   numeric: 'auto',
 })
 
+/** For the `Date` scalar: a calendar day, with no time and no timezone. */
+const DAY_FORMAT = new Intl.DateTimeFormat(undefined, {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+})
+
+/** `YYYY-MM-DD`, which is the only shape the `Date` scalar is sent in. */
+const CALENDAR_DAY = /^(\d{4})-(\d{2})-(\d{2})$/
+
 /**
  * Largest-first, so the first threshold an elapsed span clears is the unit it
  * is described in. Approximate by design: "3 months ago" does not need to
@@ -49,6 +59,33 @@ export function formatAbsolute(value: string): string {
   const parsed = parse(value)
 
   return parsed === null ? value : ABSOLUTE_FORMAT.format(parsed)
+}
+
+/**
+ * A due date, which is a calendar day and not an instant.
+ *
+ * Parsed field by field rather than with `new Date(value)`, and that is the
+ * whole reason this is not `formatAbsolute`. `new Date('2026-03-14')` is
+ * specified to parse a date-only string as UTC midnight, so every viewer west
+ * of Greenwich would see a due date one day early -- the classic off-by-one
+ * that only shows up for some of your users, in some months of the year.
+ * Constructing the date from its parts puts it at local midnight, where a day
+ * the whole team agreed on belongs.
+ *
+ * A value that is not `YYYY-MM-DD` is returned unchanged, in keeping with the
+ * rest of this module: nothing here invents a date the server did not send.
+ */
+export function formatDueDate(value: string): string {
+  const parts = CALENDAR_DAY.exec(value)
+
+  if (parts === null) {
+    return value
+  }
+
+  const [, year, month, day] = parts
+  const parsed = new Date(Number(year), Number(month) - 1, Number(day))
+
+  return Number.isNaN(parsed.getTime()) ? value : DAY_FORMAT.format(parsed)
 }
 
 /**

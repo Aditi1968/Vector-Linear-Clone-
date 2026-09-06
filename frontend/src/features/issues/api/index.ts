@@ -3,10 +3,7 @@
  *
  * This is the boundary the rest of the feature is written against. Screens
  * and rows import hooks and types from here; they never import `gql`, a
- * document, an Apollo hook, or an Apollo error type. Backend Phase 1b-5 makes
- * issue operations workspace-aware -- new arguments, new variables, quite
- * possibly a new cache key -- and the value of that rule is that the change
- * lands in this directory and stops here.
+ * document, an Apollo hook, or an Apollo error type.
  *
  * The documents are exported too, and only from this module rather than from
  * the feature root, because mocking a GraphQL response requires the exact
@@ -21,33 +18,66 @@ export { useIssueDetail } from './useIssueDetail'
 export type { UseIssueDetailResult } from './useIssueDetail'
 
 export { useCreateIssue } from './useCreateIssue'
-export type { CreateIssueOutcome, UseCreateIssueResult } from './useCreateIssue'
+export type { UseCreateIssueResult } from './useCreateIssue'
 
-export { prependCreatedIssue } from './cache'
+export { useIssueMutations } from './useIssueMutations'
+export type { UseIssueMutationsResult } from './useIssueMutations'
+
+export { memberLabel, useWorkspaceContext } from './useWorkspaceContext'
+export type { WorkspaceContext } from './useWorkspaceContext'
+
+export { useTeamCycles } from './useTeamCycles'
+
+export { groupByField } from './outcome'
+export type { IssueSaveOutcome } from './outcome'
+
+export { prependCreatedIssue, removeArchivedIssue } from './cache'
 
 export {
+  IssueArchiveDocument,
   IssueCreateDocument,
   IssueDetailDocument,
   IssueListDocument,
-  WorkspaceTeamsDocument,
+  IssueSetCycleDocument,
+  IssueSetProjectDocument,
+  IssueUpdateDocument,
+  IssueWorkspaceContextDocument,
+  TeamCyclesDocument,
 } from './documents'
 
 export type {
+  IssueArchiveData,
+  IssueArchiveVariables,
   IssueConnection,
   IssueCreateData,
   IssueCreateInput,
   IssueCreatePayload,
   IssueCreateVariables,
+  IssueCycle,
   IssueDetailData,
   IssueDetailFields,
   IssueDetailVariables,
   IssueDraft,
+  IssueLabel,
   IssueListData,
   IssueListVariables,
   IssuePageInfo,
+  IssuePatch,
+  IssueProject,
   IssueRowFields,
+  IssueSetCycleData,
+  IssueSetProjectData,
+  IssueUpdateData,
+  IssueUpdateVariables,
   IssueValidationError,
+  IssueWorkspaceContextData,
+  IssueWorkspaceContextVariables,
+  TeamCycle,
+  TeamCyclesData,
+  TeamCyclesVariables,
+  WorkflowState,
+  WorkflowStateCategory,
+  WorkspaceMember,
+  WorkspaceProject,
   WorkspaceTeam,
-  WorkspaceTeamsData,
-  WorkspaceTeamsVariables,
 } from './types'

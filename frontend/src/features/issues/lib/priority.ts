@@ -28,6 +28,8 @@
  * lands, and the disclaimers around it come out at the same time.
  */
 
+import type { PriorityLevel } from '../../../components'
+
 export const PRIORITY_MIN = 0
 export const PRIORITY_MAX = 4
 
@@ -48,6 +50,31 @@ const PRIORITY_NAMES = ['No priority', 'Urgent', 'High', 'Medium', 'Low'] as con
 export const PRIORITY_VALUES: readonly number[] = PRIORITY_NAMES.map(
   (_name, index) => index,
 )
+
+/**
+ * The same convention, in the vocabulary `PriorityIndicator` speaks.
+ *
+ * The primitive takes a named level rather than the server's integer, and
+ * deliberately so: the integer-to-name mapping is this file's invention (see
+ * the note at the top) and a primitive that re-derived it would be a second
+ * source of truth for an invented rule. This is the one translation, and it
+ * is here, next to the names it has to agree with.
+ *
+ * Indexed by the wire value, so the tuple's order is the mapping and the two
+ * cannot drift the way two parallel lists would.
+ */
+const PRIORITY_LEVELS = ['none', 'urgent', 'high', 'medium', 'low'] as const
+
+/**
+ * The level `PriorityIndicator` should draw for a server value.
+ *
+ * Falls back to `none` for a value outside 0..4, matching `describePriority`
+ * refusing to guess a name for one: an unrecognised priority is drawn as the
+ * absence of a priority rather than as a plausible-looking "Low".
+ */
+export function priorityLevel(value: number): PriorityLevel {
+  return PRIORITY_LEVELS[value] ?? 'none'
+}
 
 export interface PriorityPresentation {
   /** The raw integer, exactly as the server has it. */
