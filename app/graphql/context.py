@@ -38,6 +38,7 @@ from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
 from app.services.projects import ProjectService
 from app.services.relations import RelationService
+from app.services.search import SearchService
 from app.services.teams import TeamService
 from app.services.workspaces import WorkspaceService
 
@@ -57,6 +58,7 @@ class VectorContext(BaseContext):
         cycle_service: CycleService,
         project_service: ProjectService,
         relation_service: RelationService,
+        search_service: SearchService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -69,6 +71,7 @@ class VectorContext(BaseContext):
         self.comment_service = comment_service
         self.cycle_service = cycle_service
         self.project_service = project_service
+        self.search_service = search_service
 
         # Built here rather than in `get_context` so that a context assembled
         # by hand -- a test, a worker -- gets working loaders from the service
@@ -252,6 +255,16 @@ async def get_context() -> VectorContext:
         relation_service=RelationService(
             pool=pool,
             repository=RelationRepository(),
+        ),
+        search_service=SearchService(
+            pool=pool,
+            # Two repositories, because search reads two tables and the SQL
+            # for a table belongs to the repository that owns it. Fresh
+            # instances rather than shared ones: a repository here holds no
+            # state and no connection -- it is a namespace for statements --
+            # so there is nothing for one request to get two of.
+            issue_repository=IssueRepository(),
+            project_repository=ProjectRepository(),
         ),
         # Built here rather than resolved here: nothing in this function
         # touches the database. Constructing a context is on the path of

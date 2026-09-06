@@ -553,6 +553,7 @@ type Query {
   cycles(teamId: UUID!): [Cycle!]!
   project(id: UUID!): Project
   projects(first: Int! = 50, after: String = null): ProjectConnection!
+  search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
 }
 
 input RegisterInput {
@@ -564,6 +565,11 @@ input RegisterInput {
 type RegisterPayload {
   user: User
   errors: [ValidationErrorType!]!
+}
+
+type SearchResults {
+  issues: [Issue!]!
+  projects: [Project!]!
 }
 
 type Team {

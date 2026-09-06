@@ -413,6 +413,131 @@ class IssueRepository:
 
         return self._to_entity(row)
 
+    async def search(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        query: str,
+        limit: int,
+    ) -> list[IssueEntity]:
+        """The workspace's live issues matching a free-text query, best first.
+
+        `websearch_to_tsquery` and not `to_tsquery`, which is the security half
+        of this statement. `to_tsquery` takes tsquery *syntax* -- `&`, `|`,
+        `!`, `:*` -- so a user's search box would be a small expression
+        language, and an unbalanced quote or a stray `&` raises a
+        SyntaxError from the server rather than finding nothing. The web-search
+        parser instead takes what a person types: bare words are ANDed, `"a b"`
+        is a phrase, `or` and `-` do what they do everywhere else, and no input
+        is a syntax error. Punctuation alone parses to an empty tsquery, which
+        `@@` answers false for every row -- so garbage returns nothing rather
+        than erroring or, worse, matching everything.
+
+        The configuration is named -- `'english'` -- and must stay the same
+        name migrations/011_search.sql generates the column under. A query
+        parsed under one dictionary and a vector built under another agree only
+        by coincidence, and the disagreement is silent: no error, just results
+        that quietly stop containing the row you were looking for.
+
+        The tsquery is spelled out twice rather than joined in from a
+        one-row subquery. `websearch_to_tsquery('english', $2)` over a bound
+        parameter folds to a constant the planner can push into the GIN index;
+        the same expression reached through `FROM ..., websearch_to_tsquery(...)
+        AS q` is a join qualification, which is how the index quietly stops
+        being used.
+
+        Ordered by rank and then by `id DESC`, and the second half is not
+        decoration: `ts_rank` produces ties constantly -- two issues whose
+        titles both contain the term once score identically -- so without a
+        unique tie-break the same query returns the same rows in a different
+        order on each request, which reads to a user as results that shuffle
+        while they look at them.
+
+        `ts_rank`, not `ts_rank_cd`. Both honour the A/B weighting that puts a
+        title match above a description match, which is the ranking this
+        schema actually declares; cover density additionally rewards query
+        terms appearing close together, which is a property of prose and not
+        of issue titles.
+
+        Tenant-scoped in the WHERE clause, exactly as every other read here is,
+        and `archived_at IS NULL` beside it. Both predicates are in the partial
+        composite index migration 011 builds, so neither is a filter applied to
+        rows that had to be fetched first.
+        """
+        rows = await connection.fetch(
+            f"""
+            SELECT
+{ISSUE_COLUMNS}
+            FROM issues
+            WHERE workspace_id = $1
+                AND archived_at IS NULL
+                AND search_vector @@ websearch_to_tsquery('english', $2)
+            ORDER BY
+                ts_rank(
+                    search_vector,
+                    websearch_to_tsquery('english', $2)
+                ) DESC,
+                id DESC
+            LIMIT $3
+            """,
+            scope.workspace_id,
+            query,
+            limit,
+        )
+
+        return [self._to_entity(row) for row in rows]
+
+    async def get_by_identifier(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        team_key: str,
+        number: int,
+    ) -> IssueEntity | None:
+        """The issue a human calls `ENG-42`, or nothing.
+
+        A different lookup from `search` and not a special case of it. An
+        identifier is a key, so this is an equality on two unique indexes --
+        teams_workspace_key_unique for the key, issues_team_number_key for the
+        number, both from migrations/005_team_workflows.sql -- rather than a
+        ranked scan that would have to hope the digits survived stemming.
+
+        The team is resolved by a scalar subquery bound to the SAME `$1` the
+        outer predicate uses. A team from another workspace therefore resolves
+        to NULL and matches no issue, so this cannot be used to read across a
+        tenant boundary even with a key guessed correctly.
+
+        `archived_at IS NULL` for the reason every read here carries it: an
+        archived issue is not in the product, and answering with one because
+        the caller happened to know its identifier would be the one way back
+        in.
+        """
+        row = await connection.fetchrow(
+            f"""
+            SELECT
+{ISSUE_COLUMNS}
+            FROM issues
+            WHERE issues.workspace_id = $1
+                AND issues.archived_at IS NULL
+                AND issues.number = $3
+                AND issues.team_id = (
+                    SELECT teams.id
+                    FROM teams
+                    WHERE teams.workspace_id = $1 AND teams.key = $2
+                )
+            """,
+            scope.workspace_id,
+            team_key,
+            number,
+        )
+
+        if row is None:
+            return None
+
+        return self._to_entity(row)
+
     async def list(
         self,
         connection: asyncpg.Connection,
