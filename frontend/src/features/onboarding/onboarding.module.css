@@ -1,0 +1,378 @@
+/*
+ * Styles for first-run setup.
+ *
+ * Scoped as a CSS module and colocated with the feature. Every colour, space,
+ * radius and size comes from `src/styles/tokens.css` -- there is not one
+ * literal hex value below, which is what makes a theme change a change to the
+ * token file rather than a sweep through features.
+ *
+ * Deliberately absent, because `src/styles/base.css` already owns them:
+ * `box-sizing`, heading and list resets, form-control font inheritance, the
+ * `:focus-visible` ring, and the reduced-motion override. Restating any of
+ * them here is how a codebase ends up with four subtly different focus rings.
+ *
+ * Also absent: buttons, inputs, selects, badges and visually-hidden text.
+ * Those are `components/`.
+ */
+
+/* ----------------------------------------------------------------- frame */
+
+/*
+ * Setup renders outside `AppLayout`, so this is the whole viewport rather
+ * than a pane inside a shell. There is no sidebar to leave room for: the
+ * sidebar's links are built from a workspace slug that does not exist yet.
+ */
+.page {
+  display: flex;
+  min-height: 100vh;
+  justify-content: center;
+  padding: var(--space-9) var(--space-5);
+  background-color: var(--color-bg-sunken);
+}
+
+.frame {
+  width: 100%;
+  max-width: 34rem;
+}
+
+.brand {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  margin-bottom: var(--space-7);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.loading {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-9);
+  color: var(--color-text-muted);
+}
+
+/* ------------------------------------------------------------ step meter */
+
+.steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+  margin-bottom: var(--space-7);
+  padding: 0;
+  list-style: none;
+}
+
+.stepItem {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  color: var(--color-text-faint);
+  font-size: var(--text-xs);
+}
+
+/*
+ * Keyed off `data-state`, which the component sets from the same comparison
+ * that sets `aria-current`. One source for both, so the dot a sighted user
+ * sees and the state a screen reader announces cannot disagree.
+ */
+.stepItem[data-state='current'] {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.stepItem[data-state='done'] {
+  color: var(--color-text-muted);
+}
+
+.stepMarker {
+  display: inline-flex;
+  width: var(--glyph-column);
+  height: var(--glyph-column);
+  align-items: center;
+  justify-content: center;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-full);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.stepItem[data-state='current'] .stepMarker {
+  border-color: var(--color-accent-border);
+  background-color: var(--color-accent);
+  color: var(--color-text-on-accent);
+}
+
+.stepItem[data-state='done'] .stepMarker {
+  border-color: var(--color-success-border);
+  background-color: var(--color-success-subtle);
+  color: var(--color-text-success);
+}
+
+/* ------------------------------------------------------------------ card */
+
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-7);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface);
+  box-shadow: var(--shadow-sm);
+}
+
+.title {
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
+}
+
+.subtitle {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.lede {
+  margin-top: calc(-1 * var(--space-3));
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/* ----------------------------------------------------------------- forms */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+/*
+ * Warning, not error: the value has not been submitted or refused yet, so
+ * this is the form saying "the server will not take that" in advance. Colour
+ * is never the only signal -- the input beside it also carries
+ * `aria-invalid`, and the text says what is wrong.
+ */
+.hintWarning {
+  color: var(--color-text-warning);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+.fieldError {
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+.formError {
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-sm);
+}
+
+.notice {
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-info-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-info-subtle);
+  color: var(--color-info-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.keyInput {
+  font-family: var(--font-mono);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+/*
+ * A link that advances the flow, sized like a button.
+ *
+ * Still an `<a>`, because it goes somewhere: it belongs in the tab order as a
+ * link, is announced as a link, and opens in a new tab on a middle click.
+ * Restyling it as a button is presentation; turning it into one would take
+ * all of that away.
+ */
+.advance {
+  display: inline-flex;
+  height: var(--control-height-md);
+  align-items: center;
+  padding: 0 var(--space-5);
+  border: var(--border-width) solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.advance:hover {
+  background-color: var(--color-accent-hover);
+}
+
+/* ---------------------------------------------------------------- invite */
+
+.inviteForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-subtle);
+}
+
+.issued {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.inviteList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+
+.inviteRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.inviteMeta {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.inviteEmail {
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+}
+
+.inviteRole {
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+/*
+ * The link itself, selectable. `overflow-wrap` rather than a truncation:
+ * this is the one string in the product that cannot be fetched again, so
+ * someone whose clipboard API is unavailable has to be able to read all of
+ * it and select it by hand.
+ */
+.inviteLink {
+  flex: 1 1 100%;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-bg-sunken);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
+
+.copyStatus {
+  color: var(--color-text-success);
+  font-size: var(--text-xs);
+}
+
+/* ---------------------------------------------------------- integrations */
+
+.integrations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.integration {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.integrationHead {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.integrationName {
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+}
+
+.integrationDetail {
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+/*
+ * The one control on this page that leaves the application. Styled as a
+ * secondary button; it stays an `<a href>` because `/github/install` is a
+ * backend endpoint that sets a cookie and 302s to the provider, which the
+ * router cannot do.
+ */
+.connect {
+  display: inline-flex;
+  height: var(--control-height-sm);
+  align-items: center;
+  padding: 0 var(--space-4);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+
+.connect:hover {
+  background-color: var(--color-surface-hover);
+}

@@ -1,0 +1,191 @@
+# Every GraphQL document first-run setup sends.
+#
+# Source file. `npm run graphql:codegen` compiles it against
+# `schema.graphql` into `src/generated/operations.ts`; edit here, never
+# there. Same arrangement as `features/issues/api/operations.graphql`, and
+# for the same reason -- a misspelled field fails generation instead of
+# failing as a server-side validation error in somebody's browser.
+#
+# ## Why there is no page size anywhere below
+#
+# `app/graphql/limits.py` charges a list field its page size times the
+# fields selected under it, and `_page_size` charges **1** for a field that
+# declares no page-size argument. `myWorkspaces` and `teams` declare none --
+# they are bounded by how many workspaces a person belongs to and how many
+# teams a workspace has, not by a cursor -- so both cost one row each here.
+# The whole of this file is far under MAX_COMPLEXITY. That is a fact about
+# these two fields, not a general licence: anything with `first`/`after`
+# needs the literal-page-size treatment the issues documents document.
+#
+# ## What is deliberately absent
+#
+# Any issue, label, cycle or project field. Those belong to other features
+# and have just gained a required `workspaceSlug`; onboarding has no business
+# reading them in any case, because it runs before there is anything to read.
+
+# The two queries below are the entire onboarding state machine.
+#
+# There is no wizard cursor, no `onboarding_step` column and no localStorage
+# key, and that is the design rather than an omission: progress is a
+# *derived* fact about the workspace, so a browser refresh, a second tab, or
+# a different device all compute the same answer from the same server state.
+# A stored cursor is a second source of truth that can disagree with the
+# first, and it disagrees exactly when someone completes a step and the
+# write to the cursor fails.
+
+# Does this person have a workspace yet?
+#
+# Empty means the workspace step is unfinished. Non-empty picks the
+# workspace the rest of onboarding is about -- see `selectOnboardingWorkspace`
+# in ./progress.ts for which one, and why.
+#
+# `createdAt` is selected because that choice is made on it. `role` because
+# `teamCreate` requires admin or owner and the team step says so rather than
+# letting the server refuse a form it should not have offered.
+query OnboardingWorkspaces {
+  myWorkspaces {
+    workspace {
+      id
+      slug
+      name
+    }
+    role
+    createdAt
+  }
+}
+
+# Does that workspace have a team yet?
+#
+# Empty means the team step is unfinished. `workflowStates` is *not*
+# selected: `teamCreate` seeds them and nothing in onboarding renders one,
+# so selecting them would be paying for a fan-out to answer a yes/no
+# question.
+query OnboardingTeams($workspaceSlug: String!) {
+  teams(workspaceSlug: $workspaceSlug) {
+    id
+    key
+    name
+  }
+}
+
+# Create the workspace, and the caller's owner membership with it.
+#
+# Both failure channels are selected because the server uses both and they
+# mean different things: `errors` is expected input being rejected (a slug
+# already taken, a slug in the wrong shape) and arrives inside `data` over
+# an HTTP 200; a top-level GraphQL error is an outage or a bug and arrives
+# as a rejected promise. A form that reads one and not the other either
+# swallows the field messages or reports a database failure as a bad slug.
+mutation OnboardingWorkspaceCreate($input: WorkspaceCreateInput!) {
+  workspaceCreate(input: $input) {
+    workspace {
+      id
+      slug
+      name
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Create the first team, seeded with its workflow states by the server.
+mutation OnboardingTeamCreate($input: TeamCreateInput!) {
+  teamCreate(input: $input) {
+    team {
+      id
+      key
+      name
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Invite one email address.
+#
+# `token` is the raw invitation token and the server returns it **once and
+# never again** -- there is no query that reads it back. There is also no
+# mail delivery, so this response is the only moment the link can be put in
+# front of the person who has to send it. That is why the invite step keeps
+# every token it has been given in component state and shows a copyable link
+# per invitation, and why it says out loud that nothing was emailed.
+mutation OnboardingInvitationCreate($input: InvitationCreateInput!) {
+  invitationCreate(input: $input) {
+    invitation {
+      id
+      email
+      role
+      expiresAt
+    }
+    token
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Redeem a token, which is the other half of "create or join a workspace".
+#
+# This is what makes the link the invite step copies mean something. Without
+# it that link is a 404 and the step is handing people a dead URL, so the
+# route that consumes this (`pages/AcceptInvitePage`) ships alongside the
+# step that produces it rather than being left for later.
+#
+# The server returns one deliberately vague code here -- `INVALID`, "This
+# invitation is no longer valid" -- for a token that is unknown, revoked,
+# expired *or* already accepted. That is not a gap to paper over with a
+# guess: distinguishing them would turn this mutation into an oracle for
+# guessing tokens. The page shows what the server said and nothing more.
+mutation OnboardingInvitationAccept($input: InvitationAcceptInput!) {
+  invitationAccept(input: $input) {
+    workspace {
+      id
+      slug
+      name
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# What the deployment can actually offer for GitHub and Slack.
+#
+# One query for both, because the step shows both cards together and two
+# queries would render one card before the other for no reason.
+#
+# `status` is the whole point and the three values are not
+# interchangeable -- see `pages/IntegrationsStep.tsx`, which turns each into
+# a different piece of UI:
+#
+#   UNCONFIGURED  this deployment holds no credentials for the provider.
+#                 There is nothing to connect to, and `/github/install`
+#                 answers 404 by design rather than explaining which secret
+#                 is missing. The card says unavailable and offers no button.
+#   DISCONNECTED  configured, but this workspace has not connected. Offer it.
+#   CONNECTED     already done; say so and move on.
+#
+# `accountLogin` and `teamName` are selected so a connected card can name
+# what it is connected to. `repositories` is NOT selected: it is a list field
+# that would fan out to answer a question this step does not ask, and picking
+# repositories is a settings screen rather than a setup step.
+query OnboardingIntegrations($workspaceSlug: String!) {
+  githubIntegration(workspaceSlug: $workspaceSlug) {
+    status
+    accountLogin
+  }
+  slackIntegration(workspaceSlug: $workspaceSlug) {
+    status
+    teamName
+  }
+}
