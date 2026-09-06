@@ -122,6 +122,11 @@ async def get_context() -> VectorContext:
         issue_service=IssueService(
             pool=pool,
             repository=IssueRepository(),
+            # Creating an issue allocates a number off the team's counter and
+            # resolves the state it starts in, both inside the issue
+            # service's own transaction. Same instance as below: one request
+            # gets one team service.
+            teams=team_service,
         ),
         membership_service=MembershipService(
             pool=pool,

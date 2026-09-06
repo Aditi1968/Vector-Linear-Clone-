@@ -10,7 +10,9 @@ from uuid import UUID
 from app.domain.issues import IssueEntity
 from app.graphql.schema import build_schema
 from app.repositories.issues import IssueRepository
+from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
+from app.services.teams import TeamService
 
 from tests.conftest import TEST_SCOPE, TEST_TEAM_ID, ExplodingPool, FakeTenant
 
@@ -78,7 +80,13 @@ class BrokenIssueService:
 
 async def test_invalid_input_returns_structured_payload():
     pool = ExplodingPool()
-    context = Context(IssueService(pool=pool, repository=IssueRepository()))
+    context = Context(
+        IssueService(
+            pool=pool,
+            repository=IssueRepository(),
+            teams=TeamService(pool=pool, repository=TeamRepository()),
+        )
+    )
 
     result = await schema.execute(
         ISSUE_CREATE_MUTATION,

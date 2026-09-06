@@ -146,3 +146,43 @@ class TeamService:
             raise TeamNotFoundError()
 
         return number
+
+    async def default_workflow_state_id(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        team_id: UUID,
+    ) -> UUID:
+        """The state a new issue on this team starts in.
+
+        Takes the caller's connection for the same reason
+        `allocate_issue_number` does, though not for the same stakes. There
+        is no lock to hold here -- this is a read -- but the state it
+        returns is written into a row by the caller's transaction, and
+        reading it on a second connection would read outside that
+        transaction's snapshot. A board being rebuilt concurrently could
+        then hand back a state id that no longer exists by the time the
+        insert runs, which the composite foreign key would refuse.
+
+        A team with no `unstarted` state raises rather than returning None.
+        The caller's only use for the answer is an insert into a NOT NULL
+        column, so an Optional would move an unavoidable failure somewhere
+        less informative. It is also a provisioning defect and not a client
+        mistake: 005 seeds five states for every team, so a team without one
+        was either created outside that path or had its board emptied.
+
+        Raises TeamNotFoundError for a team in another workspace, on the
+        same terms as every other method here -- the two must stay
+        indistinguishable.
+        """
+        state_id = await self._repository.find_default_workflow_state_id(
+            connection,
+            scope.workspace_id,
+            team_id,
+        )
+
+        if state_id is None:
+            raise TeamNotFoundError()
+
+        return state_id

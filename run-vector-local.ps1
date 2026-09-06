@@ -28,11 +28,14 @@
        checking that the PID still belongs to the same process it recorded
        (name plus start time), because PIDs are reused.
 
-    3. **It never migrates past 001.** `migrations/001_issues.sql` is applied
-       only when `issues` is absent. If the database turns out to be
-       002-shaped it refuses to run at all rather than trying to repair
-       anything -- see `Assert-DatabaseIsMigration001Shaped` for why that
-       shape breaks `issueCreate`.
+    3. **It migrates only through the repository's own runner, and only to
+       the repository's head.** Every file in `migrations/` is applied by
+       `python -m scripts.apply_migration`, in filename order, so the ledger,
+       the advisory lock and the per-file checksum all apply exactly as they
+       would anywhere else. No version is named anywhere in this script: the
+       set is whatever is on disk. If the ledger and the directory disagree
+       afterwards, it refuses to run rather than repairing anything -- see
+       `Assert-SchemaMatchesRepository`.
 
 .PARAMETER Stop
     Stop the processes and container this launcher started, then remove its
@@ -41,7 +44,7 @@
 .PARAMETER ResetDb
     Destroy and recreate the dedicated `vector-ui-dev` container (and only
     that container) before starting. Use this when the launcher reports that
-    the database is not 001-shaped.
+    the local database and the repository's migrations disagree.
 
 .PARAMETER NoBrowser
     Start everything but do not open a browser window.
@@ -95,18 +98,13 @@ $DatabaseUrl = 'postgresql://' + $DbUser + ':' + $DbPassword +
 $DatabaseUrlForDisplay = 'postgresql://' + $DbUser +
     '@127.0.0.1:' + $DbHostPort + '/' + $DbName
 
-$VenvPython   = Join-Path (Join-Path $RepoRoot '.venv') 'Scripts\python.exe'
-$FrontendDir  = Join-Path $RepoRoot 'frontend'
-$MigrationSql = Join-Path (Join-Path $RepoRoot 'migrations') '001_issues.sql'
+$VenvPython    = Join-Path (Join-Path $RepoRoot '.venv') 'Scripts\python.exe'
+$FrontendDir   = Join-Path $RepoRoot 'frontend'
+$MigrationsDir = Join-Path $RepoRoot 'migrations'
 
 # Deliberately outside the repository: a state file inside it would show up
 # as an untracked change on every run.
 $StateFile = Join-Path $env:TEMP 'vector-local-dev-state.json'
-
-# Where the migration is copied to inside the container. `docker cp` rather
-# than a stdin pipe because PowerShell 5.1's $OutputEncoding defaults to
-# ASCII, which silently mangles any non-ASCII byte on its way into a pipe.
-$ContainerMigrationPath = '/tmp/vector-001_issues.sql'
 
 $BackendHealthUrl  = 'http://127.0.0.1:' + $BackendPort + '/healthz'
 
@@ -193,7 +191,12 @@ function Stop-Launcher {
 function Invoke-Native {
     param(
         [Parameter(Mandatory = $true)][string]$FilePath,
-        [string[]]$Arguments = @()
+        [string[]]$Arguments = @(),
+
+        # Optional, and restored afterwards even on a throw. `python -m` only
+        # resolves this repository's packages from the repository root, so the
+        # migration runner needs it; every other caller is unaffected.
+        [string]$WorkingDirectory
     )
 
     $previous = $ErrorActionPreference
@@ -202,11 +205,19 @@ function Invoke-Native {
     $code = $null
     $raw = $null
 
+    if ($WorkingDirectory) {
+        Push-Location -LiteralPath $WorkingDirectory
+    }
+
     try {
         $raw = & $FilePath @Arguments 2>&1
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previous
+
+        if ($WorkingDirectory) {
+            Pop-Location
+        }
     }
 
     $text = ''
@@ -867,7 +878,7 @@ function Assert-Prerequisites {
 
     $required = @(
         @{ Path = $VenvPython;   What = 'the backend virtualenv interpreter' },
-        @{ Path = $MigrationSql; What = 'migration 001' },
+        @{ Path = $MigrationsDir; What = 'the migrations directory' },
         @{ Path = (Join-Path $FrontendDir 'package.json');      What = 'the frontend manifest' },
         @{ Path = (Join-Path $FrontendDir 'package-lock.json'); What = 'the frontend lockfile' },
         @{ Path = (Join-Path $FrontendDir 'vite.config.ts');    What = 'the Vite config' }
@@ -1088,88 +1099,151 @@ function Wait-ForDatabase {
 }
 
 <#
-    Apply 001, and only 001, and only when `issues` does not exist.
+    Bring the local database up to whatever `migrations/` currently holds.
 
-    There is no migration chain here on purpose. This launcher is a way to
-    look at the running product, not a way to manage schema; migrations are
-    applied through `python -m scripts.apply_migration`, which takes an
-    advisory lock, records a ledger row and wraps the file in one
-    transaction. None of that belongs in a dev launcher.
+    Through the repository's own runner -- `python -m scripts.apply_migration`
+    -- rather than by piping SQL at psql. The runner takes an advisory lock,
+    wraps each file in one transaction, records a ledger row and refuses a
+    file whose text no longer matches the checksum it was applied under. A
+    launcher that shelled SQL straight into the database would reproduce none
+    of that, and would leave a local database the runner then considers
+    untracked.
+
+    Every file is offered every run. An already-applied migration is a no-op
+    the runner reports and exits 0 for, so this is safe to repeat and needs
+    no "which ones are pending" logic of its own.
+
+    Nothing here names a version. The set is whatever is on disk, in filename
+    order, so a migration added tomorrow is applied tomorrow without this
+    function changing -- which is the point: the previous version of this file
+    hardcoded 001, and every migration since would have needed an edit here.
+
+    DATABASE_URL is set for the runner's process only, from the constant at
+    the top of this file. pydantic-settings ranks a real environment variable
+    above anything in `.env`, so the runner cannot reach Neon even if `.env`
+    points there. `.env` is never opened by this script.
 #>
 function Initialize-Schema {
     Write-Step 'Schema'
 
-    $issuesExists = Get-ScalarFromDatabase -Sql "SELECT to_regclass('public.issues') IS NOT NULL"
+    $files = @(Get-ChildItem -LiteralPath $MigrationsDir -Filter '*.sql' |
+        Sort-Object -Property Name)
 
-    if ($issuesExists -eq 't') {
-        Write-Good 'Table "issues" already exists; no migration applied.'
-    } else {
-        Write-Detail 'Applying migrations/001_issues.sql...'
-
-        $copy = Invoke-Native -FilePath 'docker' -Arguments @(
-            'cp', $MigrationSql, ($ContainerName + ':' + $ContainerMigrationPath)
+    if ($files.Count -eq 0) {
+        Stop-Launcher -Reason 'No migrations found.' -Details @(
+            ('Looked in: ' + $MigrationsDir)
         )
-
-        if ($copy.ExitCode -ne 0) {
-            Stop-Launcher -Reason 'Could not copy migration 001 into the container.' -Details @(
-                $copy.Output
-            )
-        }
-
-        $apply = Invoke-ContainerPsql -PsqlArguments @('-f', $ContainerMigrationPath)
-
-        if ($apply.ExitCode -ne 0) {
-            Stop-Launcher -Reason 'Migration 001 failed.' -Details @(
-                $apply.Output,
-                '',
-                'Nothing else has been started. Start from a clean database with:',
-                '  .\run-vector-local.ps1 -ResetDb'
-            )
-        }
-
-        Write-Good 'Applied migration 001.'
     }
 
-    Assert-DatabaseIsMigration001Shaped
+    Write-Detail ('Applying ' + $files.Count + ' migration(s) through scripts.apply_migration...')
+
+    # Saved and restored around the loop so the launcher does not leave the
+    # owner's shell pointing at the throwaway container after it exits.
+    $previousDatabaseUrl = $env:DATABASE_URL
+    $previousEnvironment = $env:ENVIRONMENT
+
+    try {
+        $env:DATABASE_URL = $DatabaseUrl
+        $env:ENVIRONMENT  = 'development'
+
+        foreach ($file in $files) {
+            $result = Invoke-Native -FilePath $VenvPython -Arguments @(
+                '-m', 'scripts.apply_migration', $file.FullName
+            ) -WorkingDirectory $RepoRoot
+
+            if ($result.ExitCode -ne 0) {
+                Stop-Launcher -Reason ('Migration ' + $file.Name + ' failed.') -Details @(
+                    $result.Output,
+                    '',
+                    'Nothing else has been started. Start from a clean database with:',
+                    '  .
+un-vector-local.ps1 -ResetDb'
+                )
+            }
+
+            Write-Detail ('  ' + $result.Output.Trim())
+        }
+    } finally {
+        $env:DATABASE_URL = $previousDatabaseUrl
+        $env:ENVIRONMENT  = $previousEnvironment
+    }
+
+    Assert-SchemaMatchesRepository
 }
 
 <#
-    Refuse to run against a 002-shaped database, and repair nothing.
+    Refuse to run against a database the repository does not agree with.
 
-    `IssueRepository.create` inserts title, description and priority and
-    nothing else. Migration 002 makes `issues.workspace_id` and
-    `issues.team_id` NOT NULL, so on a 002 database every `issueCreate`
-    fails with a not-null violation -- the application starts, the list
-    loads, and only creating an issue breaks. That is a bad way to find out.
+    This replaces an older check that asserted the database was *001-shaped*
+    -- that `issues` carried no tenancy columns. That check existed because
+    the application was not tenancy-aware and a 002 database broke issue
+    creation; it is obsolete now that the application is, and keeping it
+    would refuse every correctly migrated database.
 
-    The response is a refusal rather than a fix. Dropping columns to make
-    a database match what a launcher expects is how data gets destroyed;
-    `-ResetDb` throws away a container the owner already knows is
-    disposable, which is the safe version of the same intent.
+    What replaces it is not another shape assertion. Enumerating expected
+    tables or columns would be a second, hand-maintained copy of the schema
+    that goes stale on the next migration and fails in a way that names the
+    launcher rather than the cause. The ledger already answers the question
+    exactly: the runner records what has been applied, and `--status` reports
+    anything on disk that has not been, plus any applied file whose text has
+    since changed.
+
+    So the assertion is: nothing pending, nothing mismatched. That stays
+    correct for every migration this repository will ever add, without this
+    function knowing any of their names.
+
+    The check is also run through psql against the container, not only
+    through the runner, because the two reach the database by different
+    routes -- if DATABASE_URL had somehow pointed elsewhere, the runner would
+    report a happy ledger for a database this launcher never started.
 #>
-function Assert-DatabaseIsMigration001Shaped {
-    $tenancyColumns = Get-ScalarFromDatabase -Sql (
-        "SELECT coalesce(string_agg(column_name, ', ' ORDER BY column_name), '') " +
-        "FROM information_schema.columns " +
-        "WHERE table_schema = 'public' AND table_name = 'issues' " +
-        "AND column_name IN ('workspace_id', 'team_id')"
-    )
+function Assert-SchemaMatchesRepository {
+    $previousDatabaseUrl = $env:DATABASE_URL
+    $previousEnvironment = $env:ENVIRONMENT
 
-    if ($tenancyColumns -ne '') {
-        Stop-Launcher -Reason 'The local database is not 001-shaped.' -Details @(
-            ('Table "issues" carries tenancy columns: ' + $tenancyColumns),
+    try {
+        $env:DATABASE_URL = $DatabaseUrl
+        $env:ENVIRONMENT  = 'development'
+
+        $status = Invoke-Native -FilePath $VenvPython -Arguments @(
+            '-m', 'scripts.apply_migration', '--status'
+        ) -WorkingDirectory $RepoRoot
+    } finally {
+        $env:DATABASE_URL = $previousDatabaseUrl
+        $env:ENVIRONMENT  = $previousEnvironment
+    }
+
+    if ($status.ExitCode -ne 0) {
+        Stop-Launcher -Reason 'The migration ledger does not match the repository.' -Details @(
+            $status.Output,
             '',
-            'That is migration 002. The backend''s IssueRepository.create does not',
-            'supply workspace_id or team_id, so issueCreate would fail with a',
-            'NOT NULL violation as soon as you tried to create an issue.',
-            '',
-            'This launcher will not downgrade, drop columns or repair anything.',
-            'Recreate the dedicated database with:',
-            '  .\run-vector-local.ps1 -ResetDb'
+            'An applied migration''s text has changed, or a migration could not',
+            'be read. This launcher will not repair a ledger. If the local',
+            'database is disposable, start over with:',
+            '  .
+un-vector-local.ps1 -ResetDb'
         )
     }
 
-    Write-Good 'Database is 001-shaped (no tenancy columns on "issues").'
+    # The same question asked of the container directly: every file on disk
+    # has a ledger row. Counted rather than listed, because the names are the
+    # runner's business and the count is what this needs to compare.
+    $onDisk = @(Get-ChildItem -LiteralPath $MigrationsDir -Filter '*.sql').Count
+    $recorded = Get-ScalarFromDatabase -Sql 'SELECT count(*) FROM schema_migrations'
+
+    if ([int]$recorded -ne $onDisk) {
+        Stop-Launcher -Reason 'The local database is not fully migrated.' -Details @(
+            ('Migrations on disk: ' + $onDisk),
+            ('Recorded in this container''s ledger: ' + $recorded),
+            '',
+            'The runner reported success, so the two are looking at different',
+            'databases. Start over with:',
+            '  .
+un-vector-local.ps1 -ResetDb'
+        )
+    }
+
+    Write-Good ('Database is migrated to the repository''s head (' + $onDisk + ' migrations).')
 }
 
 

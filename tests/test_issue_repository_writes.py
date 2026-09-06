@@ -33,6 +33,10 @@ def inserted_columns(query: str) -> list[str]:
     return [name.strip() for name in names.split(",")]
 
 
+TEST_NUMBER = 7
+TEST_WORKFLOW_STATE_ID = UUID("00000000-0000-7000-8000-0000000000e9")
+
+
 async def test_create_inserts_the_tenancy_columns_and_nothing_generated():
     """id and the timestamps are the database's to assign; the tenant is ours.
 
@@ -49,6 +53,8 @@ async def test_create_inserts_the_tenancy_columns_and_nothing_generated():
         connection,
         scope=TEST_SCOPE,
         team_id=TEST_TEAM_ID,
+        number=TEST_NUMBER,
+        workflow_state_id=TEST_WORKFLOW_STATE_ID,
         title=entity.title,
         description="a description",
         priority=3,
@@ -59,11 +65,13 @@ async def test_create_inserts_the_tenancy_columns_and_nothing_generated():
     assert inserted_columns(query) == [
         "workspace_id",
         "team_id",
+        "number",
+        "workflow_state_id",
         "title",
         "description",
         "priority",
     ]
-    assert "VALUES ($1, $2, $3, $4, $5)" in query
+    assert "VALUES ($1, $2, $3, $4, $5, $6, $7)" in query
 
 
 async def test_create_binds_values_in_declared_column_order():
@@ -74,6 +82,8 @@ async def test_create_binds_values_in_declared_column_order():
         connection,
         scope=TEST_SCOPE,
         team_id=TEST_TEAM_ID,
+        number=TEST_NUMBER,
+        workflow_state_id=TEST_WORKFLOW_STATE_ID,
         title="Ship it",
         description="a description",
         priority=3,
@@ -85,6 +95,8 @@ async def test_create_binds_values_in_declared_column_order():
     assert connection.queries[0]["args"] == (
         TEST_WORKSPACE_ID,
         TEST_TEAM_ID,
+        TEST_NUMBER,
+        TEST_WORKFLOW_STATE_ID,
         "Ship it",
         "a description",
         3,
@@ -108,6 +120,8 @@ async def test_create_writes_the_workspace_it_was_given_not_the_team_s():
         connection,
         scope=TEST_SCOPE,
         team_id=TEST_TEAM_ID,
+        number=TEST_NUMBER,
+        workflow_state_id=TEST_WORKFLOW_STATE_ID,
         title="Ship it",
         description=None,
         priority=0,
@@ -129,6 +143,8 @@ async def test_create_returns_every_column_the_entity_needs():
         connection,
         scope=TEST_SCOPE,
         team_id=TEST_TEAM_ID,
+        number=TEST_NUMBER,
+        workflow_state_id=TEST_WORKFLOW_STATE_ID,
         title=entity.title,
         description=None,
         priority=entity.priority,
@@ -148,6 +164,8 @@ async def test_create_maps_the_returned_row_onto_the_entity():
         connection,
         scope=TEST_SCOPE,
         team_id=TEST_TEAM_ID,
+        number=TEST_NUMBER,
+        workflow_state_id=TEST_WORKFLOW_STATE_ID,
         title=entity.title,
         description=entity.description,
         priority=entity.priority,
@@ -166,6 +184,8 @@ async def test_create_with_null_description_still_binds_every_parameter():
         connection,
         scope=TEST_SCOPE,
         team_id=TEST_TEAM_ID,
+        number=TEST_NUMBER,
+        workflow_state_id=TEST_WORKFLOW_STATE_ID,
         title="Ship it",
         description=None,
         priority=0,
@@ -174,6 +194,8 @@ async def test_create_with_null_description_still_binds_every_parameter():
     assert connection.queries[0]["args"] == (
         TEST_WORKSPACE_ID,
         TEST_TEAM_ID,
+        TEST_NUMBER,
+        TEST_WORKFLOW_STATE_ID,
         "Ship it",
         None,
         0,

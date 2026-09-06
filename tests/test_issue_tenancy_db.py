@@ -47,11 +47,19 @@ from uuid import UUID
 import asyncpg
 import pytest
 
+from app.domain.errors import TeamNotFoundError
 from app.domain.pagination import IssuePage
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
+from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
-from scripts.apply_migration import apply_migration, read_migration
+from app.services.teams import TeamService
+
+from tests.conftest import (
+    apply_all_migrations,
+    reset_schema,
+    seed_workflow_states,
+)
 
 
 pytestmark = pytest.mark.db
@@ -90,15 +98,26 @@ INSERT_WORKSPACE = """
 """
 
 INSERT_TEAM = """
-    INSERT INTO teams (id, workspace_id, name)
-    VALUES ($1, $2, $3)
+    INSERT INTO teams (id, workspace_id, name, key)
+    VALUES ($1, $2, $3, $4)
 """
 
+# Seeded directly rather than through the service, because these rows exist
+# to be *paged over* -- their created_at values are chosen to make the keyset
+# order falsifiable, which an application insert would not let a test pick.
+#
+# 005 made `number` and `workflow_state_id` NOT NULL, so both are supplied
+# here too. The number comes from a per-team counter the fixture keeps, and
+# the state is looked up by category from the issue's own team -- the same
+# rule `TeamRepository.find_default_workflow_state_id` uses, written as a
+# subquery so the seed cannot point an issue at another team's board.
 INSERT_ISSUE = """
     INSERT INTO issues (
         id,
         workspace_id,
         team_id,
+        number,
+        workflow_state_id,
         title,
         description,
         priority,
@@ -106,7 +125,17 @@ INSERT_ISSUE = """
         created_at,
         updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    VALUES (
+        $1, $2, $3, $10,
+        (
+            SELECT id
+            FROM workflow_states
+            WHERE workspace_id = $2 AND team_id = $3 AND type = 'unstarted'
+            ORDER BY position, id
+            LIMIT 1
+        ),
+        $4, $5, $6, $7, $8, $9
+    )
 """
 
 
@@ -231,19 +260,34 @@ async def tenanted(postgres_dsn):
     connection = await asyncpg.connect(postgres_dsn)
 
     try:
-        await connection.execute("DROP TABLE IF EXISTS issues, teams, workspaces")
-        await connection.execute("DROP TABLE IF EXISTS schema_migrations")
-        await connection.execute(read_migration(MIGRATION_001))
-
-        async with connection.transaction():
-            await apply_migration(
-                connection,
-                MIGRATION_002,
-                migrations_dir=MIGRATIONS_DIR,
-            )
+        # The whole chain, not 001 and 002. These suites create issues
+        # through the application, and 005 made `issues.number` and
+        # `issues.workflow_state_id` NOT NULL and put the states they
+        # reference in a table of their own -- so an insert needs every
+        # migration, not the two that introduced the columns it names.
+        # `reset_schema` drops whatever is there rather than a list that
+        # goes stale as the foreign-key graph grows.
+        await reset_schema(connection)
+        await apply_all_migrations(connection)
 
         await connection.execute(INSERT_WORKSPACE, WORKSPACE_B, "acme", "Acme")
-        await connection.execute(INSERT_TEAM, TEAM_B, WORKSPACE_B, "Acme Core")
+        await connection.execute(INSERT_TEAM, TEAM_B, WORKSPACE_B, "Acme Core", "ACME")
+
+        # 005 seeded boards for the teams that existed when it ran; this team
+        # was created after it, so it needs one before an issue can be filed
+        # against it.
+        await seed_workflow_states(connection, WORKSPACE_B, TEAM_B)
+
+        # One counter per team, so numbers are unique within a team --
+        # `issues_team_number_key` is a UNIQUE (team_id, number) and would
+        # refuse a second row sharing one. The value is not asserted
+        # anywhere; it exists because the column is NOT NULL.
+        numbers: dict[UUID, int] = {}
+
+        def next_number(team_id: UUID) -> int:
+            numbers[team_id] = numbers.get(team_id, 0) + 1
+
+            return numbers[team_id]
 
         await connection.executemany(
             INSERT_ISSUE,
@@ -258,6 +302,7 @@ async def tenanted(postgres_dsn):
                     None,
                     row.created_at,
                     row.created_at,
+                    next_number(row.team_id),
                 )
                 for row in SEED
             ],
@@ -267,13 +312,31 @@ async def tenanted(postgres_dsn):
         # scan whose declared order can hand back rows already sorted, which
         # would let a query that lost part of its ORDER BY still look right.
         # Every real table has statistics; this one should too.
+        # Every team's counter moved to its high-water mark, exactly as 005
+        # does after backfilling numbers. Without this the first allocation
+        # on a team returns 1 and collides with a seeded issue -- which is a
+        # fixture defect, not a product one, and reads like neither.
+        await connection.execute(
+            """
+            UPDATE teams
+            SET issue_counter = coalesce(
+                (SELECT max(number) FROM issues WHERE issues.team_id = teams.id),
+                0
+            )
+            """
+        )
+
         await connection.execute("ANALYZE issues")
 
         pool = await asyncpg.create_pool(dsn=postgres_dsn, min_size=1, max_size=2)
 
         try:
             yield Tenanted(
-                service=IssueService(pool=pool, repository=IssueRepository()),
+                service=IssueService(
+                    pool=pool,
+                    repository=IssueRepository(),
+                    teams=TeamService(pool=pool, repository=TeamRepository()),
+                ),
                 connection=connection,
             )
         finally:
@@ -538,10 +601,19 @@ async def test_filing_against_another_workspaces_team_is_refused(tenanted):
     transaction must leave nothing behind. A rejected insert that still
     committed would be the cross-tenant write this constraint exists to
     prevent, arriving with an error message attached.
+
+    The service now refuses this one statement earlier than the foreign key
+    does, and that is worth being precise about. Creating an issue resolves
+    the team's default workflow state first, and that lookup is scoped by
+    workspace, so a team from another tenant resolves to nothing and raises
+    TeamNotFoundError before any INSERT is attempted. That is not a
+    substitute for the constraint and must not become one: the lookup is
+    needed for its value, not as a check, and the second half of this test
+    asserts the server still refuses the pair on its own.
     """
     before = await tenanted.connection.fetchval("SELECT count(*) FROM issues")
 
-    with pytest.raises(asyncpg.ForeignKeyViolationError):
+    with pytest.raises(TeamNotFoundError):
         await tenanted.service.create(
             scope=SCOPE_A,
             team_id=TEAM_B,
@@ -550,4 +622,34 @@ async def test_filing_against_another_workspaces_team_is_refused(tenanted):
             priority=1,
         )
 
+    assert await tenanted.connection.fetchval("SELECT count(*) FROM issues") == before
+
+    # And the constraint itself, with the application stepped over entirely.
+    # Without this, an implementation that dropped `issues_team_fk` and kept
+    # only the scoped lookup would pass the assertion above -- and would then
+    # accept exactly this row from any caller that reached the repository
+    # directly, or lost the race between the lookup and the insert.
+    state_id = await tenanted.connection.fetchval(
+        "SELECT id FROM workflow_states WHERE team_id = $1 LIMIT 1", TEAM_B
+    )
+
+    assert state_id is not None
+
+    with pytest.raises(asyncpg.ForeignKeyViolationError):
+        await tenanted.connection.execute(
+            """
+            INSERT INTO issues (
+                id, workspace_id, team_id, number, workflow_state_id,
+                title, description, priority, created_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, NULL, 1, $7, $7)
+            """,
+            _issue_id(998),
+            WORKSPACE_A,
+            TEAM_B,
+            999,
+            state_id,
+            "Filed across tenants, straight to SQL",
+            _at(12, 9, 0),
+        )
     assert await tenanted.connection.fetchval("SELECT count(*) FROM issues") == before

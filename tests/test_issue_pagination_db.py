@@ -40,7 +40,9 @@ import pytest
 from app.domain.pagination import IssuePage, decode_issue_cursor, encode_issue_cursor
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
+from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
+from app.services.teams import TeamService
 
 from tests.conftest import reset_schema
 
@@ -391,7 +393,11 @@ async def seeded(postgres_dsn):
 @pytest.fixture
 def service(seeded) -> IssueService:
     """The real service over the real repository over the real database."""
-    return IssueService(pool=seeded, repository=IssueRepository())
+    return IssueService(
+        pool=seeded,
+        repository=IssueRepository(),
+        teams=TeamService(pool=seeded, repository=TeamRepository()),
+    )
 
 
 @pytest.fixture

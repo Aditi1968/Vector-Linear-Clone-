@@ -132,6 +132,53 @@ class TeamRepository:
 
         return self._to_team(row)
 
+    async def find_default_workflow_state_id(
+        self,
+        connection: asyncpg.Connection,
+        workspace_id: UUID,
+        team_id: UUID,
+    ) -> UUID | None:
+        """The state a newly created issue starts in, or nothing if the team
+        has none in this workspace.
+
+        Selected by *category* rather than by name or by position, which is
+        the same rule 005 used when it placed every pre-existing issue on a
+        board: an issue that is not complete belongs in `unstarted`. A team
+        may rename 'Todo' or reorder its board, and neither may change where
+        a new issue lands -- so neither the name nor `position = 0` is
+        consulted. Position only breaks a tie.
+
+        005 seeds exactly one state per category per team, so the tie-break
+        is unreachable today. It is written anyway because nothing stops a
+        team from having two `unstarted` states later, and an unordered
+        `LIMIT 1` would then pick a different one per call and per replica.
+
+        Scoped by workspace as well as by team: without the predicate a
+        team id from another tenant would resolve to that tenant's state,
+        and the issue would be created pointing at a board its workspace
+        cannot see.
+        """
+        state_id = await connection.fetchval(
+            """
+            SELECT id
+            FROM workflow_states
+            WHERE workspace_id = $1 AND team_id = $2 AND type = 'unstarted'
+            ORDER BY position, id
+            LIMIT 1
+            """,
+            workspace_id,
+            team_id,
+        )
+
+        if state_id is None:
+            return None
+
+        # Annotated rather than returned inline: asyncpg ships no types, so
+        # fetchval is Any and would silently satisfy any return type.
+        resolved: UUID = state_id
+
+        return resolved
+
     async def list_workflow_states(
         self,
         connection: asyncpg.Connection,

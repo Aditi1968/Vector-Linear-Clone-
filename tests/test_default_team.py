@@ -42,14 +42,15 @@ from app.repositories.workspaces import WorkspaceRepository
 from app.services.issues import IssueService
 from app.services.teams import TeamService
 from app.services.workspaces import WorkspaceService
-from scripts.apply_migration import apply_migration, read_migration
 
 from tests.conftest import (
     TEST_SCOPE,
     TEST_WORKSPACE_ID,
     FakeConnection,
     FakePool,
+    apply_all_migrations,
     normalize,
+    reset_schema,
 )
 
 
@@ -204,16 +205,15 @@ async def wired(postgres_dsn):
     connection = await asyncpg.connect(postgres_dsn)
 
     try:
-        await connection.execute("DROP TABLE IF EXISTS issues, teams, workspaces")
-        await connection.execute("DROP TABLE IF EXISTS schema_migrations")
-        await connection.execute(read_migration(MIGRATION_001))
-
-        async with connection.transaction():
-            await apply_migration(
-                connection,
-                MIGRATION_002,
-                migrations_dir=MIGRATIONS_DIR,
-            )
+        # The whole chain, not 001 and 002. These suites create issues
+        # through the application, and 005 made `issues.number` and
+        # `issues.workflow_state_id` NOT NULL and put the states they
+        # reference in a table of their own -- so an insert needs every
+        # migration, not the two that introduced the columns it names.
+        # `reset_schema` drops whatever is there rather than a list that
+        # goes stale as the foreign-key graph grows.
+        await reset_schema(connection)
+        await apply_all_migrations(connection)
 
         await connection.execute(
             "INSERT INTO workspaces (id, slug, name) VALUES ($1, $2, $3)",
@@ -228,21 +228,23 @@ async def wired(postgres_dsn):
         # workspace predicate returns it.
         await connection.execute(
             """
-            INSERT INTO teams (id, workspace_id, name, created_at)
-            VALUES ($1, $2, $3, TIMESTAMPTZ '2020-01-01 00:00:00+00')
+            INSERT INTO teams (id, workspace_id, name, key, created_at)
+            VALUES ($1, $2, $3, $4, TIMESTAMPTZ '2020-01-01 00:00:00+00')
             """,
             OTHER_TEAM_ID,
             OTHER_WORKSPACE_ID,
             "Acme Core",
+            "ACME",
         )
         await connection.execute(
             """
-            INSERT INTO teams (id, workspace_id, name, created_at)
-            VALUES ($1, $2, $3, TIMESTAMPTZ '2030-01-01 00:00:00+00')
+            INSERT INTO teams (id, workspace_id, name, key, created_at)
+            VALUES ($1, $2, $3, $4, TIMESTAMPTZ '2030-01-01 00:00:00+00')
             """,
             LATER_TEAM_ID,
             BOOTSTRAP_WORKSPACE_ID,
             "Platform",
+            "PLATFORM",
         )
 
         pool = await asyncpg.create_pool(dsn=postgres_dsn, min_size=1, max_size=2)
@@ -257,7 +259,11 @@ async def wired(postgres_dsn):
         try:
             yield (
                 VectorContext(
-                    issue_service=IssueService(pool=pool, repository=IssueRepository()),
+                    issue_service=IssueService(
+                        pool=pool,
+                        repository=IssueRepository(),
+                        teams=team_service,
+                    ),
                     # This fixture predates authentication and exercises the
                     # tenancy path only; no resolver it reaches resolves a
                     # viewer.

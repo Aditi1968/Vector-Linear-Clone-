@@ -7,7 +7,9 @@ import pytest
 from app.domain.errors import ValidationError
 from app.domain.pagination import decode_issue_cursor, encode_issue_cursor
 from app.domain.tenancy import WorkspaceScope
+from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
+from app.services.teams import TeamService
 
 from tests.conftest import (
     TEST_SCOPE,
@@ -22,14 +24,26 @@ def build_service(rows=None):
     pool = FakePool()
     repository = FakeIssueRepository(rows)
 
-    return IssueService(pool=pool, repository=repository), pool, repository
+    return (
+        IssueService(
+            pool=pool,
+            repository=repository,
+            teams=TeamService(pool=pool, repository=TeamRepository()),
+        ),
+        pool,
+        repository,
+    )
 
 
 @pytest.mark.parametrize("first", [0, -1, 101, 1000])
 async def test_invalid_first_fails_before_pool_acquire(first):
     pool = ExplodingPool()
     repository = FakeIssueRepository()
-    service = IssueService(pool=pool, repository=repository)
+    service = IssueService(
+        pool=pool,
+        repository=repository,
+        teams=TeamService(pool=pool, repository=TeamRepository()),
+    )
 
     with pytest.raises(ValidationError) as exc_info:
         await service.list(scope=TEST_SCOPE, first=first, after=None)
@@ -129,7 +143,11 @@ async def test_after_cursor_is_decoded_and_passed_to_repository():
 async def test_invalid_cursor_fails_before_repository_is_called():
     pool = ExplodingPool()
     repository = FakeIssueRepository()
-    service = IssueService(pool=pool, repository=repository)
+    service = IssueService(
+        pool=pool,
+        repository=repository,
+        teams=TeamService(pool=pool, repository=TeamRepository()),
+    )
 
     with pytest.raises(ValidationError) as exc_info:
         await service.list(scope=TEST_SCOPE, first=10, after="not-a-valid-cursor")
@@ -166,7 +184,11 @@ async def test_each_call_carries_its_own_workspace_to_the_repository():
 
 async def test_first_and_cursor_errors_are_collected_together():
     pool = ExplodingPool()
-    service = IssueService(pool=pool, repository=FakeIssueRepository())
+    service = IssueService(
+        pool=pool,
+        repository=FakeIssueRepository(),
+        teams=TeamService(pool=pool, repository=TeamRepository()),
+    )
 
     with pytest.raises(ValidationError) as exc_info:
         await service.list(scope=TEST_SCOPE, first=0, after="bad")

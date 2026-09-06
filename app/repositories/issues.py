@@ -69,11 +69,22 @@ class IssueRepository:
         *,
         scope: WorkspaceScope,
         team_id: UUID,
+        number: int,
+        workflow_state_id: UUID,
         title: str,
         description: str | None,
         priority: int,
     ) -> IssueEntity:
         """Insert one issue into this workspace, against this team.
+
+        `number` and `workflow_state_id` are supplied by the caller rather
+        than defaulted here, and both are required for the same reason the
+        tenancy columns are: 005 made them NOT NULL with no default, so a
+        caller that forgets one is refused by the database instead of
+        writing a row with an invented identifier or an unset status. The
+        number in particular has to come from the caller, because it must be
+        allocated inside the same transaction as this insert -- see
+        `TeamService.allocate_issue_number`.
 
         Both tenancy columns are written explicitly. Neither carries a
         database default, deliberately -- migrations/002_tenancy.sql:102-109
@@ -98,11 +109,13 @@ class IssueRepository:
             INSERT INTO issues (
                 workspace_id,
                 team_id,
+                number,
+                workflow_state_id,
                 title,
                 description,
                 priority
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING
                 id,
                 title,
@@ -114,6 +127,8 @@ class IssueRepository:
             """,
             scope.workspace_id,
             team_id,
+            number,
+            workflow_state_id,
             title,
             description,
             priority,

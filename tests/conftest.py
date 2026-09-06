@@ -6,6 +6,7 @@ import json
 import subprocess
 import time
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import asyncpg
@@ -15,8 +16,13 @@ from app.domain.issues import IssueEntity
 from app.domain.tenancy import WorkspaceScope
 from app.graphql.context import VectorContext
 from app.repositories.issues import IssueRepository
+from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
+from app.services.teams import TeamService
+from scripts.apply_migration import apply_migration
 
+
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 
 BASE_TIME = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
 
@@ -145,6 +151,68 @@ async def reset_schema(connection) -> None:
     # NULL, so there is nothing to drop and nothing to run.
     if statement is not None:
         await connection.execute(statement)
+
+
+async def apply_all_migrations(connection) -> list[str]:
+    """Apply every file in `migrations/`, in filename order, via the runner.
+
+    Globbed rather than listed. A suite that creates an issue needs whatever
+    the schema currently demands of an insert, and that grows: 005 added two
+    NOT NULL columns to `issues` and a `workflow_states` table the insert now
+    resolves against. A fixture naming versions by hand goes stale the day
+    the next migration lands, and it goes stale as a confusing failure in a
+    file about something else.
+
+    Use this wherever the subject is the *application* against the schema.
+    A suite whose subject is one migration should keep applying the prefix it
+    is about -- `tests/test_migration_002_db.py` asserts what 002 built, and
+    running 005 underneath it would change the answer.
+    """
+    applied = []
+
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        async with connection.transaction():
+            await apply_migration(connection, path, migrations_dir=MIGRATIONS_DIR)
+
+        applied.append(path.name)
+
+    return applied
+
+
+# The five states migrations/005_team_workflows.sql puts on every team, in its
+# order and with its categories.
+WORKFLOW_STATE_SEED = (
+    ("Backlog", "backlog", 0, "#bec2c8"),
+    ("Todo", "unstarted", 1, "#e2e2e2"),
+    ("In Progress", "started", 2, "#f2c94c"),
+    ("Done", "completed", 3, "#5e6ad2"),
+    ("Canceled", "canceled", 4, "#95a2b3"),
+)
+
+
+async def seed_workflow_states(connection, workspace_id, team_id) -> None:
+    """Give a team the board 005 would have given it.
+
+    005 seeds `workflow_states` for every team that exists when it runs, so a
+    team a fixture inserts *afterwards* has none -- and an issue on that team
+    cannot be created at all, because `workflow_state_id` is NOT NULL and
+    resolved by category from the team's own states.
+
+    That is not a quirk of the tests: it is what the product will have to do
+    when it grows a "create team" path, and this helper is the smallest
+    honest stand-in until that path exists.
+    """
+    await connection.executemany(
+        """
+        INSERT INTO workflow_states
+            (workspace_id, team_id, name, type, position, color)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        """,
+        [
+            (workspace_id, team_id, name, category, position, color)
+            for name, category, position, color in WORKFLOW_STATE_SEED
+        ],
+    )
 
 
 class UnusedService:
@@ -309,7 +377,19 @@ def exploding_pool() -> ExplodingPool:
 
 @pytest.fixture
 def issue_service(exploding_pool: ExplodingPool) -> IssueService:
-    return IssueService(pool=exploding_pool, repository=IssueRepository())
+    """The service under validation tests, over a pool that refuses to open.
+
+    The team service is built over the *same* exploding pool deliberately.
+    Creating an issue asks it for a workflow state and a number, but only
+    from inside `pool.acquire()` -- so on valid input the acquire is still
+    the first thing that fails, which is what the max-length test reads as
+    proof that validation accepted the input.
+    """
+    return IssueService(
+        pool=exploding_pool,
+        repository=IssueRepository(),
+        teams=TeamService(pool=exploding_pool, repository=TeamRepository()),
+    )
 
 
 @functools.cache

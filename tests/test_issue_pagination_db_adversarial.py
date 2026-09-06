@@ -46,7 +46,9 @@ import pytest
 from app.domain.pagination import IssuePage
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
+from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
+from app.services.teams import TeamService
 
 from tests.conftest import reset_schema
 
@@ -260,7 +262,11 @@ async def _service(dsn: str, settings: dict[str, str]):
     )
 
     try:
-        yield IssueService(pool=pool, repository=IssueRepository())
+        yield IssueService(
+            pool=pool,
+            repository=IssueRepository(),
+            teams=TeamService(pool=pool, repository=TeamRepository()),
+        )
     finally:
         await pool.close()
 

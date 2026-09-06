@@ -1,3 +1,4 @@
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
@@ -13,6 +14,10 @@ from app.domain.pagination import (
 )
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
+
+
+if TYPE_CHECKING:
+    from app.services.teams import TeamService
 
 
 TITLE_MIN_LENGTH = 1
@@ -49,9 +54,24 @@ class IssueService:
         self,
         pool: asyncpg.Pool,
         repository: IssueRepository,
+        teams: "TeamService",
     ):
         self._pool = pool
         self._repository = repository
+
+        # Creating an issue needs two things only the team layer can answer:
+        # the next number on that team's counter, and the state a new issue
+        # starts in. Both have to be decided inside this service's
+        # transaction, so the collaborator is a service rather than a
+        # repository -- see `TeamService.allocate_issue_number` for why the
+        # allocation cannot own a transaction of its own.
+        #
+        # Required, not defaulted. A default would let a context be built
+        # whose `create` fails at the first attempt to file an issue rather
+        # than at construction -- and the tests that never create would go
+        # on passing, which is exactly how the missing number column reached
+        # an integrated database in the first place.
+        self._teams = teams
 
     async def get_by_id(
         self,
@@ -95,10 +115,29 @@ class IssueService:
             # The service owns the transaction boundary: later this block
             # will also carry the audit / sync / outbox writes.
             async with connection.transaction():
+                # Resolved before the number is claimed, deliberately. The
+                # allocation takes a row lock on the team that is held to
+                # the end of this transaction and serialises every other
+                # creation on the same team for that whole span, so the
+                # read that does not need the lock happens outside it.
+                workflow_state_id = await self._teams.default_workflow_state_id(
+                    connection,
+                    scope=scope,
+                    team_id=team_id,
+                )
+
+                number = await self._teams.allocate_issue_number(
+                    connection,
+                    scope=scope,
+                    team_id=team_id,
+                )
+
                 return await self._repository.create(
                     connection,
                     scope=scope,
                     team_id=team_id,
+                    number=number,
+                    workflow_state_id=workflow_state_id,
                     title=title,
                     description=description,
                     priority=priority,
