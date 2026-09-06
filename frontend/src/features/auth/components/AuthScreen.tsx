@@ -3,7 +3,7 @@ import type { ReactNode, RefObject } from 'react'
 
 import { Input, VectorMark } from '../../../components'
 import type { InputProps } from '../../../components'
-import { useAppPaths } from '../../../app/routes/useAppPaths'
+import { publicPaths } from '../../../app/routes/paths'
 import { errorId } from '../lib/formErrors'
 import styles from '../auth.module.css'
 
@@ -27,12 +27,11 @@ export interface AuthScreenProps {
  * navigation to places they cannot go beside the form that would let them.
  */
 export function AuthScreen({ title, lead, children, footer }: AuthScreenProps) {
-  const paths = useAppPaths()
 
   return (
     <div className={styles.screen}>
       <main className={styles.card}>
-        <Link to={paths.landing()} className={styles.brand}>
+        <Link to={publicPaths.landing()} className={styles.brand}>
           <VectorMark className={styles.brandMark} />
           <span>Vector</span>
         </Link>

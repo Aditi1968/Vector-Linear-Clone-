@@ -44,5 +44,8 @@ export function signedInDestination(memberships: readonly ViewerMembership[]): s
     return ONBOARDING_PATH
   }
 
-  return createAppPaths(`/${encodeURIComponent(first.workspace.slug)}`).issues()
+  // The bare slug. `createAppPaths` takes the workspace, not a URL prefix,
+  // and encodes the segment itself -- handing it a pre-built `/slug` yields
+  // `/%2Fslug`, which is a real workspace nobody has.
+  return createAppPaths(first.workspace.slug).issues()
 }

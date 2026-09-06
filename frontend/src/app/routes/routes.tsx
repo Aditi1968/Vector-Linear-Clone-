@@ -1,46 +1,67 @@
 import type { RouteObject } from 'react-router-dom'
 
-import { AppLayout } from '../layout'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
+import { RequireAuth, authRoutes } from '../../features/auth'
+import { onboardingRoutes } from '../../features/onboarding'
+import { AppLayout } from '../layout'
 import { NotFound } from './NotFound'
+import { Placeholder } from './Placeholder'
 import { ROUTE_SEGMENTS, WORKSPACE_SLUG_PARAM } from './paths'
 import { RouteError } from './RouteError'
-import { WorkspaceEntry } from './WorkspaceEntry'
 
 /**
- * The route table.
+ * The route table, composed from three sources.
  *
- * One parent route wrapping every page, with children declared as *relative*
- * segments. That shape is what made the workspace segment a two-line change
- * rather than a sweep: the parent's path became `/:workspaceSlug`,
- * `useAppPaths()` began reading the param, and no feature component moved.
- * The children are written as `issues` and `issues/:issueId` rather than
- * `/issues` and `/issues/:issueId`, so React Router resolves them against
- * whatever the parent turns out to be, and components never see either form
- * because they navigate through `useAppPaths()`.
+ *   - `authRoutes` (`features/auth`): the public surface -- `/`, `/login`,
+ *     `/register`.
+ *   - `onboardingRoutes` (`features/onboarding`): `/onboarding`, the one
+ *     authenticated screen outside a workspace, because it is how you get
+ *     your first one.
+ *   - the workspace shell below: everything else, behind `<RequireAuth>`.
  *
- * `/` is a separate route and not an index of the parent, because it has no
- * workspace to be an index OF -- the shell's own links need a slug. It
- * resolves one and redirects; see ./WorkspaceEntry.
+ * Order is not what decides between them. React Router ranks a static segment
+ * above a dynamic one, so `/login` and `/onboarding` match their own routes
+ * and never `/:workspaceSlug` -- which is also why no workspace may be
+ * slugged `login` or `onboarding`, a constraint the server owns.
  *
- * Exported as data rather than JSX elements so tests can mount a subtree
- * with a memory router without booting the whole application.
+ * ## Why every page is a child of one parent route
+ *
+ * The children are declared as *relative* segments, so React Router resolves
+ * them against `/:workspaceSlug` and the shell mounts once for all of them.
+ * Chrome that unmounts and remounts loses focus and scroll position on every
+ * navigation, which is the difference between an application and a website.
+ * Components never see either form of the path, because they navigate through
+ * `useAppPaths()`.
+ *
+ * ## Screens that are not built yet
+ *
+ * Several entries below render `Placeholder`, and that is deliberate. The
+ * route is real, the URL is the one `paths` builds, the sidebar entry that
+ * reaches it is real, and the screen says outright that it does not exist
+ * yet. Swapping the `element` is the whole job of the agent who builds one --
+ * see ./Placeholder.tsx.
+ *
+ * Exported as data rather than JSX elements so tests can mount a subtree with
+ * a memory router without booting the whole application.
  */
 export const routes: RouteObject[] = [
-  {
-    // Exactly `/`, so it cannot shadow `/:workspaceSlug`. A slug that
-    // happens to be spelled like a segment of this app's own URLs is still
-    // just a slug: `/issues/issues` is a real workspace's issue list.
-    index: true,
-    element: <WorkspaceEntry />,
-    errorElement: <RouteError />,
-  },
+  ...authRoutes,
+  ...onboardingRoutes,
   {
     path: `/:${WORKSPACE_SLUG_PARAM}`,
 
-    // The shell mounts once here, as the router's root element, so chrome
-    // survives navigation between children instead of remounting per route.
-    element: <AppLayout />,
+    /*
+      `RequireAuth` outside the shell rather than inside it. The shell's first
+      act is to ask for `myWorkspaces`, and an unauthenticated caller gets
+      UNAUTHENTICATED from it -- which the shell would then have to render as
+      "could not load your workspaces", a wrong and faintly alarming answer to
+      "you are signed out". Gating above means the request is never sent.
+    */
+    element: (
+      <RequireAuth>
+        <AppLayout />
+      </RequireAuth>
+    ),
 
     // Without this, React Router's own fallback renders the caught error's
     // stack trace into the production bundle. See ./RouteError.
@@ -55,13 +76,106 @@ export const routes: RouteObject[] = [
         index: true,
         element: <IssueListPage />,
       },
+      { path: ROUTE_SEGMENTS.issues, element: <IssueListPage /> },
+      { path: ROUTE_SEGMENTS.issueDetail, element: <IssueDetailPage /> },
       {
-        path: ROUTE_SEGMENTS.issues,
-        element: <IssueListPage />,
+        path: ROUTE_SEGMENTS.myIssues,
+        element: (
+          <Placeholder
+            title="My Issues"
+            description="The issues assigned to you, across every team in this workspace."
+          />
+        ),
       },
       {
-        path: ROUTE_SEGMENTS.issueDetail,
-        element: <IssueDetailPage />,
+        path: ROUTE_SEGMENTS.inbox,
+        element: (
+          <Placeholder
+            title="Inbox"
+            description="Notifications about the issues you are following."
+          />
+        ),
+      },
+      {
+        path: ROUTE_SEGMENTS.projects,
+        element: (
+          <Placeholder
+            title="Projects"
+            description="Every project in this workspace, with its milestones and progress."
+          />
+        ),
+      },
+      {
+        path: ROUTE_SEGMENTS.projectDetail,
+        element: (
+          <Placeholder
+            title="Project"
+            description="One project: its milestones, its teams, and the issues placed in it."
+          />
+        ),
+      },
+      {
+        path: ROUTE_SEGMENTS.team,
+        element: (
+          <Placeholder
+            title="Team"
+            description="One team's overview, its workflow states and its members."
+          />
+        ),
+      },
+      {
+        path: ROUTE_SEGMENTS.teamIssues,
+        element: (
+          <Placeholder
+            title="Team issues"
+            description="One team's issues, grouped by workflow state."
+          />
+        ),
+      },
+      {
+        path: ROUTE_SEGMENTS.cycles,
+        element: (
+          <Placeholder
+            title="Cycles"
+            description="This team's time-boxed iterations, past and planned."
+          />
+        ),
+      },
+      {
+        path: ROUTE_SEGMENTS.cycleDetail,
+        element: (
+          <Placeholder
+            title="Cycle"
+            description="One cycle: its dates, its scope, and the issues in it."
+          />
+        ),
+      },
+      {
+        path: ROUTE_SEGMENTS.members,
+        element: (
+          <Placeholder
+            title="Members"
+            description="Everyone in this workspace, the role each holds, and any outstanding invitations."
+          />
+        ),
+      },
+      {
+        path: ROUTE_SEGMENTS.settings,
+        element: (
+          <Placeholder
+            title="Settings"
+            description="Workspace settings, including the GitHub and Slack integrations."
+          />
+        ),
+      },
+      {
+        path: ROUTE_SEGMENTS.search,
+        element: (
+          <Placeholder
+            title="Search"
+            description="Search this workspace's issues and projects."
+          />
+        ),
       },
       {
         // Inside the parent, so an unknown URL still renders the shell.

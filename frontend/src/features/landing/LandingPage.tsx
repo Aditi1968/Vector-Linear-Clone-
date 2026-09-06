@@ -14,7 +14,7 @@ import {
   TeamIcon,
   VectorMark,
 } from '../../components'
-import { useAppPaths } from '../../app/routes/useAppPaths'
+import { publicPaths } from '../../app/routes/paths'
 import styles from './landing.module.css'
 
 interface Capability {
@@ -95,24 +95,23 @@ const CAPABILITIES: readonly Capability[] = [
  * guarantee than an override.
  */
 export function LandingPage() {
-  const paths = useAppPaths()
 
   return (
     <div className={styles.page}>
       <header className={styles.header}>
-        <Link to={paths.landing()} className={styles.brand} aria-label="Vector home">
+        <Link to={publicPaths.landing()} className={styles.brand} aria-label="Vector home">
           <VectorMark className={styles.brandMark} />
           <span>Vector</span>
         </Link>
 
         <nav className={styles.headerActions} aria-label="Account">
-          <Link to={paths.login()} className={styles.headerLink}>
+          <Link to={publicPaths.login()} className={styles.headerLink}>
             Sign in
           </Link>
           {/* A `<Link>` styled as a button, not a `<Button>` with an onClick.
               Navigation belongs to an anchor: it is what middle-click, "open
               in new tab" and a screen reader's link list all rely on. */}
-          <Link to={paths.register()} className={styles.primaryCta}>
+          <Link to={publicPaths.register()} className={styles.primaryCta}>
             Get started
           </Link>
         </nav>
@@ -134,10 +133,10 @@ export function LandingPage() {
           </p>
 
           <div className={styles.heroActions}>
-            <Link to={paths.register()} className={styles.primaryCta}>
+            <Link to={publicPaths.register()} className={styles.primaryCta}>
               Get started
             </Link>
-            <Link to={paths.login()} className={styles.secondaryCta}>
+            <Link to={publicPaths.login()} className={styles.secondaryCta}>
               Sign in
             </Link>
           </div>
@@ -170,7 +169,7 @@ export function LandingPage() {
             Create a workspace, invite your team, and file the first thing that
             is bothering you. Everything else follows from there.
           </p>
-          <Link to={paths.register()} className={styles.primaryCta}>
+          <Link to={publicPaths.register()} className={styles.primaryCta}>
             Create your account
           </Link>
         </section>

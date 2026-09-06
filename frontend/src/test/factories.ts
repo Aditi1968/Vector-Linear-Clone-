@@ -12,7 +12,13 @@ import type {
   IssueWorkspaceContextData,
   TeamCyclesData,
 } from '../features/issues/api'
-import type { WorkspaceEntryQuery } from '../generated/operations'
+import type {
+  MeQuery,
+  ShellSidebarQuery,
+  WorkspaceEntryQuery,
+  WorkspaceShellQuery,
+} from '../generated/operations'
+import type { WorkspaceRole } from '../generated/schema'
 
 /**
  * Server responses, built against the real operation types.
@@ -377,6 +383,89 @@ export function issueArchived(id: string): IssueArchiveData {
       __typename: 'IssueArchivePayload',
       issue: { __typename: 'Issue', id },
       errors: [],
+    },
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* The application shell                                               */
+/* ------------------------------------------------------------------ */
+
+/** The signed-in user every test renders as. */
+export const VIEWER_ID = '00000000-0000-4000-8000-00000000aa01'
+
+/** One membership, as `WorkspaceShell` selects it. */
+export function membership(
+  slug: string,
+  { name = slug, role = 'MEMBER' }: { name?: string; role?: WorkspaceRole } = {},
+): WorkspaceShellQuery['myWorkspaces'][number] {
+  return {
+    __typename: 'WorkspaceMembership',
+    role,
+    workspace: {
+      __typename: 'Workspace',
+      id: `00000000-0000-4000-8000-ws${slug.padStart(10, '0').slice(0, 10)}`,
+      slug,
+      name,
+    },
+  }
+}
+
+/**
+ * The answer to `WorkspaceShell`: who is signed in, and where they belong.
+ *
+ * The default is one workspace, `WORKSPACE_SLUG`, which is what
+ * `src/test/render.tsx` answers with unless a test says otherwise. The three
+ * cases worth overriding are all shell behaviour: no memberships at all
+ * (which redirects to onboarding), more than one (which is the only condition
+ * under which the switcher exists), and a set that does not contain the slug
+ * in the URL (which is the not-found screen).
+ */
+export function workspaceShellData(
+  memberships: readonly WorkspaceShellQuery['myWorkspaces'][number][] = [
+    membership(WORKSPACE_SLUG, { name: 'Acme' }),
+  ],
+  viewer: WorkspaceShellQuery['me'] = {
+    __typename: 'User',
+    id: VIEWER_ID,
+    name: 'Ada Lovelace',
+    email: 'ada@example.com',
+  },
+): WorkspaceShellQuery {
+  return { me: viewer, myWorkspaces: [...memberships] }
+}
+
+/**
+ * The answer to `ShellSidebar`: the workspace's teams and the Inbox badge.
+ *
+ * Teams come from the server or they do not exist -- there is no default team
+ * anywhere in the frontend -- so a test that wants a team in the rail says so
+ * here.
+ */
+export function shellSidebarData(
+  teams: readonly { id: string; key: string; name: string }[] = [],
+  notificationUnreadCount = 0,
+): ShellSidebarQuery {
+  return {
+    teams: teams.map((team) => ({ __typename: 'Team' as const, ...team })),
+    notificationUnreadCount,
+  }
+}
+
+/**
+ * The signed-in viewer every authenticated screen now needs.
+ *
+ * `RequireAuth` runs the `Me` query before the shell renders anything, so a
+ * test that does not answer it never gets past the guard -- which is what a
+ * signed-out visitor should see, and not what most tests here are about.
+ */
+export function viewerData(): MeQuery {
+  return {
+    me: {
+      __typename: 'User',
+      id: MEMBER_ID,
+      email: 'member@example.test',
+      name: 'Test Member',
     },
   }
 }

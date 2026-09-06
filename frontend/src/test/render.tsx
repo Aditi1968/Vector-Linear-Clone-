@@ -6,10 +6,15 @@ import { StrictMode } from 'react'
 import { RouterProvider, createMemoryRouter } from 'react-router-dom'
 
 import { AppProviders } from '../app/providers/AppProviders'
-import { routes } from '../app/routes'
+import { routes } from '../app/routes/routes'
 import { createTestClient } from './client'
 import { ControlledLink } from './controlledLink'
-import { WORKSPACE_SLUG } from './factories'
+import { WORKSPACE_SLUG, viewerData, workspaceShellData } from './factories'
+import type {
+  MeQuery,
+  ShellSidebarQuery,
+  WorkspaceShellQuery,
+} from '../generated/operations'
 
 /**
  * Mount the real application against a controllable network.
@@ -50,6 +55,40 @@ export interface RenderAppOptions {
    * were sent" an ambiguous question, and most tests here ask exactly that.
    */
   strictMode?: boolean
+  /**
+   * The shell's own two queries, answered as a standing response.
+   *
+   * `AppLayout` will not render a screen until `WorkspaceShell` has told it
+   * the viewer belongs to the workspace in the URL, and the rail asks for
+   * `ShellSidebar` straight after. Neither is what most tests are about, so
+   * both are answered by default and never appear as pending requests -- see
+   * `ControlledLink.answerAlways`.
+   *
+   * `null` leaves one unanswered, which is how the shell's own tests drive
+   * its loading, error and not-found states.
+   *
+   * `sidebar` defaults to `null` and `shell` does not, which is not an
+   * oversight. `ShellSidebar` selects `teams(workspaceSlug:)`, and so does
+   * `WorkspaceTeams` in `features/issues/api` -- same root field, same
+   * arguments, so answering the sidebar's copy writes a cache entry that the
+   * composer's copy then reads instead of going to the network. That is the
+   * right behaviour in the product (one request instead of two) and the wrong
+   * default for a suite where several tests assert on `WorkspaceTeams` being
+   * dispatched. Leaving it unanswered keeps the rail's teams in their loading
+   * state, which no test outside the shell's own looks at.
+   */
+  shell?: WorkspaceShellQuery | null
+  sidebar?: ShellSidebarQuery | null
+  /**
+   * Who is signed in, answered as a standing response.
+   *
+   * `RequireAuth` resolves the viewer before any authenticated screen mounts,
+   * so without this every test below the guard would render the redirect to
+   * `/login` instead of the page it is about. Answered by default for the
+   * same reason `shell` is; `null` leaves it unanswered, which is how the
+   * auth tests drive the signed-out and still-resolving states.
+   */
+  viewer?: MeQuery | null
 }
 
 export interface RenderAppResult extends RenderResult {
@@ -64,8 +103,24 @@ export interface RenderAppResult extends RenderResult {
 export function renderApp({
   initialPath = `/${WORKSPACE_SLUG}/issues`,
   strictMode = false,
+  shell = workspaceShellData(),
+  sidebar = null,
+  viewer = viewerData(),
 }: RenderAppOptions = {}): RenderAppResult {
   const link = new ControlledLink()
+
+  if (viewer !== null) {
+    link.answerAlways('Me', { data: viewer })
+  }
+
+  if (shell !== null) {
+    link.answerAlways('WorkspaceShell', { data: shell })
+  }
+
+  if (sidebar !== null) {
+    link.answerAlways('ShellSidebar', { data: sidebar })
+  }
+
   const client = createTestClient(link)
 
   const router = createMemoryRouter(routes, { initialEntries: [initialPath] })

@@ -1,6 +1,6 @@
 import type { RouteObject } from 'react-router-dom'
 
-import { appPaths } from '../../app/routes/paths'
+import { publicPaths } from '../../app/routes/paths'
 import { LandingPage } from '../landing'
 import { RequireNoAuth } from './guards'
 import { LoginPage } from './pages/LoginPage'
@@ -26,11 +26,11 @@ import { RegisterPage } from './pages/RegisterPage'
  */
 export const authRoutes: RouteObject[] = [
   {
-    path: appPaths.landing(),
+    path: publicPaths.landing(),
     element: <LandingPage />,
   },
   {
-    path: appPaths.login(),
+    path: publicPaths.login(),
     element: (
       <RequireNoAuth>
         <LoginPage />
@@ -38,7 +38,7 @@ export const authRoutes: RouteObject[] = [
     ),
   },
   {
-    path: appPaths.register(),
+    path: publicPaths.register(),
     element: (
       <RequireNoAuth>
         <RegisterPage />

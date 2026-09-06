@@ -1,5 +1,20 @@
+/**
+ * The rail's navigation.
+ *
+ * This is the only scrolling region of the sidebar, which is what keeps the
+ * account block pinned at the foot and keeps its popover out of a clipping
+ * ancestor.
+ */
 .nav {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-6);
+  min-height: 0;
   min-width: 0;
+
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .list {
@@ -11,13 +26,21 @@
   list-style: none;
 }
 
+/* ------------------------------------------------------------------ */
+/* Rows                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One row. 28px tall, 13px type, 8px gutters -- the density of a tool
+ * somebody keeps open all day rather than a page they visit.
+ */
 .link {
   display: flex;
   align-items: center;
   gap: var(--space-4);
 
   min-width: 0;
-  height: var(--control-height-md);
+  height: var(--control-height-sm);
   padding-inline: var(--space-4);
   border-radius: var(--radius-md);
 
@@ -40,14 +63,14 @@
 /**
  * The current page.
  *
- * Three signals, not one: a tinted background, a colour change, and a heavier
- * weight. Colour alone would fail WCAG 1.4.1, and in a sidebar that will grow
- * to a dozen rows the weight change is what makes the active row findable at
- * a glance rather than by comparison.
+ * Three signals, not one: a tinted background, a colour change and a heavier
+ * weight. Colour alone would fail WCAG 1.4.1, and in a rail of a dozen rows
+ * the weight change is what makes the active row findable at a glance rather
+ * than by comparison.
  *
- * The programmatic half of this is `aria-current="page"`, which `NavLink`
- * sets for us -- see SidebarNav.tsx. A screen reader user is told which item
- * is current by that attribute, not by any of these three.
+ * The programmatic half is `aria-current="page"`, which `NavLink` sets -- see
+ * ./NavRow.tsx. A screen-reader user is told which row is current by that
+ * attribute and by none of these three.
  */
 .linkActive {
   background-color: var(--color-surface-selected);
@@ -60,31 +83,226 @@
   color: var(--color-text-accent);
 }
 
+/** A team's own sections, indented to the icon column above them. */
+.nested {
+  padding-inline-start: calc(var(--space-4) + var(--space-7));
+  font-weight: var(--weight-regular);
+}
+
 .icon {
   display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: none;
+  width: 1rem;
   font-size: 1rem;
 }
 
 .label {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 /**
- * Compact layout: the sidebar becomes a horizontal bar, so the nav becomes a
- * row. Nothing is hidden and nothing is reordered -- the DOM order and the
- * visual order stay identical, which is what keeps tab order matching what
- * the user sees (WCAG 2.4.3).
+ * The unread count on Inbox.
+ *
+ * A real number from `notificationUnreadCount` or nothing at all -- the
+ * component does not render this at zero, so there is no empty pill claiming
+ * to be a count. The digits are followed by a visually hidden "unread", so
+ * the link's accessible name reads "Inbox 3 unread" rather than "Inbox 3".
+ */
+.badge {
+  flex: none;
+  min-width: 1.25rem;
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-full);
+
+  background-color: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25rem;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Sections                                                            */
+/* ------------------------------------------------------------------ */
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+/**
+ * A section's name. Not a heading element.
+ *
+ * The rail sits before the page's `<h1>` in the document, so an `<h2>` here
+ * would put a level-2 heading above the only level-1 on the page. The name is
+ * carried programmatically instead: the list below is labelled by this
+ * paragraph's id, so a reader announces "Teams, list, 3 items".
+ */
+.sectionLabel {
+  margin: 0;
+  padding-inline: var(--space-4);
+
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+}
+
+.sectionNote {
+  margin: 0;
+  padding-inline: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.teamsLoading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-inline: var(--space-4);
+}
+
+/* ------------------------------------------------------------------ */
+/* Teams                                                               */
+/* ------------------------------------------------------------------ */
+
+.teamRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.teamLink {
+  flex: 1 1 auto;
+  padding-inline-start: var(--space-2);
+}
+
+/**
+ * The team key -- ENG -- standing in for an icon.
+ *
+ * Monospace and tabular so a column of them lines up, and it is a better glyph
+ * for a team than any drawing of one: it is the prefix the user already reads
+ * in every issue identifier.
+ */
+.teamKey {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+
+  min-width: 1.75rem;
+  height: 1.125rem;
+  padding-inline: var(--space-2);
+  border-radius: var(--radius-sm);
+
+  background-color: var(--color-surface-active);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+}
+
+.disclosure {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+
+  background: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.disclosure:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.chevron {
+  transition: transform var(--duration-fast) var(--ease-standard);
+}
+
+.chevronOpen {
+  transform: rotate(90deg);
+}
+
+.subList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: var(--space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/**
+ * `display: flex` above would otherwise defeat the `hidden` attribute, since
+ * any `display` declaration overrides the UA's `[hidden] { display: none }`.
+ * The attribute is what keeps `aria-controls` pointing at an element that
+ * exists in every state.
+ */
+.subList[hidden] {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Compact layout                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * In the top bar the navigation is a wrapping row of rows rather than a
+ * column, and it does not scroll -- the page does. DOM order and visual order
+ * stay identical, which is what keeps tab order matching what is on screen
+ * (WCAG 2.4.3).
  *
  * `48rem` is `--layout-breakpoint-compact` in src/styles/tokens.css. Media
- * queries cannot read custom properties, so the literal is repeated here;
- * the two must change together.
+ * queries cannot read custom properties, so the literal is repeated here; the
+ * two must change together.
  */
 @media (max-width: 47.999rem) {
+  .nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-5);
+    overflow: visible;
+  }
+
   .list {
     flex-direction: row;
+    flex-wrap: wrap;
     gap: var(--space-2);
+  }
+
+  .section {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-4);
+  }
+
+  /* A team's sections are a second axis of nesting, which a single-row bar has
+   * no way to express. The team row still links to the team, and its sections
+   * are reachable from there. */
+  .subList {
+    display: none;
   }
 }

@@ -2,7 +2,7 @@ import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import type { ReactNode } from 'react'
 
 import { ErrorState, Spinner, VisuallyHidden } from '../../components'
-import { useAppPaths } from '../../app/routes/useAppPaths'
+import { publicPaths } from '../../app/routes/paths'
 import { useSignedInDestination, useViewer } from './api'
 import styles from './auth.module.css'
 
@@ -81,7 +81,6 @@ export interface GuardProps {
 export function RequireAuth({ children }: GuardProps) {
   const { viewer, isLoading, errorMessage, refresh } = useViewer()
   const location = useLocation()
-  const paths = useAppPaths()
 
   if (isLoading) {
     return <SessionPending label="Checking your session" />
@@ -102,7 +101,7 @@ export function RequireAuth({ children }: GuardProps) {
 
     // `replace`, so the back button does not walk into the page they were
     // just refused and bounce them here again.
-    return <Navigate to={paths.login()} replace state={{ from } satisfies ReturnState} />
+    return <Navigate to={publicPaths.login()} replace state={{ from } satisfies ReturnState} />
   }
 
   return <>{children ?? <Outlet />}</>

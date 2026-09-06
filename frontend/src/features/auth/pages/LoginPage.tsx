@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import type { FormEvent } from 'react'
 
 import { Button } from '../../../components'
-import { useAppPaths } from '../../../app/routes/useAppPaths'
+import { publicPaths } from '../../../app/routes/paths'
 import { useLogin } from '../api'
 import { AuthField, AuthScreen, FormAlert } from '../components/AuthScreen'
 import { textField, useAuthFormErrors } from '../lib/formErrors'
@@ -41,7 +41,6 @@ const FIELDS = ['email', 'password'] as const
  * and performs the redirect. One place decides where sign-in lands.
  */
 export function LoginPage() {
-  const paths = useAppPaths()
   const { submit, isSubmitting } = useLogin()
   const { errors, report, formRef, alertRef } = useAuthFormErrors(FIELDS)
   const [handedOff, setHandedOff] = useState(false)
@@ -71,7 +70,7 @@ export function LoginPage() {
       lead="Pick up where your team left off."
       footer={
         <>
-          New to Vector? <Link to={paths.register()}>Create an account</Link>
+          New to Vector? <Link to={publicPaths.register()}>Create an account</Link>
         </>
       }
     >

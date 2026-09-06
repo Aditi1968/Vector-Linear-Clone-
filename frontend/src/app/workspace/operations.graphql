@@ -1,0 +1,74 @@
+# The shell's own documents.
+#
+# Edit here, never in `src/generated/`. `npm run graphql:codegen` builds the
+# types and the `TypedDocumentNode`s from this file plus `schema.graphql`.
+
+# Everything the shell needs before it can render a workspace.
+#
+# ## Why `myWorkspaces` and not `myWorkspace(slug:)`
+#
+# The slug in the URL is a route parameter. It is not an authorization claim,
+# and asking the server about it is the one thing that could turn it into a
+# leak: `myWorkspace(slug:)` answers NOT_FOUND identically for a workspace
+# that does not exist and one the caller may not see -- which is correct, but
+# it still means the client sends the unknown slug and then has to be careful
+# about what it renders from the failure.
+#
+# Asking for the caller's own memberships avoids the question entirely. The
+# server returns the workspaces this user is in; the shell looks for the slug
+# among them. An address for a workspace the viewer is not a member of is
+# never asked about, so there is nothing to leak -- and the same response
+# drives the workspace switcher, so the switcher costs no extra request.
+#
+# `me` rides along because the account menu needs a name and an email, and a
+# second round trip for two strings the same session already implies is a
+# request for no reason.
+#
+# Cost: neither root field declares a page-size argument, so `app/graphql/
+# limits.py` charges each of them once. Nowhere near MAX_COMPLEXITY.
+query WorkspaceShell {
+  me {
+    id
+    name
+    email
+  }
+  myWorkspaces {
+    role
+    workspace {
+      id
+      slug
+      name
+    }
+  }
+}
+
+# The sidebar's own data: the workspace's teams, and the Inbox badge.
+#
+# Separate from `WorkspaceShell` and not merged into it, because both fields
+# here require membership. `teams` returns `[Team!]!` and
+# `notificationUnreadCount` returns `Int!`, so a caller who is not a member
+# gets a NOT_FOUND that propagates through the non-null to `data` -- which
+# would take `myWorkspaces` down with it and leave the shell unable to tell
+# "not a member" from "the server is down". Split, this query is simply not
+# sent until membership has been established.
+#
+# The two fields *are* together, because they are one round trip for one
+# region of the UI, with the same lifetime and the same failure.
+#
+# `ShellSidebar` and not `WorkspaceTeams`: `features/issues/api` already
+# declares an operation by that name -- it selects `id` and `key` to pick a
+# team to file an issue against -- and two operations cannot share a name in
+# one document set. Different consumer, different selection, so this is a
+# second document rather than a shared one; the normalised cache still stores
+# one `Team` entity per id.
+#
+# `workflowStates` is not selected. The sidebar renders a team's name and key;
+# the board that needs its states is another screen's query.
+query ShellSidebar($workspaceSlug: String!) {
+  teams(workspaceSlug: $workspaceSlug) {
+    id
+    key
+    name
+  }
+  notificationUnreadCount(workspaceSlug: $workspaceSlug)
+}

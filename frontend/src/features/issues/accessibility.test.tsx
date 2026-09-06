@@ -37,7 +37,11 @@ async function tabPath(user: UserEvent, steps: number): Promise<string[]> {
     await user.tab()
 
     const active = document.activeElement
-    const label = active === null ? '' : (active.textContent ?? '').trim()
+    // `aria-label` first: the rail's icon-only controls have no text, and
+    // `textContent` on one of those yields '' and then 'BUTTON', which
+    // describes nothing a user would recognise.
+    const label =
+      active?.getAttribute('aria-label') ?? (active?.textContent ?? '').trim()
 
     path.push(label.length > 0 ? label : (active?.tagName ?? '(none)'))
   }
@@ -81,18 +85,30 @@ describe('accessibility', () => {
   it('puts the chrome before the content in the tab order, and skips what cannot be used', async () => {
     const { user } = await renderPopulatedList()
 
-    const path = await tabPath(user, 4)
+    /*
+      Ordering rather than an exact list.
+
+      The rail's contents are the shell's to change -- it grew a collapse
+      toggle, a command affordance and an account menu -- and a test that
+      pinned every stop would fail on every one of those without any of them
+      being a regression. What must not change is the shape: the skip link
+      first, the global create action before the list it files into, and the
+      whole of the chrome before the first row.
+    */
+    const path = await tabPath(user, 16)
 
     // The skip link is first, which is the only position it works from.
     expect(path[0]).toBe('Skip to main content')
-    expect(path[1]).toBe('New issue')
-    expect(path[2]).toBe('Issues')
-    // Then the content, in the order it is read.
-    expect(path[3]).toContain('Alpha')
 
-    // The search affordance is disabled, so no keyboard user can land on it
-    // and wonder why nothing happens.
-    expect(path.some((entry) => entry.includes('Search'))).toBe(false)
+    const createAt = path.indexOf('New issue')
+    const firstRowAt = path.findIndex((entry) => entry.includes('Alpha'))
+
+    expect(createAt).toBeGreaterThan(0)
+    expect(firstRowAt).toBeGreaterThan(createAt)
+
+    // The command affordance is disabled, so no keyboard user can land on it
+    // and wonder why pressing it does nothing.
+    expect(path.some((entry) => entry.includes('Command palette'))).toBe(false)
   })
 
   it('moves focus through the composer in the order it is read', async () => {

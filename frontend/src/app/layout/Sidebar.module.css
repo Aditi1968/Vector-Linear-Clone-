@@ -11,6 +11,12 @@
  * `align-self: flex-start` is required: the default `stretch` would size the
  * item to the full height of a long page, and a sticky element as tall as its
  * container has nowhere to travel and never sticks.
+ *
+ * The rail is a three-part column -- head and actions, then the navigation,
+ * then the account -- and only the *navigation* scrolls. Scrolling the whole
+ * rail would take the account block out of reach on a short window and would
+ * clip the account menu's popover, since an `overflow: auto` ancestor is also
+ * a clipping ancestor.
  */
 .sidebar {
   position: sticky;
@@ -29,16 +35,282 @@
 
   background-color: var(--color-bg-sunken);
   border-right: var(--border-width) solid var(--color-border);
-  /* A rail that will one day hold more sections than fit. */
-  overflow-y: auto;
-  overscroll-behavior: contain;
 }
+
+/**
+ * Collapsed: an icon rail.
+ *
+ * Wide enough for a 2rem control plus the rail's own padding and no wider.
+ * Every label inside is clipped rather than removed -- see `.collapsible` --
+ * so the accessible names survive and only the pixels go.
+ */
+.collapsed {
+  width: 3.25rem;
+  padding-inline: var(--space-3);
+}
+
+/**
+ * Text that the collapsed rail hides.
+ *
+ * The standard clip-rect technique rather than `display: none`. An element
+ * that is not rendered is not in the accessibility tree either, so hiding a
+ * link's label that way would leave the row announced as bare "link"; this
+ * removes it from the page and leaves it in the name.
+ */
+.collapsed .collapsible {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Head: workspace identity and the collapse toggle                    */
+/* ------------------------------------------------------------------ */
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.identity,
+.switcher {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+  padding-inline: var(--space-2);
+}
+
+/* The switcher's trigger is a `Button`, which has its own padding and a
+ * centred content box. Both are wrong for a row that has to align with the
+ * navigation beneath it. */
+.switcher > button {
+  justify-content: flex-start;
+  width: 100%;
+  min-width: 0;
+  padding-inline: var(--space-2);
+  gap: var(--space-4);
+}
+
+.mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+
+  width: 1.375rem;
+  height: 1.375rem;
+  border-radius: var(--radius-md);
+
+  background-color: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: 0.875rem;
+}
+
+.identityName {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-none);
+  text-align: start;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.toggle {
+  flex: none;
+}
+
+/* Collapsed, the head stacks: the mark on one line and the toggle under it,
+ * because 3.25rem does not hold both side by side. */
+.collapsed .head {
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.collapsed .switcher > button {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Global actions: search, command, create                             */
+/* ------------------------------------------------------------------ */
 
 .actions {
   display: flex;
   flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height-sm);
+  padding-inline: var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-family: inherit;
+  line-height: var(--leading-none);
+  text-align: start;
+  text-decoration: none;
+
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.action:hover:not(:disabled) {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.actionActive {
+  background-color: var(--color-surface-selected);
+  color: var(--color-text-accent);
+  font-weight: var(--weight-semibold);
+}
+
+/**
+ * A control whose feature does not exist yet.
+ *
+ * Dashed and dimmed, a treatment used nowhere else in the product, so that it
+ * does not read as a live row that happens to be greyed. It is also
+ * `disabled` in the markup, so no pointer and no keyboard can reach it -- the
+ * visual treatment is the redundant half, not the load-bearing one.
+ */
+.actionPending {
+  border: var(--border-width) dashed var(--color-border-strong);
+  color: var(--color-text-muted);
+  cursor: default;
+}
+
+.actionIcon {
+  display: inline-flex;
+  flex: none;
+  font-size: 1rem;
+}
+
+.actionLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.actionHint {
+  display: inline-flex;
+  flex: none;
+  gap: var(--space-1);
+}
+
+.collapsed .action {
+  justify-content: center;
+  padding-inline: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Account                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pinned to the foot of the rail by `margin-top: auto` rather than by
+ * `position: absolute`, so it still participates in layout and the navigation
+ * above it gets whatever height is left.
+ */
+.account {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-top: auto;
+  padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--color-border-subtle);
+}
+
+.theme {
+  width: 100%;
+}
+
+.accountRow {
+  display: flex;
+  align-items: center;
   gap: var(--space-4);
   min-width: 0;
+  padding-inline: var(--space-2);
+}
+
+.accountText {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.accountName {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.accountEmail {
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.accountMenu {
+  flex: none;
+}
+
+/**
+ * The account panel opens upward.
+ *
+ * It is the last thing in the rail, so `Menu`'s default -- below the trigger
+ * -- would put it off the bottom of the viewport. Overridden from here rather
+ * than by adding a `placement` prop to `Menu`, because one consumer needing
+ * one flip is not an API; the attribute selector targets the panel `Menu`
+ * renders without this file having to know its class name.
+ */
+.accountMenu > [role='menu'] {
+  inset-block-start: auto;
+  inset-block-end: calc(100% + var(--space-2));
+}
+
+.collapsed .accountRow {
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-inline: 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -46,33 +318,36 @@
 /* ------------------------------------------------------------------ */
 
 /**
- * Below the breakpoint the rail becomes a bar across the top and the shell
- * stacks. See AppLayout.module.css for the reasoning behind choosing this
- * over an off-canvas drawer.
+ * Below the breakpoint the rail becomes a bar across the top of the page.
  *
- * It becomes `position: static` here on purpose. Both the rail and the page
- * header want `top: 0`, and two sticky elements at the same offset overlap.
- * Stacking them would mean the header's offset had to equal the bar's height
- * -- a second magic constant that breaks whenever the bar's content changes
- * height. Letting the bar scroll away leaves exactly one sticky element on
- * screen, and the page header is the one worth keeping.
+ * `position: static` here on purpose: both the bar and a page header want
+ * `top: 0`, and two sticky elements at the same offset overlap. Letting the
+ * bar scroll away leaves exactly one sticky element on screen, and the page
+ * header is the one worth keeping.
  *
- * `48rem` is `--layout-breakpoint-compact` in src/styles/tokens.css. Media
- * queries cannot read custom properties, so the literal is repeated here;
- * the two must change together.
+ * The bar is a two-row grid rather than a drawer. A drawer needs a focus
+ * trap, `inert` on the content behind it, a scroll lock, Escape handling and
+ * focus restoration -- an accessibility surface the size of the rest of this
+ * shell -- and it would make the collapse state mean something different in
+ * each layout. Here it means the same thing: the navigation is showing, or it
+ * is not. `--layout-breakpoint-compact` is 48rem in src/styles/tokens.css;
+ * media queries cannot read custom properties, so the literal is repeated
+ * here and the two must change together.
  */
 @media (max-width: 47.999rem) {
-  .sidebar {
+  .sidebar,
+  .collapsed {
     position: static;
-    /* Required, not redundant. `.shell` becomes a column at this breakpoint,
-     * which flips the flex cross axis to horizontal -- so the
-     * `align-self: flex-start` that keeps the rail stickable in the wide
-     * layout would here shrink the bar to the width of its contents. */
+    /* Required, not redundant: `.shell` becomes a column at this breakpoint,
+     * which flips the flex cross axis, so the `align-self: flex-start` that
+     * makes the rail stickable in the wide layout would shrink the bar to the
+     * width of its contents here. */
     align-self: stretch;
 
-    flex-direction: row;
+    display: grid;
+    grid-template-columns: auto 1fr auto;
     align-items: center;
-    gap: var(--space-4);
+    gap: var(--space-4) var(--space-5);
 
     width: auto;
     height: auto;
@@ -80,25 +355,66 @@
 
     border-right: none;
     border-bottom: var(--border-width) solid var(--color-border);
+  }
+
+  /* Everything the wide rail hides when collapsed is visible again here: a
+   * bar has the width for labels even when the navigation under it is shut. */
+  .collapsed .collapsible {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
     overflow: visible;
+    clip-path: none;
+  }
+
+  .collapsed .head,
+  .collapsed .accountRow {
+    flex-direction: row;
+  }
+
+  .collapsed .action,
+  .collapsed .switcher > button {
+    justify-content: flex-start;
+    padding-inline: var(--space-4);
+  }
+
+  .head {
+    grid-column: 1;
   }
 
   .actions {
+    grid-column: 2;
     flex-direction: row;
     align-items: center;
-    /* Pushes the actions -- and the nav that follows them in the DOM -- to
-     * the trailing edge, leaving the brand at the leading edge. An auto
-     * margin rather than `order`, because `order` would separate visual
-     * position from tab order (WCAG 2.4.3) while this does not: the DOM
-     * order and the reading order stay identical in both layouts. */
-    margin-inline-start: auto;
+    justify-content: flex-end;
   }
 
-  /* `Button`'s `fullWidth` is right in a vertical rail and wrong in a
-   * horizontal bar. Two classes plus an element beat the single class of
-   * `.fullWidth`, so this wins regardless of the order the two modules end
-   * up in the bundle -- which is not something to leave to chance. */
-  .actions > button {
+  .action {
     width: auto;
+  }
+
+  .account {
+    grid-column: 3;
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  /* The theme control is a third row's worth of width in a bar that has none.
+   * It is reachable from the same place it always was once the window is
+   * wide enough; nothing else in the shell is lost. */
+  .account .theme {
+    display: none;
+  }
+
+  /* The navigation is the second row, spanning the bar, and it is what the
+   * toggle opens and closes. */
+  .sidebar > nav {
+    grid-column: 1 / -1;
+  }
+
+  .collapsed > nav {
+    display: none;
   }
 }

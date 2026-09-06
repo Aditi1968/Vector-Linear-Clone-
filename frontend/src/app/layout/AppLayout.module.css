@@ -135,3 +135,122 @@
     flex-direction: column;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Pre-workspace states                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The rail's silhouette while `myWorkspaces` is in flight.
+ *
+ * Deliberately the same width and padding as the real rail, so the layout
+ * does not jump when the answer arrives. It is not the `Sidebar` component:
+ * that one needs a workspace, and this is the state before there is one.
+ */
+.skeletonRail {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--space-5);
+
+  width: var(--layout-sidebar-width);
+  height: 100dvh;
+  padding: var(--space-5) var(--space-4);
+
+  background-color: var(--color-bg-sunken);
+  border-right: var(--border-width) solid var(--color-border);
+}
+
+.skeletonPage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--layout-content-padding-block) var(--layout-content-padding-inline);
+}
+
+/**
+ * A screen shown *instead of* the shell.
+ *
+ * The error and not-found states render no rail, because a rail is built from
+ * a workspace and neither of them has one. It carries the `main` landmark
+ * itself, so the document still has exactly one.
+ */
+.standalone {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  padding: var(--space-8) var(--space-6);
+}
+
+.notFound {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-5);
+  max-width: 32rem;
+}
+
+.notFoundMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-lg);
+
+  background-color: var(--color-accent);
+  color: var(--color-text-on-accent);
+  font-size: 1.125rem;
+}
+
+.notFoundTitle {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.notFoundBody {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+}
+
+.notFoundSlug {
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.notFoundList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.notFoundListLabel {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.notFoundLinks {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+}

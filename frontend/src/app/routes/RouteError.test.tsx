@@ -6,7 +6,11 @@ import { describe, expect, it, vi } from 'vitest'
 import { AppProviders } from '../providers/AppProviders'
 import { createTestClient } from '../../test/client'
 import { ControlledLink } from '../../test/controlledLink'
-import { routes } from './index'
+import { shellSidebarData, workspaceShellData,
+  viewerData,
+} from '../../test/factories'
+import { WORKSPACE_SLUG_PARAM } from './paths'
+import { routes } from './routes'
 
 /**
  * The route error boundary.
@@ -61,17 +65,16 @@ function Exploding(): never {
 
 /** The real table, plus one route that fails inside the workspace shell. */
 function routesWith(extra: RouteObject): RouteObject[] {
-  // The workspace route, not `routes[0]`. The table's first entry is the
-  // index route that resolves `/` to a workspace, and it has no children to
-  // hang a failing route off -- the shell is the one under `/:workspaceSlug`.
-  // `RouteObject` is a union and an index route may not have children, so
-  // the predicate is what makes the spread below type-check as well as what
-  // picks the right route: TypeScript infers it and narrows `shell` to the
-  // non-index member.
-  const shell = routes.find((route) => route.index !== true)
+  // Selected by path rather than by position. The table is composed from the
+  // auth, onboarding and workspace route sets, so an index into it is a claim
+  // about which feature is listed first -- and the shell is the one under
+  // `/:workspaceSlug`, whichever order they end up in.
+  const shell = routes.find(
+    (route) => route.index !== true && route.path === `/:${WORKSPACE_SLUG_PARAM}`,
+  )
 
-  if (shell === undefined) {
-    throw new Error('The route table has no non-index shell route')
+  if (shell === undefined || shell.index === true) {
+    throw new Error('The route table has no workspace shell route')
   }
 
   return [
@@ -83,8 +86,20 @@ function routesWith(extra: RouteObject): RouteObject[] {
   ]
 }
 
-function renderAt(table: RouteObject[], path: string): void {
-  const client = createTestClient(new ControlledLink())
+async function renderAt(table: RouteObject[], path: string): Promise<void> {
+  const link = new ControlledLink()
+
+  // The shell will not render a child until it knows the viewer belongs to
+  // the workspace in the URL, so the throwing route below would never mount
+  // without these. See `ControlledLink.answerAlways`.
+  // `RequireAuth` resolves the viewer before the shell mounts at all, so
+  // without this the guard renders its redirect and the throwing route below
+  // never runs.
+  link.answerAlways('Me', { data: viewerData() })
+  link.answerAlways('WorkspaceShell', { data: workspaceShellData() })
+  link.answerAlways('ShellSidebar', { data: shellSidebarData() })
+
+  const client = createTestClient(link)
   const router = createMemoryRouter(table, { initialEntries: [path] })
 
   render(
@@ -92,15 +107,19 @@ function renderAt(table: RouteObject[], path: string): void {
       <RouterProvider router={router} />
     </AppProviders>,
   )
+
+  // The shell renders skeletons until `WorkspaceShell` has answered, so the
+  // throwing route below has not mounted yet at the end of `render`.
+  await link.idle()
 }
 
 describe('RouteError', () => {
-  it('reports a thrown error without revealing anything about it', () => {
+  it('reports a thrown error without revealing anything about it', async () => {
     // React logs every error an boundary catches, and `RouteError` logs the
     // detail itself. Silenced so the run stays readable, and asserted below.
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
+    await renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
 
     // Something controlled rendered: not a blank page, and not a crash that
     // took the render down with it.
@@ -149,7 +168,7 @@ describe('RouteError', () => {
   it('shows the status of a thrown route response', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    renderAt(
+    await renderAt(
       routesWith({
         path: 'missing',
         loader: () => {
@@ -181,10 +200,10 @@ describe('RouteError', () => {
     expect(document.body.textContent).not.toContain('Unexpected Application Error')
   })
 
-  it('renders standalone rather than inside the shell, deliberately', () => {
+  it('renders standalone rather than inside the shell, deliberately', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
+    await renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
 
     /*
       `RouteError` owns its own `<main>`, and that is *not* the duplicate

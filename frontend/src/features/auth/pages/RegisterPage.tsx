@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import type { FormEvent } from 'react'
 
 import { Button } from '../../../components'
-import { useAppPaths } from '../../../app/routes/useAppPaths'
+import { publicPaths } from '../../../app/routes/paths'
 import { useRegister } from '../api'
 import { AuthField, AuthScreen, FormAlert } from '../components/AuthScreen'
 import { textField, useAuthFormErrors } from '../lib/formErrors'
@@ -35,7 +35,6 @@ const PASSWORD_MIN_LENGTH = 8
  * case.
  */
 export function RegisterPage() {
-  const paths = useAppPaths()
   const { submit, isSubmitting } = useRegister()
   const { errors, report, formRef, alertRef } = useAuthFormErrors(FIELDS)
   const [handedOff, setHandedOff] = useState(false)
@@ -62,7 +61,7 @@ export function RegisterPage() {
       lead="Start tracking work in minutes. No credit card, no trial clock."
       footer={
         <>
-          Already have an account? <Link to={paths.login()}>Sign in</Link>
+          Already have an account? <Link to={publicPaths.login()}>Sign in</Link>
         </>
       }
     >

@@ -2,7 +2,7 @@ import { useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useApolloClient, useMutation } from '@apollo/client/react'
 
-import { appPaths } from '../../../app/routes/paths'
+import { publicPaths } from '../../../app/routes/paths'
 import { LogoutDocument } from './documents'
 
 export interface UseLogoutResult {
@@ -51,7 +51,7 @@ export function useLogout(): UseLogoutResult {
       // Nothing to report and nowhere to report it: the user asked to be
       // signed out, and the client-side half of that happens regardless.
     } finally {
-      void navigate(appPaths.landing(), { replace: true })
+      void navigate(publicPaths.landing(), { replace: true })
       await client.clearStore()
     }
   }, [client, mutate, navigate])
