@@ -30,6 +30,35 @@ FIRST_MIN = 1
 FIRST_MAX = 100
 
 
+# The two foreign keys migrations/009_projects.sql puts on `issues`, and the
+# field error each one means. Keyed on the constraint name because both raise
+# the same exception class and point a client at different halves of its
+# request.
+#
+# Neither distinguishes "belongs to another workspace" from "does not exist":
+# a project in another tenant breaks `issues_project_fk` exactly as a
+# nonexistent id does, and both answer NOT_FOUND. That is the point -- telling
+# them apart would confirm the existence of a resource the caller cannot see.
+PROJECT_CONSTRAINT_ERRORS: dict[str, ValidationIssue] = {
+    "issues_project_fk": ValidationIssue(
+        field="projectId",
+        code="NOT_FOUND",
+        message="Project not found",
+    ),
+    "issues_milestone_fk": ValidationIssue(
+        field="milestoneId",
+        code="NOT_FOUND",
+        message="Milestone not found in this project",
+    ),
+}
+
+ISSUE_NOT_FOUND = ValidationIssue(
+    field="issueId",
+    code="NOT_FOUND",
+    message="Issue not found",
+)
+
+
 class IssueService:
     """Business rules for issues.
 
@@ -143,6 +172,60 @@ class IssueService:
                     priority=priority,
                 )
 
+    async def set_project(
+        self,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+        project_id: UUID | None,
+        milestone_id: UUID | None,
+    ) -> IssueEntity:
+        """Move one issue into a project and milestone, or out of both.
+
+        Both are supplied together, and passing None for both is how an issue
+        leaves a project. There is no separate "clear" operation because there
+        is no separate state: an issue's place in the plan is one pair of
+        values, and the schema refuses three of the four combinations of
+        present and absent.
+
+        The one combination this can rule out without asking the database --
+        a milestone with no project -- is checked here, because it is a
+        property of the arguments alone. Nothing else is: whether the project
+        is in this workspace, and whether the milestone belongs to that
+        project, are facts about rows that can change between a check and a
+        write, so they are left to `issues_project_fk` and
+        `issues_milestone_fk` and translated from the constraint they name.
+
+        `issues_milestone_requires_project` is deliberately absent from that
+        translation. If the pre-check above is right, the constraint cannot
+        fire; if it ever does, the two disagree, and that is a defect to
+        surface as one rather than to report to a client as bad input.
+        """
+        self._validate_set_project(project_id=project_id, milestone_id=milestone_id)
+
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                try:
+                    issue = await self._repository.set_project(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                        project_id=project_id,
+                        milestone_id=milestone_id,
+                    )
+                except asyncpg.ForeignKeyViolationError as error:
+                    mapped = PROJECT_CONSTRAINT_ERRORS.get(error.constraint_name or "")
+
+                    if mapped is None:
+                        raise
+
+                    raise ValidationError([mapped]) from None
+
+        if issue is None:
+            raise ValidationError([ISSUE_NOT_FOUND])
+
+        return issue
+
     async def list(
         self,
         *,
@@ -224,6 +307,31 @@ class IssueService:
             raise ValidationError(issues)
 
         return cursor
+
+    @staticmethod
+    def _validate_set_project(
+        *,
+        project_id: UUID | None,
+        milestone_id: UUID | None,
+    ) -> None:
+        """The one thing about this operation the arguments alone decide.
+
+        A milestone belongs to a project; asking for one without the other is
+        not a lookup that might succeed, it is a request that cannot be
+        satisfied by any state of the database. Rejecting it here means no
+        connection is acquired for it, which is the same property
+        `_validate_create` gives the create path.
+        """
+        if milestone_id is not None and project_id is None:
+            raise ValidationError(
+                [
+                    ValidationIssue(
+                        field="milestoneId",
+                        code="PROJECT_REQUIRED",
+                        message="A milestone can only be set together with its project",
+                    )
+                ]
+            )
 
     @staticmethod
     def _validate_create(*, title: str, priority: int) -> None:

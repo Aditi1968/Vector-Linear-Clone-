@@ -1,0 +1,740 @@
+from collections.abc import Sequence
+from datetime import date, datetime
+from uuid import UUID
+
+import asyncpg
+
+from app.domain.projects import ProjectEntity, ProjectMilestoneEntity
+from app.domain.tenancy import WorkspaceScope
+
+
+class ProjectRepository:
+    """SQL access for `projects`, `project_teams` and `project_milestones`.
+
+    The repository receives a connection from the service layer. It never
+    acquires connections, never touches the pool, and never owns a
+    transaction. `asyncpg.Record` never escapes this class.
+
+    Every statement is scoped to one workspace, and the scope arrives as a
+    required keyword argument -- the shape IssueRepository establishes, for
+    the reasons stated there. Two of them matter more here than they do for
+    issues, because a project is reachable through three tables: a caller
+    cannot get to any of them without having decided which tenant it is
+    addressing, and `scope=` appears literally at every call site, so "does
+    this query cross tenants" is answered by reading the call.
+
+    Nothing here checks a project against its workspace before writing to a
+    child table. Every foreign key migrations/009_projects.sql declares is
+    composite over `workspace_id`, so PostgreSQL refuses a cross-workspace
+    association as part of the statement itself. A SELECT-first check would
+    be a second, weaker copy of that rule -- weaker because it is a separate
+    statement the row can change between, and weaker because it would then be
+    two places that have to agree.
+    """
+
+    # ----------------------------------------------------------------- reads
+
+    async def get_by_id(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+    ) -> ProjectEntity | None:
+        """The project with this id in this workspace, or nothing.
+
+        The workspace is part of the lookup rather than a check applied
+        afterwards, so a project belonging to another tenant produces exactly
+        the same answer as an id that exists nowhere. A caller holding a
+        guessed or leaked id learns nothing by asking.
+
+        The team ids come back in the same statement. They are bound to the
+        same `$1`/`$2` the outer predicate uses rather than correlated to the
+        outer row, which is what makes this a single index lookup on
+        project_teams_pkey's leading columns.
+        """
+        row = await connection.fetchrow(
+            """
+            SELECT
+                id,
+                name,
+                description,
+                state,
+                target_date,
+                created_at,
+                updated_at,
+                (
+                    SELECT COALESCE(
+                        array_agg(pt.team_id ORDER BY pt.team_id),
+                        ARRAY[]::UUID[]
+                    )
+                    FROM project_teams pt
+                    WHERE pt.workspace_id = $1 AND pt.project_id = $2
+                ) AS team_ids
+            FROM projects
+            WHERE workspace_id = $1 AND id = $2
+            """,
+            scope.workspace_id,
+            project_id,
+        )
+
+        if row is None:
+            return None
+
+        return self._to_project(row)
+
+    async def get_many_by_ids(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_ids: Sequence[UUID],
+    ) -> list[ProjectEntity]:
+        """Every project from this workspace whose id is in the list.
+
+        The batching half of `Issue.project`. Ids the workspace does not own
+        are simply absent from the result -- not an error and not a hole the
+        caller can distinguish from an id that exists nowhere, which is the
+        same property `get_by_id` has and for the same reason.
+
+        `= ANY($2)` rather than an IN list built by string interpolation: the
+        array is one bound parameter whatever its length, so the statement
+        text is constant and there is nothing for a caller to inject into.
+        """
+        rows = await connection.fetch(
+            """
+            SELECT
+                id,
+                name,
+                description,
+                state,
+                target_date,
+                created_at,
+                updated_at,
+                (
+                    SELECT COALESCE(
+                        array_agg(pt.team_id ORDER BY pt.team_id),
+                        ARRAY[]::UUID[]
+                    )
+                    FROM project_teams pt
+                    WHERE pt.workspace_id = projects.workspace_id
+                        AND pt.project_id = projects.id
+                ) AS team_ids
+            FROM projects
+            WHERE workspace_id = $1 AND id = ANY($2::UUID[])
+            """,
+            scope.workspace_id,
+            list(project_ids),
+        )
+
+        return [self._to_project(row) for row in rows]
+
+    async def list(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        limit: int,
+        after_created_at: datetime | None,
+        after_id: UUID | None,
+    ) -> list[ProjectEntity]:
+        """Keyset page of one workspace's projects, newest first.
+
+        `limit` is expected to already be `first + 1` so the caller can detect
+        a following page. No OFFSET: the cursor is a row-value comparison, and
+        `workspace_id` leads both statements so a page is served by the
+        leading columns of projects_workspace_created_at_id_idx.
+
+        The tenant predicate is ANDed with the cursor rather than folded into
+        it. Widening the row-value comparison to
+        `(workspace_id, created_at, id) < (...)` would put workspaces into the
+        ordering, which is how a page walk falls out of one tenant and into
+        whichever one sorts next.
+
+        The team-id aggregate is correlated here, because each row needs its
+        own. That is one index-only lookup per project rather than a second
+        round trip per project, which is the tradeoff worth taking for the one
+        field this feature exists to expose.
+        """
+        if after_created_at is None or after_id is None:
+            rows = await connection.fetch(
+                """
+                SELECT
+                    id,
+                    name,
+                    description,
+                    state,
+                    target_date,
+                    created_at,
+                    updated_at,
+                    (
+                        SELECT COALESCE(
+                            array_agg(pt.team_id ORDER BY pt.team_id),
+                            ARRAY[]::UUID[]
+                        )
+                        FROM project_teams pt
+                        WHERE pt.workspace_id = projects.workspace_id
+                            AND pt.project_id = projects.id
+                    ) AS team_ids
+                FROM projects
+                WHERE workspace_id = $1
+                ORDER BY created_at DESC, id DESC
+                LIMIT $2
+                """,
+                scope.workspace_id,
+                limit,
+            )
+        else:
+            rows = await connection.fetch(
+                """
+                SELECT
+                    id,
+                    name,
+                    description,
+                    state,
+                    target_date,
+                    created_at,
+                    updated_at,
+                    (
+                        SELECT COALESCE(
+                            array_agg(pt.team_id ORDER BY pt.team_id),
+                            ARRAY[]::UUID[]
+                        )
+                        FROM project_teams pt
+                        WHERE pt.workspace_id = projects.workspace_id
+                            AND pt.project_id = projects.id
+                    ) AS team_ids
+                FROM projects
+                WHERE workspace_id = $1 AND (created_at, id) < ($2, $3)
+                ORDER BY created_at DESC, id DESC
+                LIMIT $4
+                """,
+                scope.workspace_id,
+                after_created_at,
+                after_id,
+                limit,
+            )
+
+        return [self._to_project(row) for row in rows]
+
+    # ---------------------------------------------------------------- writes
+
+    async def create(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        name: str,
+        description: str | None,
+        state: str,
+        target_date: date | None,
+    ) -> ProjectEntity:
+        """Insert one project into this workspace.
+
+        `workspace_id` is written explicitly and carries no database default,
+        so omitting it would be a NOT NULL violation rather than a quiet
+        mis-filing. `state` likewise: the schema names the legal states and
+        refuses everything else, but it does not choose one.
+
+        `team_ids` comes back as an empty array literal rather than from a
+        query. A project one statement old has no `project_teams` rows -- no
+        statement anywhere has been able to reference its id yet -- so a
+        subquery here would be a round trip that can only ever return empty.
+        """
+        row = await connection.fetchrow(
+            """
+            INSERT INTO projects (
+                workspace_id,
+                name,
+                description,
+                state,
+                target_date
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING
+                id,
+                name,
+                description,
+                state,
+                target_date,
+                created_at,
+                updated_at,
+                ARRAY[]::UUID[] AS team_ids
+            """,
+            scope.workspace_id,
+            name,
+            description,
+            state,
+            target_date,
+        )
+
+        return self._to_project(row)
+
+    async def update(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+        set_name: bool,
+        name: str | None,
+        set_description: bool,
+        description: str | None,
+        set_state: bool,
+        state: str | None,
+        set_target_date: bool,
+        target_date: date | None,
+    ) -> ProjectEntity | None:
+        """Apply a partial update, or return nothing if there is no such row.
+
+        Each field arrives as a pair: a flag saying whether the caller
+        mentioned it, and the value. That is what makes "clear the
+        description" expressible at all -- `COALESCE($n, description)` cannot
+        distinguish a NULL the caller asked for from a field it never
+        mentioned, and would silently treat every clear as a no-op.
+
+        One static statement rather than a SET list assembled per call. The
+        SQL text is then the same for every combination of fields, so there is
+        no place for a column name to arrive from anywhere but this file, and
+        the server plans one statement instead of sixteen.
+
+        Every value parameter is cast explicitly. Inside `CASE WHEN ... THEN
+        $n ELSE column END` PostgreSQL would usually infer $n from the branch
+        it sits beside, but a NULL parameter in an untyped position is exactly
+        where that inference gets reported back as "could not determine data
+        type", and a clear is the case that sends NULLs.
+
+        Returning None means no row in THIS workspace has that id. The caller
+        cannot tell that from "no such project anywhere", which is the point.
+        """
+        row = await connection.fetchrow(
+            """
+            UPDATE projects
+            SET
+                name = CASE WHEN $3::BOOLEAN THEN $4::TEXT ELSE name END,
+                description = CASE
+                    WHEN $5::BOOLEAN THEN $6::TEXT ELSE description
+                END,
+                state = CASE WHEN $7::BOOLEAN THEN $8::TEXT ELSE state END,
+                target_date = CASE
+                    WHEN $9::BOOLEAN THEN $10::DATE ELSE target_date
+                END,
+                updated_at = now()
+            WHERE workspace_id = $1 AND id = $2
+            RETURNING
+                id,
+                name,
+                description,
+                state,
+                target_date,
+                created_at,
+                updated_at,
+                (
+                    SELECT COALESCE(
+                        array_agg(pt.team_id ORDER BY pt.team_id),
+                        ARRAY[]::UUID[]
+                    )
+                    FROM project_teams pt
+                    WHERE pt.workspace_id = $1 AND pt.project_id = $2
+                ) AS team_ids
+            """,
+            scope.workspace_id,
+            project_id,
+            set_name,
+            name,
+            set_description,
+            description,
+            set_state,
+            state,
+            set_target_date,
+            target_date,
+        )
+
+        if row is None:
+            return None
+
+        return self._to_project(row)
+
+    async def delete(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+    ) -> bool:
+        """Delete the project, reporting whether there was one to delete.
+
+        The workspace is in the predicate, so this cannot reach another
+        tenant's project however the id was obtained.
+
+        This does NOT remove the rows that reference the project: every
+        foreign key onto `projects` is ON DELETE RESTRICT, so a project still
+        carrying teams, milestones or issues makes the server refuse this
+        statement. ProjectService.delete clears them first, in one
+        transaction. That ordering is deliberate -- see the note there on why
+        the schema refuses to do it silently.
+        """
+        status = await connection.execute(
+            """
+            DELETE FROM projects
+            WHERE workspace_id = $1 AND id = $2
+            """,
+            scope.workspace_id,
+            project_id,
+        )
+
+        return status == "DELETE 1"
+
+    # ------------------------------------------------------------ team links
+
+    async def add_team(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+        team_id: UUID,
+    ) -> None:
+        """Associate one team with one project.
+
+        The single `$1` feeding both foreign keys is the whole mechanism: the
+        row carries one workspace, so the project and the team are checked
+        against the same tenant. A team from another workspace raises
+        ForeignKeyViolationError on `project_teams_team_fk`, a project from
+        another workspace raises it on `project_teams_project_fk`, and a
+        duplicate raises UniqueViolationError on `project_teams_pkey`. All
+        three are expected outcomes of client input; ProjectService names them
+        by constraint and translates them, and translates nothing else.
+
+        No `ON CONFLICT DO NOTHING`. It would make this idempotent by hiding
+        the one answer the caller might act on -- whether the association was
+        already there -- and this repository has no way to report back what it
+        chose to ignore.
+        """
+        await connection.execute(
+            """
+            INSERT INTO project_teams (workspace_id, project_id, team_id)
+            VALUES ($1, $2, $3)
+            """,
+            scope.workspace_id,
+            project_id,
+            team_id,
+        )
+
+    async def remove_team(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+        team_id: UUID,
+    ) -> bool:
+        """Dissociate one team, reporting whether it was associated.
+
+        A project from another workspace matches nothing here, so the answer
+        is the same `False` an unassociated team produces. That is the same
+        indistinguishability every read in this class provides, on the write
+        path.
+        """
+        status = await connection.execute(
+            """
+            DELETE FROM project_teams
+            WHERE workspace_id = $1 AND project_id = $2 AND team_id = $3
+            """,
+            scope.workspace_id,
+            project_id,
+            team_id,
+        )
+
+        return status == "DELETE 1"
+
+    async def clear_teams(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+    ) -> None:
+        """Drop every team association of one project.
+
+        Only used on the way to deleting the project. It reports no count,
+        because there is nothing a caller could do differently for zero.
+        """
+        await connection.execute(
+            """
+            DELETE FROM project_teams
+            WHERE workspace_id = $1 AND project_id = $2
+            """,
+            scope.workspace_id,
+            project_id,
+        )
+
+    # ------------------------------------------------------------ milestones
+
+    async def create_milestone(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+        name: str,
+        target_date: date | None,
+    ) -> ProjectMilestoneEntity:
+        """Append one milestone to the end of a project's list.
+
+        The position is computed by the server inside the same statement, as
+        `MAX(position) + 1` over the project's existing milestones. A
+        SELECT-then-INSERT would leave a window in which another request
+        appends and both writes land on the same number.
+
+        This statement narrows that window rather than closing it: under READ
+        COMMITTED two concurrent appends can still read the same maximum. That
+        is survivable BY DESIGN and not by luck -- `position` carries no
+        UNIQUE constraint, and every ordering of milestones breaks ties with
+        `id`, so two milestones sharing a position are ordered stably rather
+        than ambiguously. Making the column unique would turn this benign race
+        into a failed mutation and every reorder into a shuffle.
+
+        The aggregate over an empty set yields one row holding NULL, so a
+        project with no milestones starts at 0 and the INSERT always writes
+        exactly one row. A project that does not exist -- or belongs to
+        another workspace -- also produces one row, and it is
+        `project_milestones_project_fk` that refuses it. There is no
+        pre-check.
+        """
+        row = await connection.fetchrow(
+            """
+            INSERT INTO project_milestones (
+                workspace_id,
+                project_id,
+                name,
+                target_date,
+                position
+            )
+            SELECT
+                $1,
+                $2,
+                $3,
+                $4,
+                COALESCE(MAX(existing.position) + 1, 0)
+            FROM project_milestones existing
+            WHERE existing.workspace_id = $1 AND existing.project_id = $2
+            RETURNING
+                id,
+                project_id,
+                name,
+                target_date,
+                position,
+                created_at,
+                updated_at
+            """,
+            scope.workspace_id,
+            project_id,
+            name,
+            target_date,
+        )
+
+        return self._to_milestone(row)
+
+    async def update_milestone(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        milestone_id: UUID,
+        set_name: bool,
+        name: str | None,
+        set_target_date: bool,
+        target_date: date | None,
+        set_position: bool,
+        position: int | None,
+    ) -> ProjectMilestoneEntity | None:
+        """Apply a partial update to one milestone, or report no such row.
+
+        Flag-and-value pairs, one static statement and explicit casts, for the
+        reasons given on `update`. The project is not among the updatable
+        fields: moving a milestone between projects would silently invalidate
+        `issues_milestone_fk` for every issue pointing at it, and the server
+        would refuse the update with a message about issues rather than about
+        the milestone. If that operation is ever wanted it needs its own
+        method and its own decision about what happens to those issues.
+        """
+        row = await connection.fetchrow(
+            """
+            UPDATE project_milestones
+            SET
+                name = CASE WHEN $3::BOOLEAN THEN $4::TEXT ELSE name END,
+                target_date = CASE
+                    WHEN $5::BOOLEAN THEN $6::DATE ELSE target_date
+                END,
+                position = CASE
+                    WHEN $7::BOOLEAN THEN $8::INTEGER ELSE position
+                END,
+                updated_at = now()
+            WHERE workspace_id = $1 AND id = $2
+            RETURNING
+                id,
+                project_id,
+                name,
+                target_date,
+                position,
+                created_at,
+                updated_at
+            """,
+            scope.workspace_id,
+            milestone_id,
+            set_name,
+            name,
+            set_target_date,
+            target_date,
+            set_position,
+            position,
+        )
+
+        if row is None:
+            return None
+
+        return self._to_milestone(row)
+
+    async def list_milestones(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+    ) -> list[ProjectMilestoneEntity]:
+        """One project's milestones, in display order.
+
+        Not paginated, and that is a product statement rather than an
+        oversight: a milestone list is a handful of rows a client renders
+        whole, so a cursor would buy a second round trip for every project
+        page and a `hasNextPage` nobody reads.
+
+        `ORDER BY position, id` -- `id` because `position` is not unique, so
+        without it two milestones sharing a number come back in whatever order
+        the scan produced, differently between calls and between replicas.
+        """
+        rows = await connection.fetch(
+            """
+            SELECT
+                id,
+                project_id,
+                name,
+                target_date,
+                position,
+                created_at,
+                updated_at
+            FROM project_milestones
+            WHERE workspace_id = $1 AND project_id = $2
+            ORDER BY position, id
+            """,
+            scope.workspace_id,
+            project_id,
+        )
+
+        return [self._to_milestone(row) for row in rows]
+
+    async def list_milestones_for_projects(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_ids: Sequence[UUID],
+    ) -> list[ProjectMilestoneEntity]:
+        """Every listed project's milestones, in one statement.
+
+        The batching half of `Project.milestones`. Ordered by project first so
+        the caller can group without re-sorting, then by the same
+        `(position, id)` `list_milestones` uses -- one ordering rule for
+        milestones, stated in two places that this file keeps identical.
+        """
+        rows = await connection.fetch(
+            """
+            SELECT
+                id,
+                project_id,
+                name,
+                target_date,
+                position,
+                created_at,
+                updated_at
+            FROM project_milestones
+            WHERE workspace_id = $1 AND project_id = ANY($2::UUID[])
+            ORDER BY project_id, position, id
+            """,
+            scope.workspace_id,
+            list(project_ids),
+        )
+
+        return [self._to_milestone(row) for row in rows]
+
+    async def delete_milestone(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        milestone_id: UUID,
+    ) -> bool:
+        """Delete one milestone, reporting whether there was one to delete.
+
+        `issues_milestone_fk` is ON DELETE RESTRICT, so a milestone still
+        carrying issues makes the server refuse this. The service clears those
+        issues first, in the same transaction.
+        """
+        status = await connection.execute(
+            """
+            DELETE FROM project_milestones
+            WHERE workspace_id = $1 AND id = $2
+            """,
+            scope.workspace_id,
+            milestone_id,
+        )
+
+        return status == "DELETE 1"
+
+    async def delete_milestones_for_project(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+    ) -> None:
+        """Drop every milestone of one project, on the way to deleting it."""
+        await connection.execute(
+            """
+            DELETE FROM project_milestones
+            WHERE workspace_id = $1 AND project_id = $2
+            """,
+            scope.workspace_id,
+            project_id,
+        )
+
+    # ---------------------------------------------------------------- mapping
+
+    @staticmethod
+    def _to_project(row: asyncpg.Record) -> ProjectEntity:
+        # `team_ids` arrives as a Python list; the entity is frozen, so it is
+        # copied into a tuple rather than handed out as a mutable alias of
+        # whatever asyncpg built.
+        return ProjectEntity(
+            id=row["id"],
+            name=row["name"],
+            description=row["description"],
+            state=row["state"],
+            target_date=row["target_date"],
+            team_ids=tuple(row["team_ids"]),
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    @staticmethod
+    def _to_milestone(row: asyncpg.Record) -> ProjectMilestoneEntity:
+        return ProjectMilestoneEntity(
+            id=row["id"],
+            project_id=row["project_id"],
+            name=row["name"],
+            target_date=row["target_date"],
+            position=row["position"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
