@@ -11,17 +11,24 @@ from app.graphql.limits import operation_limit_extensions
 from app.graphql.mutations.auth import AuthMutation
 from app.graphql.mutations.comments import CommentMutation
 from app.graphql.mutations.cycles import CycleMutation
+from app.graphql.mutations.github import GithubMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
 from app.graphql.mutations.labels import LabelMutation
 from app.graphql.mutations.memberships import MembershipMutation
+from app.graphql.mutations.notifications import NotificationMutation
 from app.graphql.mutations.projects import ProjectMutation
 from app.graphql.mutations.relations import RelationMutation
+from app.graphql.mutations.slack import SlackMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.cycles import CycleQuery
+from app.graphql.queries.github import GithubQuery
 from app.graphql.queries.issues import Query as IssueQuery
 from app.graphql.queries.labels import LabelQuery
 from app.graphql.queries.memberships import MembershipQuery
+from app.graphql.queries.notifications import NotificationQuery
 from app.graphql.queries.projects import ProjectQuery
+from app.graphql.queries.search import SearchQuery
+from app.graphql.queries.slack import SlackQuery
 from app.graphql.queries.teams import TeamQuery
 
 
@@ -58,6 +65,10 @@ QUERY_TYPES = (
     LabelQuery,
     CycleQuery,
     ProjectQuery,
+    SearchQuery,
+    GithubQuery,
+    SlackQuery,
+    NotificationQuery,
 )
 
 Query = merge_types("Query", QUERY_TYPES)
@@ -70,6 +81,9 @@ MUTATION_TYPES = (
     CycleMutation,
     ProjectMutation,
     RelationMutation,
+    GithubMutation,
+    SlackMutation,
+    NotificationMutation,
 )
 
 Mutation = merge_types("Mutation", MUTATION_TYPES)

@@ -51,3 +51,32 @@ async def viewer_user_id(info: Info) -> UUID:
     identified: UUID = viewer.id
 
     return identified
+
+
+async def actor_user_id(info: Info) -> UUID | None:
+    """Who to record as having done this, or nobody.
+
+    The permissive half of the pair above, for the mutations that do not yet
+    require an identity -- labels, relations, issue edits. They record WHO
+    acted in the history and are answerable without knowing, so None here is
+    "a change with no actor" rather than a refusal, which is the same state
+    `issues.creator_id` has allowed since 006 and the same one a system action
+    is in.
+
+    It is deliberately NOT a fallback for `viewer_user_id`. Anything that
+    needs an identity to be correct -- writing a comment, reading an inbox --
+    calls that one and fails closed. This exists so that a mutation which is
+    open today records an honest actor when a session happens to be present,
+    instead of every history row claiming nobody did anything.
+
+    Shares the memoised `context.viewer()`, so a document mixing both pays for
+    one session lookup.
+    """
+    viewer = await info.context.viewer()
+
+    if viewer is None:
+        return None
+
+    identified: UUID = viewer.id
+
+    return identified

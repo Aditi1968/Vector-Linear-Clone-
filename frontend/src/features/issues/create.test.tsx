@@ -8,7 +8,10 @@ import {
   issueListData,
   issueRejected,
   issueRow,
+  oneTeam,
+  TEAM_ID,
   validationError,
+  WORKSPACE_SLUG,
 } from '../../test/factories'
 import { issueRowTexts, main, renderApp } from '../../test/render'
 
@@ -49,9 +52,28 @@ function titleField(): HTMLElement {
   return screen.getByRole('textbox', { name: 'Title' })
 }
 
+/**
+ * Open the composer, and answer the one query it runs on mount.
+ *
+ * `issueCreate` requires a `teamId` and the server picks no default, so the
+ * form cannot be submitted until `WorkspaceTeams` has answered. Resolving it
+ * here rather than in every test keeps the tests about creating an issue
+ * instead of about the lookup that makes it possible.
+ */
 async function openComposer(view: ReturnType<typeof renderApp>): Promise<void> {
   await view.user.click(screen.getByRole('button', { name: 'New issue' }))
+  await view.link.resolve('WorkspaceTeams', { data: oneTeam() })
 }
+
+/**
+ * The two fields the composer never asks anyone for.
+ *
+ * The workspace comes from the URL and the team from `WorkspaceTeams`, so
+ * they are on every create and are not part of what the form collects --
+ * which is exactly what the assertions below are checking by spelling them
+ * separately from the typed fields.
+ */
+const SCOPE_FIELDS = { workspaceSlug: WORKSPACE_SLUG, teamId: TEAM_ID }
 
 describe('creating an issue', () => {
   it('opens the composer from the shell button', async () => {
@@ -110,10 +132,13 @@ describe('creating an issue', () => {
 
     const variables = await view.link.waitForRequest('IssueCreate')
 
-    // `IssueCreateInput` is `{ title, description, priority }` and nothing
-    // else -- there is no team, project, assignee or status to send.
+    // The form collects `{ title, description, priority }` and nothing else
+    // -- there is no project, assignee or status control. The workspace and
+    // the team are added by the hook: one from the URL, one from the teams
+    // query, and neither from anything the person typed.
     expect(variables).toEqual({
       input: {
+        ...SCOPE_FIELDS,
         title: 'Login redirect loops',
         description: 'Only after a password reset.',
         priority: 2,
@@ -133,7 +158,7 @@ describe('creating an issue', () => {
     const variables = await view.link.waitForRequest('IssueCreate')
 
     expect(variables).toEqual({
-      input: { title: 'No body', description: null, priority: 0 },
+      input: { ...SCOPE_FIELDS, title: 'No body', description: null, priority: 0 },
     })
   })
 
@@ -155,7 +180,7 @@ describe('creating an issue', () => {
       REQUIRED for a value still visible in the box.
     */
     expect(variables).toEqual({
-      input: { title: '  padded  ', description: null, priority: 0 },
+      input: { ...SCOPE_FIELDS, title: '  padded  ', description: null, priority: 0 },
     })
   })
 

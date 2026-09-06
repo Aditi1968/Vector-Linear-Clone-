@@ -9,6 +9,7 @@ from app.graphql.inputs.label import (
     LabelDeleteInput,
     LabelUpdateInput,
 )
+from app.graphql.scope import authorized_scope
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import IssueLabelPayload, IssueType
 from app.graphql.types.label import LabelDeletePayload, LabelPayload, LabelType
@@ -30,21 +31,19 @@ class LabelMutation:
     and a resolver that re-checked any of them would be a second copy that can
     disagree with the first.
 
-    None of these require an authenticated viewer, which matches `issueCreate`
-    and is the same gap for the same reason: the workspace itself still comes
-    from `app/graphql/tenancy.py` rather than from a request that proved
-    anything. `commentCreate` is the exception, and deliberately so -- a
-    comment records WHO wrote it, so it cannot be written without an identity
-    at all. When workspace authorization lands it lands on all of these
-    together; adding half of it here would read as a rule that is enforced.
+    Every one of them requires an authenticated viewer who is a member of the
+    workspace named in the input, because `authorized_scope` resolves the
+    viewer first and the membership second. There is no anonymous path into
+    any of these any more.
     """
 
     @strawberry.mutation
     async def label_create(self, info: Info, input: LabelCreateInput) -> LabelPayload:
-        # Resolved before the try, and outside it. A missing workspace is not
-        # something the client's input can be corrected to fix, so catching it
-        # here would report a server-side gap as a field error.
-        scope = await info.context.tenant.scope()
+        # Resolved before the try, and outside it. An unauthenticated caller,
+        # and one who may not see this workspace, are not things the client's
+        # INPUT can be corrected to fix, so they leave as GraphQL errors
+        # rather than as field errors on the payload.
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.label_service.create(
@@ -62,7 +61,7 @@ class LabelMutation:
 
     @strawberry.mutation
     async def label_update(self, info: Info, input: LabelUpdateInput) -> LabelPayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.label_service.update(
@@ -86,7 +85,7 @@ class LabelMutation:
         issue is touched: an association carries no data of its own, and
         deleting a label is exactly how a workspace stops using one.
         """
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             deleted_id = await info.context.label_service.delete(
@@ -110,13 +109,15 @@ class LabelMutation:
         the write; the alternative is a client that updates its cache from what
         it hoped the server did.
         """
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
+        actor_id = scope.user_id
 
         try:
             await info.context.label_service.attach(
                 scope=scope,
                 issue_id=input.issue_id,
                 label_id=input.label_id,
+                actor_id=actor_id,
             )
         except ValidationError as exc:
             return IssueLabelPayload(issue=None, errors=_errors(exc))
@@ -127,13 +128,15 @@ class LabelMutation:
     async def issue_label_detach(
         self, info: Info, input: IssueLabelInput
     ) -> IssueLabelPayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
+        actor_id = scope.user_id
 
         try:
             await info.context.label_service.detach(
                 scope=scope,
                 issue_id=input.issue_id,
                 label_id=input.label_id,
+                actor_id=actor_id,
             )
         except ValidationError as exc:
             return IssueLabelPayload(issue=None, errors=_errors(exc))
@@ -160,6 +163,6 @@ class LabelMutation:
         )
 
         return IssueLabelPayload(
-            issue=None if entity is None else IssueType.from_entity(entity),
+            issue=None if entity is None else IssueType.from_entity(entity, scope),
             errors=[],
         )

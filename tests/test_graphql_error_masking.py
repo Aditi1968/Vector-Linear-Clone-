@@ -26,8 +26,8 @@ from app.graphql import limits
 from app.graphql.schema import MASKED_ERROR_MESSAGE, build_schema
 
 from tests.conftest import (
-    AnonymousAuthService,
-    FakeTenant,
+    TEST_TEAM_ID,
+    TEST_WORKSPACE_SLUG,
     graphql_context,
     make_entity,
 )
@@ -41,7 +41,7 @@ INTERNAL_MARKER = "asyncpg_password_hunter2_9f3c1d"
 
 ISSUES_QUERY = """
 query ListIssues {
-  issues(first: 1) {
+  issues(workspaceSlug: "acme", first: 1) {
     nodes {
       id
       title
@@ -56,6 +56,14 @@ FULL_PAGE_SELECTION = """
   nodes { id title description priority completedAt createdAt updatedAt }
   pageInfo { hasNextPage endCursor }
 """
+
+# The two fields every create now carries, so that the tests below vary only
+# the one they are about.
+CREATE_INPUT = {
+    "workspaceSlug": TEST_WORKSPACE_SLUG,
+    "teamId": str(TEST_TEAM_ID),
+    "priority": 0,
+}
 
 ISSUE_CREATE_MUTATION = """
 mutation CreateIssue($input: IssueCreateInput!) {
@@ -82,18 +90,20 @@ def Context(issue_service):
     silently -- which is how `issueCreate` starting to read the viewer
     surfaced here as an AttributeError inside a resolver rather than as a
     failure that named the cause.
+
+    The viewer and the membership come from that helper's defaults: every
+    document below names a workspace, and a request that could not be
+    authorized would be refused before the service under test raised
+    anything -- which would make these tests assert masking of an error they
+    never provoked.
     """
-    return graphql_context(
-        issue_service=issue_service,
-        auth_service=AnonymousAuthService(),
-        tenant=FakeTenant(),
-    )
+    return graphql_context(issue_service=issue_service)
 
 
 class ExplodingIssueService:
     """Fails the way a driver or a bug does: an exception nobody expected."""
 
-    async def list(self, *, scope, first: int, after: str | None):
+    async def list(self, *, scope, team_id, first: int, after: str | None):
         raise RuntimeError(INTERNAL_MARKER)
 
     async def create(self, *, scope, team_id, **fields):
@@ -108,7 +118,7 @@ class LeakyIssueService:
     decision to publish, so this must be masked exactly like a RuntimeError.
     """
 
-    async def list(self, *, scope, first: int, after: str | None):
+    async def list(self, *, scope, team_id, first: int, after: str | None):
         raise GraphQLError(
             INTERNAL_MARKER,
             extensions={"code": "DB_CONNECTION_FAILED", "statement": INTERNAL_MARKER},
@@ -121,7 +131,7 @@ class RejectingIssueService:
     def __init__(self, issues: list[ValidationIssue]):
         self._issues = issues
 
-    async def list(self, *, scope, first: int, after: str | None):
+    async def list(self, *, scope, team_id, first: int, after: str | None):
         raise ValidationError(self._issues)
 
     async def create(self, *, scope, team_id, **fields):
@@ -132,7 +142,7 @@ class FakeIssueService:
     def __init__(self, page: IssuePage):
         self._page = page
 
-    async def list(self, *, scope, first: int, after: str | None):
+    async def list(self, *, scope, team_id, first: int, after: str | None):
         return self._page
 
 
@@ -242,7 +252,7 @@ async def test_typed_validation_payloads_are_untouched(environment: Environment)
 
     result = await build_schema(environment).execute(
         ISSUE_CREATE_MUTATION,
-        variable_values={"input": {"title": "", "priority": 0}},
+        variable_values={"input": CREATE_INPUT | {"title": ""}},
         context_value=Context(service),
     )
 
@@ -270,7 +280,7 @@ async def test_an_unexpected_mutation_failure_is_masked():
     """
     result = await build_schema("production").execute(
         ISSUE_CREATE_MUTATION,
-        variable_values={"input": {"title": "Valid", "priority": 0}},
+        variable_values={"input": CREATE_INPUT | {"title": "Valid"}},
         context_value=Context(ExplodingIssueService()),
     )
 

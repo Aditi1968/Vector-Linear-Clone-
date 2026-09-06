@@ -35,7 +35,7 @@ from app.domain.pagination import (
     decode_label_cursor,
     encode_label_cursor,
 )
-from app.domain.tenancy import WorkspaceScope
+from app.domain.tenancy import AuthorizedWorkspaceScope, WorkspaceScope
 from app.graphql.limits import MAX_COMPLEXITY, OperationLimitsRule
 from app.graphql.schema import build_schema
 from app.graphql.viewer import UNAUTHENTICATED_MESSAGE
@@ -53,8 +53,10 @@ from app.services.labels import (
 from tests.conftest import (
     TEST_SCOPE,
     TEST_WORKSPACE_ID,
+    TEST_WORKSPACE_SLUG,
     ExplodingPool,
     FakeConnection,
+    FakeMembershipService,
     FakePool,
     graphql_context,
     make_entity,
@@ -424,7 +426,24 @@ def viewer_context(viewer_id, **services):
     comes from the request's session cookie, so it is resolved and never a
     value a caller sets. `None` is what the session layer produces for a
     request with no cookie, an expired one, or one naming no session.
+
+    The membership fake is built to agree with it -- the scope it hands back
+    carries the same user id -- because a comment's author now comes off that
+    scope rather than off a second lookup. Two ids that could disagree here
+    would make the assertions below pass against a resolver reading the wrong
+    one.
     """
+    services.setdefault(
+        "membership_service",
+        FakeMembershipService(
+            scope=AuthorizedWorkspaceScope(
+                workspace_id=TEST_WORKSPACE_ID,
+                user_id=viewer_id,
+                role="member",
+            )
+        ),
+    )
+
     context = graphql_context(**services)
 
     async def viewer():
@@ -462,8 +481,20 @@ def test_the_comment_input_has_no_author_field():
 @pytest.mark.parametrize(
     ("document", "variables"),
     [
-        (COMMENT_CREATE, {"input": {"issueId": str(ISSUE_ID), "body": "hi"}}),
-        (COMMENT_DELETE, {"input": {"id": str(COMMENT_ID)}}),
+        (
+            COMMENT_CREATE,
+            {
+                "input": {
+                    "workspaceSlug": TEST_WORKSPACE_SLUG,
+                    "issueId": str(ISSUE_ID),
+                    "body": "hi",
+                }
+            },
+        ),
+        (
+            COMMENT_DELETE,
+            {"input": {"workspaceSlug": TEST_WORKSPACE_SLUG, "id": str(COMMENT_ID)}},
+        ),
     ],
     ids=["commentCreate", "commentDelete"],
 )
@@ -502,7 +533,13 @@ async def test_the_author_is_the_viewer_and_not_anything_the_client_sent():
 
     result = await schema.execute(
         COMMENT_CREATE,
-        variable_values={"input": {"issueId": str(ISSUE_ID), "body": "Reproduced."}},
+        variable_values={
+            "input": {
+                "workspaceSlug": TEST_WORKSPACE_SLUG,
+                "issueId": str(ISSUE_ID),
+                "body": "Reproduced.",
+            }
+        },
         context_value=viewer_context(VIEWER_ID, comment_service=service),
     )
 
@@ -518,7 +555,9 @@ async def test_deleting_a_comment_passes_the_viewer_as_the_author():
 
     result = await schema.execute(
         COMMENT_DELETE,
-        variable_values={"input": {"id": str(COMMENT_ID)}},
+        variable_values={
+            "input": {"workspaceSlug": TEST_WORKSPACE_SLUG, "id": str(COMMENT_ID)}
+        },
         context_value=viewer_context(VIEWER_ID, comment_service=service),
     )
 
@@ -532,7 +571,7 @@ async def test_deleting_a_comment_passes_the_viewer_as_the_author():
 
 ISSUES_WITH_COMMENTS = """
 query {
-  issues {
+  issues(workspaceSlug: "acme") {
     nodes {
       comments {
         nodes { id body }
@@ -544,7 +583,7 @@ query {
 
 ISSUES_WITH_COMMENTS_SMALL_PAGE = """
 query {
-  issues(first: 20) {
+  issues(workspaceSlug: "acme", first: 20) {
     nodes {
       comments {
         nodes { id body }
@@ -556,7 +595,7 @@ query {
 
 ISSUES_WITH_LABELS = """
 query {
-  issues {
+  issues(workspaceSlug: "acme") {
     nodes {
       id
       labels { id name }
@@ -567,7 +606,7 @@ query {
 
 ONE_ISSUES_THREAD = """
 query {
-  issue(id: "00000000-0000-7000-8000-0000000000a2") {
+  issue(workspaceSlug: "acme", id: "00000000-0000-7000-8000-0000000000a2") {
     comments {
       nodes { id body }
     }
@@ -654,7 +693,7 @@ class FakeIssuePageService:
     def __init__(self, entities):
         self._entities = entities
 
-    async def list(self, *, scope, first, after):
+    async def list(self, *, scope, team_id, first, after):
         return IssuePage(nodes=self._entities, has_next_page=False, end_cursor=None)
 
 
@@ -760,6 +799,10 @@ async def test_the_label_loader_keys_on_the_workspace_as_well_as_the_issue():
         ),
     )
 
+    # A plain WorkspaceScope carrying the authorized workspace's id, because
+    # the loader REBUILDS one from its key rather than closing over the scope
+    # the resolver held. That is the property under test: the tenant travels
+    # in the key, so a cached batch cannot be served across workspaces.
     assert captured == [TEST_SCOPE]
 
 

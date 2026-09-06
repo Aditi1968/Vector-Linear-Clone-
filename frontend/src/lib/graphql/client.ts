@@ -1,6 +1,7 @@
-import { ApolloClient, HttpLink } from '@apollo/client'
+import { ApolloClient, ApolloLink, HttpLink } from '@apollo/client'
 
 import { graphqlUrl } from '../config'
+import { sessionExpiryLink } from '../../features/auth/api/sessionExpiry'
 import { createCache } from './cache'
 
 /**
@@ -19,21 +20,34 @@ import { createCache } from './cache'
  */
 export function createApolloClient(): ApolloClient {
   return new ApolloClient({
-    link: new HttpLink({
-      uri: graphqlUrl,
+    /*
+     * Two links, and the order is the contract: a response travels back up
+     * the chain, so `sessionExpiryLink` sits above the transport in order to
+     * see what the transport returned.
+     *
+     * It is here rather than inside React because a dead session has to be
+     * noticed on *any* operation from any feature, including ones written
+     * after this file. See features/auth/api/sessionExpiry.
+     */
+    link: ApolloLink.from([
+      sessionExpiryLink,
+      new HttpLink({
+        uri: graphqlUrl,
 
-      // Same-origin in development because Vite proxies `/graphql` (see
-      // vite.config.ts), and same-origin in production because the endpoint
-      // is a path. Stating it rather than inheriting fetch's default
-      // documents the intent for the auth phase: a session cookie set by the
-      // backend is sent on these requests without any CORS credential
-      // negotiation, precisely because nothing here is cross-origin.
-      credentials: 'same-origin',
+        // Same-origin in development because Vite proxies `/graphql` (see
+        // vite.config.ts), and same-origin in production because the endpoint
+        // is a path. Stating it rather than inheriting fetch's default is what
+        // carries the session: the backend's cookie is HttpOnly, so this
+        // header is the only way the browser proves who it is, and it rides
+        // along without any CORS credential negotiation precisely because
+        // nothing here is cross-origin.
+        credentials: 'same-origin',
 
-      // Do NOT set `useGETForQueries`. The backend builds its router with
-      // `allow_queries_via_get=False` (`app/graphql/router.py`), so a GET
-      // query is refused at the transport, not answered from a cache.
-    }),
+        // Do NOT set `useGETForQueries`. The backend builds its router with
+        // `allow_queries_via_get=False` (`app/graphql/router.py`), so a GET
+        // query is refused at the transport, not answered from a cache.
+      }),
+    ]),
 
     cache: createCache(),
 

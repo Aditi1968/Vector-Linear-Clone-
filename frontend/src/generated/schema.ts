@@ -45,6 +45,7 @@ export type CommentConnection = {
 export type CommentCreateInput = {
   body: Scalars['String']['input'];
   issueId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type CommentCreatePayload = {
@@ -55,6 +56,7 @@ export type CommentCreatePayload = {
 
 export type CommentDeleteInput = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type CommentDeletePayload = {
@@ -80,6 +82,7 @@ export type CycleCreateInput = {
   number: Scalars['Int']['input'];
   startsAt: Scalars['DateTime']['input'];
   teamId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type CycleDeletePayload = {
@@ -100,6 +103,31 @@ export type CycleUpdateInput = {
   name?: InputMaybe<Scalars['String']['input']>;
   number: Scalars['Int']['input'];
   startsAt: Scalars['DateTime']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type GithubDisconnectInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type GithubIntegration = {
+  __typename?: 'GithubIntegration';
+  accountLogin?: Maybe<Scalars['String']['output']>;
+  connectedAt?: Maybe<Scalars['DateTime']['output']>;
+  connectedById?: Maybe<Scalars['UUID']['output']>;
+  repositories: Array<GithubRepository>;
+  status: GithubIntegrationStatus;
+};
+
+export type GithubIntegrationStatus =
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'UNCONFIGURED';
+
+export type GithubRepository = {
+  __typename?: 'GithubRepository';
+  fullName: Scalars['String']['output'];
+  repositoryId: Scalars['ID']['output'];
 };
 
 export type InvitationAcceptInput = {
@@ -138,6 +166,7 @@ export type InvitationRevokePayload = {
 
 export type Issue = {
   __typename?: 'Issue';
+  activity: IssueActivityConnection;
   /** When the issue was taken off the board. Always null here, because archived issues are absent from every query -- only the archive mutation's own result carries a value. */
   archivedAt?: Maybe<Scalars['DateTime']['output']>;
   assigneeId?: Maybe<Scalars['UUID']['output']>;
@@ -172,6 +201,12 @@ export type Issue = {
 };
 
 
+export type IssueActivityArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
+
 export type IssueChildrenArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
@@ -189,6 +224,37 @@ export type IssueRelationsArgs = {
   first?: Scalars['Int']['input'];
 };
 
+export type IssueActivity = {
+  __typename?: 'IssueActivity';
+  actorId?: Maybe<Scalars['UUID']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  fromValue?: Maybe<Scalars['String']['output']>;
+  id: Scalars['UUID']['output'];
+  issueId: Scalars['UUID']['output'];
+  kind: IssueActivityKind;
+  toValue?: Maybe<Scalars['String']['output']>;
+};
+
+export type IssueActivityConnection = {
+  __typename?: 'IssueActivityConnection';
+  nodes: Array<IssueActivity>;
+  pageInfo: PageInfo;
+};
+
+export type IssueActivityKind =
+  | 'ARCHIVED'
+  | 'ASSIGNEE_CHANGED'
+  | 'COMMENTED'
+  | 'CREATED'
+  | 'CYCLE_CHANGED'
+  | 'LABEL_ATTACHED'
+  | 'LABEL_DETACHED'
+  | 'PRIORITY_CHANGED'
+  | 'PROJECT_CHANGED'
+  | 'RELATION_ADDED'
+  | 'STATE_CHANGED'
+  | 'TITLE_CHANGED';
+
 export type IssueArchivePayload = {
   __typename?: 'IssueArchivePayload';
   errors: Array<ValidationErrorType>;
@@ -197,6 +263,7 @@ export type IssueArchivePayload = {
 
 export type IssueClearParentInput = {
   issueId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueConnection = {
@@ -211,7 +278,9 @@ export type IssueCreateInput = {
   dueDate?: InputMaybe<Scalars['Date']['input']>;
   estimate?: InputMaybe<Scalars['Int']['input']>;
   priority?: Scalars['Int']['input'];
+  teamId: Scalars['UUID']['input'];
   title: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueCreatePayload = {
@@ -223,6 +292,7 @@ export type IssueCreatePayload = {
 export type IssueLabelInput = {
   issueId: Scalars['UUID']['input'];
   labelId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueLabelPayload = {
@@ -255,6 +325,7 @@ export type IssueRelationCreateInput = {
   sourceIssueId: Scalars['UUID']['input'];
   targetIssueId: Scalars['UUID']['input'];
   type: IssueRelationType;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueRelationCreatePayload = {
@@ -265,6 +336,7 @@ export type IssueRelationCreatePayload = {
 
 export type IssueRelationDeleteInput = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueRelationDeletePayload = {
@@ -282,6 +354,7 @@ export type IssueRelationType =
 export type IssueSetCycleInput = {
   cycleId?: InputMaybe<Scalars['UUID']['input']>;
   issueId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueSetCyclePayload = {
@@ -293,12 +366,14 @@ export type IssueSetCyclePayload = {
 export type IssueSetParentInput = {
   issueId: Scalars['UUID']['input'];
   parentId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueSetProjectInput = {
   issueId: Scalars['UUID']['input'];
   milestoneId?: InputMaybe<Scalars['UUID']['input']>;
   projectId?: InputMaybe<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueSetProjectPayload = {
@@ -332,6 +407,7 @@ export type IssueUpdateInput = {
   priority?: InputMaybe<Scalars['Int']['input']>;
   title?: InputMaybe<Scalars['String']['input']>;
   workflowStateId?: InputMaybe<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueUpdatePayload = {
@@ -358,10 +434,12 @@ export type LabelConnection = {
 export type LabelCreateInput = {
   color?: InputMaybe<Scalars['String']['input']>;
   name: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type LabelDeleteInput = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type LabelDeletePayload = {
@@ -380,6 +458,7 @@ export type LabelUpdateInput = {
   color: Scalars['String']['input'];
   id: Scalars['UUID']['input'];
   name: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type LoginInput = {
@@ -423,6 +502,7 @@ export type Mutation = {
   cycleCreate: CyclePayload;
   cycleDelete: CycleDeletePayload;
   cycleUpdate: CyclePayload;
+  githubDisconnect: GithubIntegration;
   /** Redeem an invitation token as the authenticated caller. */
   invitationAccept: InvitationAcceptPayload;
   /** Invite an email address to the workspace. Returns the raw invitation token once and never again. */
@@ -449,6 +529,8 @@ export type Mutation = {
   memberRemove: MemberRemovePayload;
   /** Change a member's role. Requires the admin or owner role. */
   memberRoleUpdate: WorkspaceMemberPayload;
+  notificationMarkAllRead: NotificationMarkAllReadPayload;
+  notificationMarkRead: NotificationMarkReadPayload;
   projectCreate: ProjectPayload;
   projectDelete: ProjectDeletePayload;
   projectMilestoneCreate: ProjectMilestonePayload;
@@ -458,6 +540,7 @@ export type Mutation = {
   projectTeamRemove: ProjectPayload;
   projectUpdate: ProjectPayload;
   register: RegisterPayload;
+  slackDisconnect: SlackDisconnectPayload;
   /** Create a team, seeded with the default workflow states. Requires the admin or owner role. */
   teamCreate: TeamPayload;
   /** Create a workspace. The authenticated caller becomes its owner. */
@@ -482,11 +565,17 @@ export type MutationCycleCreateArgs = {
 
 export type MutationCycleDeleteArgs = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
 export type MutationCycleUpdateArgs = {
   input: CycleUpdateInput;
+};
+
+
+export type MutationGithubDisconnectArgs = {
+  input: GithubDisconnectInput;
 };
 
 
@@ -507,6 +596,7 @@ export type MutationInvitationRevokeArgs = {
 
 export type MutationIssueArchiveArgs = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
@@ -591,6 +681,16 @@ export type MutationMemberRoleUpdateArgs = {
 };
 
 
+export type MutationNotificationMarkAllReadArgs = {
+  input: NotificationMarkAllReadInput;
+};
+
+
+export type MutationNotificationMarkReadArgs = {
+  input: NotificationMarkReadInput;
+};
+
+
 export type MutationProjectCreateArgs = {
   input: ProjectCreateInput;
 };
@@ -636,6 +736,11 @@ export type MutationRegisterArgs = {
 };
 
 
+export type MutationSlackDisconnectArgs = {
+  input: SlackDisconnectInput;
+};
+
+
 export type MutationTeamCreateArgs = {
   input: TeamCreateInput;
 };
@@ -643,6 +748,48 @@ export type MutationTeamCreateArgs = {
 
 export type MutationWorkspaceCreateArgs = {
   input: WorkspaceCreateInput;
+};
+
+export type Notification = {
+  __typename?: 'Notification';
+  actorId?: Maybe<Scalars['UUID']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  issueId: Scalars['UUID']['output'];
+  kind: NotificationKind;
+  readAt?: Maybe<Scalars['DateTime']['output']>;
+};
+
+export type NotificationConnection = {
+  __typename?: 'NotificationConnection';
+  nodes: Array<Notification>;
+  pageInfo: PageInfo;
+};
+
+export type NotificationKind =
+  | 'ASSIGNED'
+  | 'BLOCKED'
+  | 'COMMENTED';
+
+export type NotificationMarkAllReadInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type NotificationMarkAllReadPayload = {
+  __typename?: 'NotificationMarkAllReadPayload';
+  errors: Array<ValidationErrorType>;
+  markedCount: Scalars['Int']['output'];
+};
+
+export type NotificationMarkReadInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type NotificationMarkReadPayload = {
+  __typename?: 'NotificationMarkReadPayload';
+  errors: Array<ValidationErrorType>;
+  notification?: Maybe<Notification>;
 };
 
 export type PageInfo = {
@@ -677,10 +824,12 @@ export type ProjectCreateInput = {
   name: Scalars['String']['input'];
   state?: ProjectState;
   targetDate?: InputMaybe<Scalars['Date']['input']>;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type ProjectDeleteInput = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type ProjectDeletePayload = {
@@ -704,10 +853,12 @@ export type ProjectMilestoneCreateInput = {
   name: Scalars['String']['input'];
   projectId: Scalars['UUID']['input'];
   targetDate?: InputMaybe<Scalars['Date']['input']>;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type ProjectMilestoneDeleteInput = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type ProjectMilestoneDeletePayload = {
@@ -727,6 +878,7 @@ export type ProjectMilestoneUpdateInput = {
   name?: InputMaybe<Scalars['String']['input']>;
   position?: InputMaybe<Scalars['Int']['input']>;
   targetDate?: InputMaybe<Scalars['Date']['input']>;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type ProjectPayload = {
@@ -745,6 +897,7 @@ export type ProjectState =
 export type ProjectTeamInput = {
   projectId: Scalars['UUID']['input'];
   teamId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type ProjectUpdateInput = {
@@ -754,12 +907,14 @@ export type ProjectUpdateInput = {
   name?: InputMaybe<Scalars['String']['input']>;
   state?: InputMaybe<ProjectState>;
   targetDate?: InputMaybe<Scalars['Date']['input']>;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type Query = {
   __typename?: 'Query';
   cycle?: Maybe<Cycle>;
   cycles: Array<Cycle>;
+  githubIntegration: GithubIntegration;
   /** Invitations to this workspace that have not been accepted or expired. Admins and owners only. */
   invitations: Array<WorkspaceInvitation>;
   issue?: Maybe<Issue>;
@@ -769,8 +924,12 @@ export type Query = {
   me?: Maybe<User>;
   myWorkspace: WorkspaceMembership;
   myWorkspaces: Array<WorkspaceMembership>;
+  notificationUnreadCount: Scalars['Int']['output'];
+  notifications: NotificationConnection;
   project?: Maybe<Project>;
   projects: ProjectConnection;
+  search: SearchResults;
+  slackIntegration: SlackIntegration;
   /** The teams in a workspace, each with the workflow states its issues can occupy. */
   teams: Array<Team>;
   /** Everyone in a workspace, with the role each holds. Members only. */
@@ -780,11 +939,18 @@ export type Query = {
 
 export type QueryCycleArgs = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
 export type QueryCyclesArgs = {
   teamId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryGithubIntegrationArgs = {
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
@@ -795,23 +961,28 @@ export type QueryInvitationsArgs = {
 
 export type QueryIssueArgs = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
 export type QueryIssuesArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
+  teamId?: InputMaybe<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
 export type QueryLabelArgs = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
 export type QueryLabelsArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
@@ -820,14 +991,41 @@ export type QueryMyWorkspaceArgs = {
 };
 
 
+export type QueryNotificationUnreadCountArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryNotificationsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+  unreadOnly?: Scalars['Boolean']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
 export type QueryProjectArgs = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
 export type QueryProjectsArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QuerySearchArgs = {
+  first?: Scalars['Int']['input'];
+  query: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QuerySlackIntegrationArgs = {
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
@@ -851,6 +1049,33 @@ export type RegisterPayload = {
   errors: Array<ValidationErrorType>;
   user?: Maybe<User>;
 };
+
+export type SearchResults = {
+  __typename?: 'SearchResults';
+  issues: Array<Issue>;
+  projects: Array<Project>;
+};
+
+export type SlackDisconnectInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type SlackDisconnectPayload = {
+  __typename?: 'SlackDisconnectPayload';
+  integration: SlackIntegration;
+};
+
+export type SlackIntegration = {
+  __typename?: 'SlackIntegration';
+  scopes: Array<Scalars['String']['output']>;
+  status: SlackIntegrationStatus;
+  teamName?: Maybe<Scalars['String']['output']>;
+};
+
+export type SlackIntegrationStatus =
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'UNCONFIGURED';
 
 export type Team = {
   __typename?: 'Team';

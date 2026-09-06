@@ -7,6 +7,7 @@ import {
   issueId,
   issueListData,
   issueRow,
+  WORKSPACE_SLUG,
 } from '../../test/factories'
 import { issueRows, main, renderApp } from '../../test/render'
 
@@ -15,13 +16,22 @@ import { issueRows, main, renderApp } from '../../test/render'
  *
  * The property worth protecting is that the *URL* is the state. Nothing is
  * handed from the list to the detail view; the id comes from the route and
- * the query runs from it, which is what makes a reload of `/issues/<id>`
- * render the same page by the same path. A test that only clicked a row and
- * looked for a title would pass just as well against an implementation that
- * smuggled the issue across in memory and broke on refresh.
+ * the query runs from it, which is what makes a reload of
+ * `/:workspaceSlug/issues/<id>` render the same page by the same path. A
+ * test that only clicked a row and looked for a title would pass just as
+ * well against an implementation that smuggled the issue across in memory
+ * and broke on refresh.
+ *
+ * The workspace is part of that URL for the same reason the id is: the
+ * server requires one on every field, so a detail request carries the slug
+ * from the route and not from anywhere a reload would lose.
  */
 
 const ALPHA_ID = issueId(1)
+
+/** The list and one issue, inside the workspace every test here is in. */
+const LIST_PATH = `/${WORKSPACE_SLUG}/issues`
+const detailPath = (id: string) => `${LIST_PATH}/${id}`
 
 describe('navigating to an issue', () => {
   it('opens the detail view from a row and puts the id in the URL', async () => {
@@ -40,11 +50,11 @@ describe('navigating to an issue', () => {
 
     await user.click(screen.getByRole('link', { name: /Alpha/ }))
 
-    expect(currentPath()).toBe(`/issues/${ALPHA_ID}`)
+    expect(currentPath()).toBe(detailPath(ALPHA_ID))
 
     // The route drives the query: the id that went out is the id in the URL.
     const variables = await link.waitForRequest('IssueDetail')
-    expect(variables).toEqual({ id: ALPHA_ID })
+    expect(variables).toEqual({ workspaceSlug: WORKSPACE_SLUG, id: ALPHA_ID })
 
     await link.resolve('IssueDetail', {
       data: issueDetailData(
@@ -59,10 +69,10 @@ describe('navigating to an issue', () => {
   })
 
   it('renders the same page when the detail URL is opened directly', async () => {
-    const { link } = renderApp({ initialPath: `/issues/${ALPHA_ID}` })
+    const { link } = renderApp({ initialPath: detailPath(ALPHA_ID) })
 
     const variables = await link.waitForRequest('IssueDetail')
-    expect(variables).toEqual({ id: ALPHA_ID })
+    expect(variables).toEqual({ workspaceSlug: WORKSPACE_SLUG, id: ALPHA_ID })
 
     await link.resolve('IssueDetail', {
       data: issueDetailData(issueDetail(1, { title: 'Alpha' })),
@@ -88,7 +98,7 @@ describe('navigating to an issue', () => {
 
     await user.click(screen.getByRole('link', { name: /All issues/ }))
 
-    expect(currentPath()).toBe('/issues')
+    expect(currentPath()).toBe(LIST_PATH)
     expect(screen.getByRole('link', { name: /Alpha/ })).toBeInTheDocument()
 
     /*
@@ -101,7 +111,7 @@ describe('navigating to an issue', () => {
   })
 
   it('treats a missing issue as an answer, not an error', async () => {
-    const { link } = renderApp({ initialPath: `/issues/${issueId(404)}` })
+    const { link } = renderApp({ initialPath: detailPath(issueId(404)) })
 
     // `issue(id:)` is nullable in the schema, so null is a successful
     // response meaning the row is not there.
@@ -117,7 +127,7 @@ describe('navigating to an issue', () => {
   })
 
   it('answers a malformed id without asking the server', async () => {
-    const { link } = renderApp({ initialPath: '/issues/not-a-uuid' })
+    const { link } = renderApp({ initialPath: detailPath('not-a-uuid') })
 
     await link.idle()
 
@@ -131,7 +141,7 @@ describe('navigating to an issue', () => {
   })
 
   it('reports a failed detail request as an error, with a retry', async () => {
-    const { link, user } = renderApp({ initialPath: `/issues/${ALPHA_ID}` })
+    const { link, user } = renderApp({ initialPath: detailPath(ALPHA_ID) })
 
     await link.fail('IssueDetail', new Error('Failed to fetch'))
 
@@ -151,7 +161,7 @@ describe('navigating to an issue', () => {
   })
 
   it('shows a loading state before the issue arrives', async () => {
-    const { link } = renderApp({ initialPath: `/issues/${ALPHA_ID}` })
+    const { link } = renderApp({ initialPath: detailPath(ALPHA_ID) })
 
     await link.waitForRequest('IssueDetail')
 

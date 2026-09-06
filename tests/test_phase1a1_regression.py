@@ -51,7 +51,7 @@ from app.http_limits import MAX_REQUEST_BODY_BYTES
 from app.main import create_app
 from app.rest.health import READINESS_TIMEOUT_SECONDS, router
 
-from tests.conftest import FakeTenant, graphql_context, make_entity
+from tests.conftest import graphql_context, make_entity
 from tests.test_settings import PLACEHOLDER_DSN, use_environment
 
 
@@ -106,16 +106,20 @@ class RecordingIssueService:
     def __init__(self):
         self.firsts: list[int] = []
 
-    async def list(self, *, scope, first: int, after: str | None) -> IssuePage:
+    async def list(self, *, scope, team_id, first: int, after: str | None) -> IssuePage:
         self.firsts.append(first)
 
         return IssuePage(nodes=[make_entity(1)], has_next_page=False, end_cursor=None)
 
 
-class Context:
-    def __init__(self, issue_service):
-        self.issue_service = issue_service
-        self.tenant = FakeTenant()
+def Context(issue_service):
+    """The real context, wired to one recording service.
+
+    `issues` names a workspace now, so the request needs an identity and a
+    membership before it reaches the issue service; `graphql_context`
+    supplies working fakes for both.
+    """
+    return graphql_context(issue_service=issue_service)
 
 
 def git_blob_sha1(path: Path) -> str:
@@ -137,7 +141,9 @@ def fragment_diamond(levels: int, fan_out: int = 2) -> str:
     nothing is unused, so every stock graphql-core rule accepts it; the
     expansion only exists for a counter that follows spreads.
     """
-    definitions = ["query Bomb { issues(first: 1) { nodes { ...F0 } } }"]
+    definitions = [
+        'query Bomb { issues(workspaceSlug: "acme", first: 1) { nodes { ...F0 } } }'
+    ]
 
     for level in range(levels):
         spreads = " ".join([f"...F{level + 1}"] * fan_out)
@@ -210,7 +216,10 @@ async def test_batched_documents_are_refused_rather_than_amplified(
     )
 
     batch = [
-        {"query": "query Q { issues(first: 100) { %s } }" % FULL_PAGE_SELECTION}
+        {
+            "query": 'query Q { issues(workspaceSlug: "acme", first: 100) { %s } }'
+            % FULL_PAGE_SELECTION
+        }
         for _ in range(50)
     ]
 
@@ -236,7 +245,7 @@ async def test_an_internal_failure_is_masked_over_the_real_http_stack(
     marker = "asyncpg_dsn_leak_marker_4a91c7"
 
     class Exploding:
-        async def list(self, *, scope, first, after):
+        async def list(self, *, scope, team_id, first, after):
             raise RuntimeError(marker)
 
     use_environment(
@@ -254,7 +263,10 @@ async def test_an_internal_failure_is_masked_over_the_real_http_stack(
         base_url="http://vector.test",
     ) as client:
         response = await client.post(
-            "/graphql", json={"query": "{ issues(first: 1) { nodes { id } } }"}
+            "/graphql",
+            json={
+                "query": '{ issues(workspaceSlug: "acme", first: 1) { nodes { id } } }'
+            },
         )
 
     assert response.status_code == 200
@@ -519,7 +531,10 @@ async def test_omitting_a_page_size_costs_exactly_what_writing_it_costs():
     fan_out = ALIASED_FAN_OUT + 1
 
     def document(argument: str) -> str:
-        page = f"issues{argument} {{ {FULL_PAGE_SELECTION} }}"
+        # The workspace argument is present in both documents and absent from
+        # neither, so it cancels: what is being compared is still whether
+        # `first` was written down.
+        page = f'issues(workspaceSlug: "acme"{argument}) {{ {FULL_PAGE_SELECTION} }}'
 
         return (
             "query Pages { "
@@ -530,7 +545,7 @@ async def test_omitting_a_page_size_costs_exactly_what_writing_it_costs():
         )
 
     defaulted = document("")
-    written_out = document(f"(first: {DEFAULT_FIRST})")
+    written_out = document(f", first: {DEFAULT_FIRST}")
 
     schema = build_schema("test")
     service = RecordingIssueService()
@@ -623,12 +638,15 @@ async def test_reusing_a_fragment_measurement_still_charges_every_spread(
     schema = build_schema("test")
     service = RecordingIssueService()
 
-    through_fragments = "query Q { issues(first: %d) { %s } }\n%s" % (
-        OVER_BUDGET_PAGE_SIZE,
-        spreads,
-        "\n".join(definitions),
+    through_fragments = (
+        'query Q { issues(workspaceSlug: "acme", first: %d) { %s } }\n%s'
+        % (
+            OVER_BUDGET_PAGE_SIZE,
+            spreads,
+            "\n".join(definitions),
+        )
     )
-    written_out = "query Q { issues(first: %d) { %s } }" % (
+    written_out = 'query Q { issues(workspaceSlug: "acme", first: %d) { %s } }' % (
         OVER_BUDGET_PAGE_SIZE,
         " ".join([ISSUE_NODES] * copies),
     )

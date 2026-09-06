@@ -8,11 +8,24 @@ import strawberry
 class CycleCreateInput:
     """The cycle to open.
 
-    `team_id` is required and is the client's, not the request's. Cycles are
-    per team, so the tenant seam that picks a default team for a new issue
-    (app/graphql/tenancy.py) has nothing to say here: a caller that did not
-    name a team has not said which team's numbering its `number` belongs to.
+    `team_id` is required. Cycles are numbered per team, so a caller that did
+    not name a team has not said which team's numbering its `number` belongs
+    to. A team from another workspace is refused by `cycles_team_fk` against
+    the authorized workspace, inside the insert.
     """
+
+    # Every workspace-scoped mutation names its tenant, and every mutation
+    # that takes an `input` names it HERE rather than beside the input. One
+    # place per operation, so a client never has to remember which mutations
+    # spell it as an argument; the two that take no input at all
+    # (`issueArchive`, `cycleDelete`) carry it as a field argument, because
+    # inventing a one-field input object for them would be worse.
+    #
+    # A slug and not a workspace id, deliberately. CLAUDE.md forbids trusting
+    # a workspace id from the frontend: the slug is a public string that
+    # selects WHAT is being asked about, and `app.graphql.scope` decides
+    # whether the session behind the request may act there.
+    workspace_slug: str
 
     team_id: UUID
     number: int
@@ -33,6 +46,7 @@ class CycleUpdateInput:
     `teamId` is absent on purpose: a cycle's team is fixed for its lifetime.
     """
 
+    workspace_slug: str
     id: UUID
     number: int
     starts_at: datetime
@@ -51,5 +65,6 @@ class IssueSetCycleInput:
     dropdown would have to branch on which one to call.
     """
 
+    workspace_slug: str
     issue_id: UUID
     cycle_id: UUID | None = None

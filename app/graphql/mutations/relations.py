@@ -10,6 +10,7 @@ from app.graphql.inputs.relations import (
     IssueRelationDeleteInput,
     IssueSetParentInput,
 )
+from app.graphql.scope import authorized_scope
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import IssueType
 from app.graphql.types.relations import IssueRelationType
@@ -84,7 +85,7 @@ class RelationMutation:
         info: Info,
         input: IssueSetParentInput,
     ) -> IssueParentPayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.relation_service.set_parent(
@@ -99,7 +100,7 @@ class RelationMutation:
             )
 
         return IssueParentPayload(
-            issue=IssueType.from_entity(entity),
+            issue=IssueType.from_entity(entity, scope),
             errors=[],
         )
 
@@ -109,7 +110,7 @@ class RelationMutation:
         info: Info,
         input: IssueClearParentInput,
     ) -> IssueParentPayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.relation_service.clear_parent(
@@ -123,7 +124,7 @@ class RelationMutation:
             )
 
         return IssueParentPayload(
-            issue=IssueType.from_entity(entity),
+            issue=IssueType.from_entity(entity, scope),
             errors=[],
         )
 
@@ -133,7 +134,8 @@ class RelationMutation:
         info: Info,
         input: IssueRelationCreateInput,
     ) -> IssueRelationCreatePayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
+        actor_id = scope.user_id
 
         try:
             entity = await info.context.relation_service.create_relation(
@@ -141,6 +143,7 @@ class RelationMutation:
                 source_issue_id=input.source_issue_id,
                 target_issue_id=input.target_issue_id,
                 relation_type=input.type.to_domain(),
+                actor_id=actor_id,
             )
         except ValidationError as exc:
             return IssueRelationCreatePayload(
@@ -159,7 +162,7 @@ class RelationMutation:
         info: Info,
         input: IssueRelationDeleteInput,
     ) -> IssueRelationDeletePayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             deleted = await info.context.relation_service.delete_relation(

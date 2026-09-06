@@ -9,7 +9,12 @@ from strawberry.types import Info
 from app.domain.errors import ValidationError
 from app.domain.issues import IssueEntity
 from app.domain.pagination import IssuePage
+from app.domain.tenancy import WorkspaceScope
 from app.graphql.errors import bad_user_input
+from app.graphql.types.activity import (
+    DEFAULT_ACTIVITY_FIRST,
+    IssueActivityConnection,
+)
 from app.graphql.types.comment import (
     DEFAULT_COMMENT_FIRST,
     CommentConnection,
@@ -106,6 +111,18 @@ class IssueType:
     # exactly what CLAUDE.md forbids: a client names a workspace by slug and
     # the server resolves it.
 
+    # Carried, not exposed. The scope the root field AUTHORIZED, handed down
+    # so that `cycle`, `project`, `parent`, `children`, `relations`, `labels`
+    # and `comments` all run in the workspace this issue was read from.
+    #
+    # It comes from `app.graphql.scope.authorized_scope` by way of the
+    # resolver that built this object -- never from the row. An entity that
+    # remembered its own tenant would let these resolvers scope their queries
+    # with a value that arrived in an earlier query's RESULT rather than from
+    # the request, and one document may legally name two workspaces, so no
+    # single per-request value could serve them either.
+    scope: strawberry.Private[WorkspaceScope]
+
     # Carried, not exposed: `strawberry.Private` keeps it out of the schema.
     # The `cycle` resolver below needs the id to fetch with, and a client
     # that wanted the id alone can read `cycle { id }` -- publishing both
@@ -135,10 +152,8 @@ class IssueType:
         if self.cycle_id is None:
             return None
 
-        scope = await info.context.tenant.scope()
-
         entity = await info.context.cycle_loader.load(
-            scope=scope,
+            scope=self.scope,
             cycle_id=self.cycle_id,
         )
 
@@ -166,23 +181,21 @@ class IssueType:
         would answer a question about a row it may not see. The first case
         short-circuits for cost, not for semantics.
 
-        The workspace comes from the request rather than from this object, for
-        the reason ProjectType.milestones gives: a resolver must not scope a
-        query with a value that arrived in an earlier query's result.
+        The workspace is the one this issue was read under -- see `scope`
+        above -- so a project reached from here can only ever be one the
+        caller was already authorized for.
         """
         if self.project_id is None:
             return None
 
-        scope = await info.context.tenant.scope()
-
         entity = await info.context.project_loader.load(
-            (scope.workspace_id, self.project_id)
+            (self.scope.workspace_id, self.project_id)
         )
 
         if entity is None:
             return None
 
-        return ProjectType.from_entity(entity)
+        return ProjectType.from_entity(entity, self.scope)
 
     @strawberry.field
     async def parent(self, info: Info) -> IssueSummaryType | None:
@@ -193,10 +206,8 @@ class IssueType:
         point -- an id that resolves to null says nothing about whether it
         exists somewhere the caller cannot see.
         """
-        scope = await info.context.tenant.scope()
-
         entity = await info.context.relation_service.find_parent(
-            scope=scope,
+            scope=self.scope,
             issue_id=self.id,
         )
 
@@ -225,11 +236,9 @@ class IssueType:
         the product rule migration 010's `issues_parent_fk` is shaped for,
         and a team filter here would quietly take it back.
         """
-        scope = await info.context.tenant.scope()
-
         try:
             page = await info.context.relation_service.list_children(
-                scope=scope,
+                scope=self.scope,
                 parent_id=self.id,
                 first=first,
                 after=after,
@@ -253,11 +262,9 @@ class IssueType:
         out of one page in one order; a client wanting only one kind filters
         on `type`.
         """
-        scope = await info.context.tenant.scope()
-
         try:
             page = await info.context.relation_service.list_relations(
-                scope=scope,
+                scope=self.scope,
                 issue_id=self.id,
                 first=first,
                 after=after,
@@ -267,9 +274,49 @@ class IssueType:
 
         return IssueRelationConnection.from_domain(page)
 
+    @strawberry.field
+    async def activity(
+        self,
+        info: Info,
+        first: int = DEFAULT_ACTIVITY_FIRST,
+        after: str | None = None,
+    ) -> IssueActivityConnection:
+        """What has happened to this issue, newest first.
+
+        Not `comments` and not a merged feed of the two. A comment is what
+        somebody wrote and can withdraw; this is what the system recorded
+        happening, and it is append-only. A client that wants them
+        interleaved selects both and merges on `createdAt`, which is a
+        rendering decision and belongs where the rendering is.
+
+        Paginated rather than batched, for the reason `comments` gives: a
+        page per key cannot be batched without a lateral join, and because
+        this field declares `first`, the complexity rule prices it properly
+        instead of letting a document buy a fan-out that measured as cheap.
+
+        The workspace comes from the request, never from the document, so
+        this cannot read another tenant's history even with a correct issue
+        id -- the page comes back empty, exactly as it does for an issue
+        nothing has happened to.
+        """
+        scope = await info.context.tenant.scope()
+
+        try:
+            page = await info.context.activity_service.list_for_issue(
+                scope=scope,
+                issue_id=self.id,
+                first=first,
+                after=after,
+            )
+        except ValidationError as exc:
+            raise bad_user_input("Invalid pagination arguments", exc) from None
+
+        return IssueActivityConnection.from_domain(page)
+
     @classmethod
-    def from_entity(cls, entity: IssueEntity) -> "IssueType":
+    def from_entity(cls, entity: IssueEntity, scope: WorkspaceScope) -> "IssueType":
         return cls(
+            scope=scope,
             id=entity.id,
             team_id=entity.team_id,
             identifier=entity.identifier,
@@ -308,14 +355,13 @@ class IssueType:
         ceiling. What keeps that from being a fan-out of queries is the
         DataLoader below: one statement per page of issues, not one per issue.
 
-        The workspace comes from the request and is part of the loader key, so
-        two issues with the same id in two workspaces -- which cannot happen
-        today and would not need to for this to matter -- could never share a
-        cached answer.
+        The workspace is part of the loader key, so two issues with the same
+        id in two workspaces -- which cannot happen today and would not need
+        to for this to matter -- could never share a cached answer.
         """
-        scope = await info.context.tenant.scope()
-
-        entities = await info.context.issue_labels.load((scope.workspace_id, self.id))
+        entities = await info.context.issue_labels.load(
+            (self.scope.workspace_id, self.id)
+        )
 
         return [LabelType.from_entity(entity) for entity in entities]
 
@@ -337,16 +383,14 @@ class IssueType:
         refused during validation instead of being served as a fan-out. See
         DEFAULT_COMMENT_FIRST for the arithmetic.
 
-        The workspace comes from the request, never from the document, so this
-        cannot be used to read another tenant's discussion even with a
+        The workspace is the authorized one this issue was read under, so
+        this cannot be used to read another tenant's discussion even with a
         correct issue id -- the page comes back empty, exactly as it does for
         an issue nobody has commented on.
         """
-        scope = await info.context.tenant.scope()
-
         try:
             page = await info.context.comment_service.list_for_issue(
-                scope=scope,
+                scope=self.scope,
                 issue_id=self.id,
                 first=first,
                 after=after,
@@ -423,9 +467,9 @@ class IssueConnection:
     page_info: PageInfo
 
     @classmethod
-    def from_domain(cls, page: IssuePage) -> "IssueConnection":
+    def from_domain(cls, page: IssuePage, scope: WorkspaceScope) -> "IssueConnection":
         return cls(
-            nodes=[IssueType.from_entity(entity) for entity in page.nodes],
+            nodes=[IssueType.from_entity(entity, scope) for entity in page.nodes],
             page_info=PageInfo(
                 has_next_page=page.has_next_page,
                 end_cursor=page.end_cursor,

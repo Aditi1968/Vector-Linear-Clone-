@@ -288,6 +288,8 @@ def _domain_module(entity_name: str) -> str:
     """
     known = {
         "IssueEntity": "issues",
+        "ActivityEntity": "activity",
+        "NotificationEntity": "notifications",
         "CommentEntity": "comments",
         "LabelEntity": "labels",
         "CycleEntity": "cycles",
@@ -299,6 +301,7 @@ def _domain_module(entity_name: str) -> str:
         "WorkspaceInvitationEntity": "memberships",
         "TeamEntity": "teams",
         "WorkflowStateEntity": "teams",
+        "SlackInstallationEntity": "slack",
     }
 
     assert entity_name in known, (

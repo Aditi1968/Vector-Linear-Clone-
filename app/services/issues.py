@@ -4,8 +4,10 @@ from uuid import UUID
 
 import asyncpg
 
+from app.domain.activity import ActivityKind, IssueSnapshot
 from app.domain.errors import ValidationError, ValidationIssue
 from app.domain.issues import IssueEntity, IssuePatch, Unset
+from app.domain.notifications import NotificationKind
 from app.domain.pagination import (
     InvalidCursorError,
     IssueCursor,
@@ -15,6 +17,7 @@ from app.domain.pagination import (
 )
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
+from app.services import activity
 
 
 if TYPE_CHECKING:
@@ -245,8 +248,11 @@ class IssueService:
         self._validate_create(title=title, priority=priority, estimate=estimate)
 
         async with self._pool.acquire() as connection:
-            # The service owns the transaction boundary: later this block
-            # will also carry the audit / sync / outbox writes.
+            # The service owns the transaction boundary, and the history
+            # write below is inside it: an issue that exists without the row
+            # saying it was created, or a "created" row for an issue the
+            # allocation rolled back, are both states this block makes
+            # unreachable.
             try:
                 async with connection.transaction():
                     # Resolved before the number is claimed, deliberately.
@@ -267,7 +273,7 @@ class IssueService:
                         team_id=team_id,
                     )
 
-                    return await self._repository.create(
+                    entity = await self._repository.create(
                         connection,
                         scope=scope,
                         team_id=team_id,
@@ -281,6 +287,34 @@ class IssueService:
                         estimate=estimate,
                         due_date=due_date,
                     )
+
+                    # The creator is the actor: whoever filed it is who did
+                    # it. One 'created' row and not six field rows -- an
+                    # issue's initial values are the issue, not six changes
+                    # made to an issue that did not exist a moment ago.
+                    await activity.record(
+                        connection,
+                        scope=scope,
+                        issue_id=entity.id,
+                        actor_id=creator_id,
+                        kind=ActivityKind.CREATED,
+                        to_value=entity.title,
+                    )
+
+                    if assignee_id is not None:
+                        # Filing work on somebody else's plate is the first
+                        # thing they need to hear about. The statement drops
+                        # the row when the assignee IS the creator, so
+                        # assigning an issue to yourself notifies nobody.
+                        await activity.notify(
+                            connection,
+                            scope=scope,
+                            issue_id=entity.id,
+                            actor_id=creator_id,
+                            kind=NotificationKind.ASSIGNED,
+                        )
+
+                    return entity
             except asyncpg.ForeignKeyViolationError as exc:
                 # Caught outside the transaction block so the rollback has
                 # already happened by the time this runs. Catching inside it
@@ -299,6 +333,7 @@ class IssueService:
         scope: WorkspaceScope,
         issue_id: UUID,
         patch: IssuePatch,
+        actor_id: UUID | None = None,
     ) -> IssueEntity | None:
         """Apply a patch to one live issue in this workspace, or nothing.
 
@@ -308,21 +343,66 @@ class IssueService:
         holding a guessed id could learn which ids exist by watching which
         updates report a different kind of failure.
 
-        A single statement does the whole job, so no transaction is opened.
         The patch is not read back and merged in here; see the repository
-        for why that shape would lose concurrent edits.
+        for why that shape would lose concurrent edits. The snapshot taken
+        first is a different thing and does not reintroduce that problem: it
+        is read `FOR UPDATE`, nothing is computed from it, and the UPDATE
+        below still replaces each field with a bound parameter or leaves the
+        column alone. It exists so the history can say what the value WAS.
+
+        A transaction is now opened where a single statement used to need
+        none, and it is what makes the history true rather than approximate:
+        the update and the rows describing it commit together or not at all.
+
+        `actor_id` defaults to None -- an unauthenticated or internal write,
+        which the history records as an action with no actor. It is passed in
+        rather than derived here, for the reason `create` gives about
+        `creator_id`: the only honest source is whatever authenticated the
+        request, and a client able to name the actor could forge one.
         """
         self._validate_patch(patch)
 
         async with self._pool.acquire() as connection:
             try:
-                return await self._repository.update(
-                    connection,
-                    scope=scope,
-                    issue_id=issue_id,
-                    patch=patch,
-                )
+                async with connection.transaction():
+                    before = await self._repository.lock_snapshot(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                    )
+
+                    if before is None:
+                        return None
+
+                    entity = await self._repository.update(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                        patch=patch,
+                    )
+
+                    if entity is None:
+                        # The snapshot found a row and the update did not,
+                        # which means the issue is archived: `lock_snapshot`
+                        # deliberately does not filter on `archived_at` and
+                        # the UPDATE does. Same answer as an id that exists
+                        # nowhere, and no history for a change that did not
+                        # happen.
+                        return None
+
+                    await activity.record_changes(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                        actor_id=actor_id,
+                        before=before,
+                        after=IssueSnapshot.of(entity),
+                    )
+
+                    return entity
             except asyncpg.ForeignKeyViolationError as exc:
+                # Caught outside the transaction block so the rollback has
+                # already happened by the time this runs.
                 error = _validation_error_for(exc.constraint_name)
 
                 if error is None:
@@ -335,6 +415,7 @@ class IssueService:
         *,
         scope: WorkspaceScope,
         issue_id: UUID,
+        actor_id: UUID | None = None,
     ) -> IssueEntity | None:
         """Take one issue off this workspace's board, or answer nothing.
 
@@ -347,13 +428,32 @@ class IssueService:
         archived" alike. The last one collapses into the others rather than
         reporting success a second time, which keeps `archived_at` the
         moment of archival rather than of the most recent attempt.
+
+        The history row is written inside the same transaction, so an issue
+        cannot leave the board without the record of it leaving -- which is
+        the one event the archived issue's own row can no longer be read to
+        discover, since every query here excludes it.
         """
         async with self._pool.acquire() as connection:
-            return await self._repository.archive(
-                connection,
-                scope=scope,
-                issue_id=issue_id,
-            )
+            async with connection.transaction():
+                entity = await self._repository.archive(
+                    connection,
+                    scope=scope,
+                    issue_id=issue_id,
+                )
+
+                if entity is None:
+                    return None
+
+                await activity.record(
+                    connection,
+                    scope=scope,
+                    issue_id=issue_id,
+                    actor_id=actor_id,
+                    kind=ActivityKind.ARCHIVED,
+                )
+
+                return entity
 
     async def set_cycle(
         self,
@@ -361,6 +461,7 @@ class IssueService:
         scope: WorkspaceScope,
         issue_id: UUID,
         cycle_id: UUID | None,
+        actor_id: UUID | None = None,
     ) -> IssueEntity:
         """Put this workspace's issue in a cycle, or take it out of one.
 
@@ -385,12 +486,31 @@ class IssueService:
             # statement is all it holds today.
             async with connection.transaction():
                 try:
+                    before = await self._repository.lock_snapshot(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                    )
+
                     entity = await self._repository.set_cycle(
                         connection,
                         scope=scope,
                         issue_id=issue_id,
                         cycle_id=cycle_id,
                     )
+
+                    if before is not None and entity is not None:
+                        # `record_changes` writes nothing when the issue is
+                        # already in that cycle, which is what keeps a
+                        # repeated request out of the timeline.
+                        await activity.record_changes(
+                            connection,
+                            scope=scope,
+                            issue_id=issue_id,
+                            actor_id=actor_id,
+                            before=before,
+                            after=IssueSnapshot.of(entity),
+                        )
                 except asyncpg.ForeignKeyViolationError as error:
                     if error.constraint_name != ISSUES_CYCLE_FK:
                         raise
@@ -425,6 +545,7 @@ class IssueService:
         issue_id: UUID,
         project_id: UUID | None,
         milestone_id: UUID | None,
+        actor_id: UUID | None = None,
     ) -> IssueEntity:
         """Move one issue into a project and milestone, or out of both.
 
@@ -452,6 +573,12 @@ class IssueService:
         async with self._pool.acquire() as connection:
             async with connection.transaction():
                 try:
+                    before = await self._repository.lock_snapshot(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                    )
+
                     issue = await self._repository.set_project(
                         connection,
                         scope=scope,
@@ -459,6 +586,21 @@ class IssueService:
                         project_id=project_id,
                         milestone_id=milestone_id,
                     )
+
+                    if before is not None and issue is not None:
+                        # The milestone is not in the snapshot and gets no
+                        # row of its own: it is a position INSIDE the
+                        # project, so "moved to project X" is the event, and
+                        # a second row for the milestone would read as a
+                        # second move.
+                        await activity.record_changes(
+                            connection,
+                            scope=scope,
+                            issue_id=issue_id,
+                            actor_id=actor_id,
+                            before=before,
+                            after=IssueSnapshot.of(issue),
+                        )
                 except asyncpg.ForeignKeyViolationError as error:
                     mapped = PROJECT_CONSTRAINT_ERRORS.get(error.constraint_name or "")
 
@@ -478,6 +620,7 @@ class IssueService:
         scope: WorkspaceScope,
         first: int,
         after: str | None,
+        team_id: UUID | None = None,
     ) -> IssuePage:
         """Forward keyset page of one workspace's live issues, newest first.
 
@@ -489,6 +632,13 @@ class IssueService:
         holding it. The scope comes from this call, so a cursor minted in
         one workspace and replayed against another selects nothing rather
         than resuming someone else's page.
+
+        `team_id` narrows within the workspace and is not validated against
+        it here. The repository ANDs it onto the tenant predicate, so a team
+        from another workspace selects nothing -- which is the same empty
+        page an id naming no team gets, and deliberately so: a service that
+        checked the team first and raised would report that another tenant's
+        team is real.
         """
         cursor = self._validate_list(first=first, after=after)
 
@@ -497,6 +647,7 @@ class IssueService:
             rows = await self._repository.list(
                 connection,
                 scope=scope,
+                team_id=team_id,
                 limit=first + 1,
                 after_created_at=cursor.created_at if cursor is not None else None,
                 after_id=cursor.id if cursor is not None else None,

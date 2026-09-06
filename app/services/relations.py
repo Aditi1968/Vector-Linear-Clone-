@@ -2,8 +2,10 @@ from uuid import UUID
 
 import asyncpg
 
+from app.domain.activity import ActivityKind
 from app.domain.errors import ValidationError, ValidationIssue
 from app.domain.issues import IssueEntity
+from app.domain.notifications import NotificationKind
 from app.domain.pagination import (
     InvalidCursorError,
     IssueCursor,
@@ -18,9 +20,11 @@ from app.domain.relations import (
     RelatedIssueNotFoundError,
     RelationEndpoint,
     RelationType,
+    invert,
 )
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.relations import RelationRepository
+from app.services import activity
 
 
 FIRST_MIN = 1
@@ -332,6 +336,7 @@ class RelationService:
         source_issue_id: UUID,
         target_issue_id: UUID,
         relation_type: RelationType,
+        actor_id: UUID | None = None,
     ) -> IssueRelationEntity:
         """Relate two issues, and return the relation from the source's side.
 
@@ -364,13 +369,56 @@ class RelationService:
         async with self._pool.acquire() as connection:
             async with connection.transaction():
                 try:
-                    return await self._repository.create_relation(
+                    entity = await self._repository.create_relation(
                         connection,
                         scope=scope,
                         source_issue_id=source_issue_id,
                         target_issue_id=target_issue_id,
                         relation_type=relation_type,
                     )
+
+                    # One history row per END, not one for the relationship.
+                    # A relation is a fact about two issues and each of them
+                    # has its own timeline, so an engineer reading the target
+                    # sees "blocked_by SOURCE" rather than nothing at all.
+                    # `invert` is what names the same edge from the other
+                    # side; it is total, so this needs no branch.
+                    for issue_id, other_id, named in (
+                        (source_issue_id, target_issue_id, relation_type),
+                        (target_issue_id, source_issue_id, invert(relation_type)),
+                    ):
+                        await activity.record(
+                            connection,
+                            scope=scope,
+                            issue_id=issue_id,
+                            actor_id=actor_id,
+                            kind=ActivityKind.RELATION_ADDED,
+                            from_value=named.value,
+                            to_value=str(other_id),
+                        )
+
+                    blocked_id = _blocked_issue_id(
+                        source_issue_id=source_issue_id,
+                        target_issue_id=target_issue_id,
+                        relation_type=relation_type,
+                    )
+
+                    if blocked_id is not None:
+                        # Only the assignee, and only for a blocking
+                        # relation. Being told that work you are holding has
+                        # just been stopped is the one relation event worth
+                        # interrupting somebody for; `related` and
+                        # `duplicate` are context, and an inbox that carried
+                        # them would be an inbox nobody reads.
+                        await activity.notify(
+                            connection,
+                            scope=scope,
+                            issue_id=blocked_id,
+                            actor_id=actor_id,
+                            kind=NotificationKind.BLOCKED,
+                        )
+
+                    return entity
                 except RelatedIssueNotFoundError as exc:
                     raise self._not_found(exc.endpoint) from None
                 except DuplicateRelationError:
@@ -486,3 +534,32 @@ class RelationService:
             raise ValidationError(issues)
 
         return cursor
+
+
+def _blocked_issue_id(
+    *,
+    source_issue_id: UUID,
+    target_issue_id: UUID,
+    relation_type: RelationType,
+) -> UUID | None:
+    """Which of the two issues is now blocked, or neither.
+
+    The direction is the content of a blocking relation and the two names
+    say it from opposite ends: `BLOCKS` means the source stops the target,
+    `BLOCKED_BY` means the target stops the source. Getting this backwards
+    would notify the person who is holding things up rather than the person
+    who is held up -- a mistake nothing downstream could detect, since both
+    ids are real issues in the same workspace.
+
+    None for `RELATED` and `DUPLICATE`, which name no direction at all;
+    `SYMMETRIC_TYPES` says the same thing from the other side, and this
+    matches the two directed names rather than excluding the symmetric ones
+    so that a fifth relation type has to be classified here on purpose.
+    """
+    if relation_type is RelationType.BLOCKS:
+        return target_issue_id
+
+    if relation_type is RelationType.BLOCKED_BY:
+        return source_issue_id
+
+    return None

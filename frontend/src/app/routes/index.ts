@@ -1,10 +1,11 @@
 export { routes } from './routes'
-export { useAppPaths } from './useAppPaths'
+export { useAppPaths, useWorkspaceSlug } from './useAppPaths'
 export {
   appPaths,
   createAppPaths,
   ISSUE_ID_PARAM,
   PUBLIC_SEGMENTS,
   ROUTE_SEGMENTS,
+  WORKSPACE_SLUG_PARAM,
 } from './paths'
 export type { AppPaths } from './paths'

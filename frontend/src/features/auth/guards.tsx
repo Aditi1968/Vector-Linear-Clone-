@@ -130,11 +130,22 @@ export function RequireNoAuth({ children }: GuardProps) {
   const { viewer, isLoading } = useViewer()
   const location = useLocation()
   const signedIn = viewer !== null
-  const { destination, isResolving, errorMessage, retry } =
-    useSignedInDestination(signedIn)
+  const returnPath = returnPathFrom(location.state)
 
-  if (isLoading || (signedIn && isResolving)) {
+  // A saved return path is already an answer, so `myWorkspaces` is not asked
+  // for another one. That skips a round trip on the commonest path through
+  // this screen -- follow a link, get refused, sign in -- and is also what
+  // makes that redirect immediate rather than one request late.
+  const { destination, isResolving, errorMessage, retry } = useSignedInDestination(
+    signedIn && returnPath === null,
+  )
+
+  if (isLoading || (signedIn && returnPath === null && isResolving)) {
     return <SessionPending label="Checking your session" />
+  }
+
+  if (signedIn && returnPath !== null) {
+    return <Navigate to={returnPath} replace />
   }
 
   if (signedIn && errorMessage !== null) {
@@ -148,7 +159,7 @@ export function RequireNoAuth({ children }: GuardProps) {
   }
 
   if (signedIn && destination !== null) {
-    return <Navigate to={returnPathFrom(location.state) ?? destination} replace />
+    return <Navigate to={destination} replace />
   }
 
   return <>{children ?? <Outlet />}</>

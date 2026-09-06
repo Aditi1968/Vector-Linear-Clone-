@@ -14,30 +14,37 @@ from app.graphql.loaders.projects import (
     build_project_loader,
     build_project_milestones_loader,
 )
-from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
+from app.repositories.activity import ActivityRepository
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
+from app.repositories.github import GithubRepository
 from app.repositories.invitations import InvitationRepository
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.labels import LabelRepository
 from app.repositories.memberships import MembershipRepository
+from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.relations import RelationRepository
 from app.repositories.sessions import SessionRepository
+from app.repositories.slack import SlackRepository
 from app.repositories.teams import TeamRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
+from app.services.activity import ActivityService
 from app.services.auth import AuthService
 from app.services.comments import CommentService
 from app.services.cycles import CycleService
+from app.services.github import GithubAppConfig, GithubService
 from app.services.issues import IssueService
 from app.services.labels import LabelService
 from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
 from app.services.projects import ProjectService
 from app.services.relations import RelationService
+from app.services.search import SearchService
+from app.services.slack import DatabaseTokenStore, SlackService
 from app.services.teams import TeamService
 from app.services.workspaces import WorkspaceService
 
@@ -57,7 +64,10 @@ class VectorContext(BaseContext):
         cycle_service: CycleService,
         project_service: ProjectService,
         relation_service: RelationService,
-        tenant: RequestTenant,
+        search_service: SearchService,
+        github_service: GithubService,
+        slack_service: SlackService,
+        activity_service: ActivityService,
         environment: Environment,
     ):
         super().__init__()
@@ -69,6 +79,30 @@ class VectorContext(BaseContext):
         self.comment_service = comment_service
         self.cycle_service = cycle_service
         self.project_service = project_service
+        self.search_service = search_service
+
+        # Holds the deployment's GitHub App credentials, and is the reason
+        # nothing else in this context does. The service answers `configured`
+        # and never the values behind it, and no Strawberry type is built from
+        # `GithubAppConfig`, so there is no field a client can select a
+        # credential through.
+        self.github_service = github_service
+
+        # Reads a status and removes an installation, and does neither without
+        # an AuthorizedWorkspaceScope. The connect half of the integration is
+        # not reachable from here at all: an OAuth grant arrives through
+        # app/rest/slack.py, which builds its own instance of this service
+        # over the same pool.
+        self.slack_service = slack_service
+
+        # The READ half of activity and notifications only. Nothing writes
+        # through this object: an activity row and an inbox item are written
+        # by the service that causes them, on that service's own connection
+        # and inside its transaction, through the module-level functions in
+        # app/services/activity.py. A writable service here would be a way to
+        # record history for a change that had not happened yet -- or that
+        # was about to be rolled back.
+        self.activity_service = activity_service
 
         # Built here rather than in `get_context` so that a context assembled
         # by hand -- a test, a worker -- gets working loaders from the service
@@ -84,10 +118,9 @@ class VectorContext(BaseContext):
             project_service
         )
 
-        # The same two service objects `tenant` resolves through, exposed
-        # directly for the resolvers that ask about teams and workspaces as
-        # entities rather than as this request's scope. Shared instances,
-        # not second copies: one request gets one of each.
+        # Teams and workspaces as entities, for the resolvers that ask about
+        # them rather than about this request's scope. Shared instances, not
+        # second copies: one request gets one of each.
         self.team_service = team_service
         self.workspace_service = workspace_service
 
@@ -111,11 +144,16 @@ class VectorContext(BaseContext):
         # a resolver, which the schema masks as "Internal server error".
         self.relation_service = relation_service
 
-        # Required, not defaulted. A context that could be built without a
-        # tenant would let a resolver reach the services with no workspace
-        # to give them, and the first sign of it would be a TypeError in
-        # production rather than a failure to construct.
-        self.tenant = tenant
+        # There is deliberately no workspace on this object. A per-request
+        # "current tenant" is what `app/graphql/tenancy.py` used to hold, and
+        # the reason it is gone is not that the constant in it was temporary:
+        # a scope living on the context is a scope a resolver can reach
+        # without having been given one, so a resolver that forgot to
+        # authorize would still find a workspace to work in. The scope now
+        # arrives per FIELD, from `app.graphql.scope.authorized_scope`, which
+        # is the only thing that produces one -- and a document may legally
+        # name two workspaces in two root fields, which no single ambient
+        # value could have served.
 
         # Carried because the Set-Cookie policy depends on it: Secure is only
         # legal where the deployment speaks https. Passed in rather than read
@@ -191,9 +229,10 @@ async def get_context() -> VectorContext:
     # Resolved per request rather than at import, which is what keeps this
     # module importable without a configured environment. get_settings is
     # lru_cached, so this is a dict lookup after the first request.
-    environment = get_settings().environment
+    settings = get_settings()
+    environment = settings.environment
 
-    # Constructed once and handed to both the context and the tenant. Two
+    # Constructed once and shared by every resolver that needs one. Two
     # instances would be two objects answering the same question over the
     # same pool, and any caching either one grows later would then be per
     # copy rather than per request.
@@ -253,14 +292,44 @@ async def get_context() -> VectorContext:
             pool=pool,
             repository=RelationRepository(),
         ),
-        # Built here rather than resolved here: nothing in this function
-        # touches the database. Constructing a context is on the path of
-        # every request, including the malformed ones a query never runs
-        # for, so the workspace lookup happens in the resolver that needs
-        # it and not once per HTTP request regardless.
-        tenant=RequestTenant(
-            workspace_service=workspace_service,
-            team_service=team_service,
+        search_service=SearchService(
+            pool=pool,
+            # Two repositories, because search reads two tables and the SQL
+            # for a table belongs to the repository that owns it. Fresh
+            # instances rather than shared ones: a repository here holds no
+            # state and no connection -- it is a namespace for statements --
+            # so there is nothing for one request to get two of.
+            issue_repository=IssueRepository(),
+            project_repository=ProjectRepository(),
+        ),
+        github_service=GithubService(
+            pool=pool,
+            repository=GithubRepository(),
+            # Built from the same settings this function already resolved, so
+            # the GraphQL layer and app/rest/github.py cannot disagree about
+            # whether this deployment has a GitHub App.
+            config=GithubAppConfig.from_settings(settings),
+        ),
+        slack_service=SlackService(
+            pool=pool,
+            repository=SlackRepository(),
+            token_store=DatabaseTokenStore(),
+            # Whether this deployment has a Slack app at all, resolved from
+            # settings here rather than read inside the service, so that one
+            # request cannot answer one field as configured and another as
+            # not. `settings` is already resolved above for `environment`.
+            configured=settings.slack_configured,
+        ),
+        # One service over both tables, because a history row and an inbox
+        # item are two records of one moment: the event that happened, and
+        # who has to look at it. They stay two TABLES and two entities --
+        # that distinction is the point of migration 012 -- but a reader
+        # asking "what happened here, and does it concern me" is asking one
+        # question.
+        activity_service=ActivityService(
+            pool=pool,
+            repository=ActivityRepository(),
+            notifications=NotificationRepository(),
         ),
         environment=environment,
     )

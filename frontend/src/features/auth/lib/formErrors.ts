@@ -27,6 +27,20 @@ export function errorId(field: string): string {
 }
 
 /**
+ * One text input's value, read off the submitted form.
+ *
+ * `FormData.get` is typed `File | string | null` because a form may carry a
+ * file input. None of these does, so a non-string is not a value to coerce:
+ * `String(file)` produces "[object File]", and this is the code path a
+ * password travels down.
+ */
+export function textField(fields: FormData, name: string): string {
+  const value = fields.get(name)
+
+  return typeof value === 'string' ? value : ''
+}
+
+/**
  * Sort an outcome into field errors and form errors.
  *
  * An error naming a field the form does not render is promoted to the form

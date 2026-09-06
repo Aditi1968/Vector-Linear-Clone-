@@ -28,7 +28,7 @@ from tests.test_settings import PLACEHOLDER_DSN, use_environment
 
 ISSUES_QUERY = """
 query ListIssues {
-  issues(first: 1) {
+  issues(workspaceSlug: "acme", first: 1) {
     nodes {
       id
       title
@@ -58,7 +58,7 @@ class RecordingIssueService:
     def __init__(self):
         self.calls = 0
 
-    async def list(self, *, scope, first: int, after: str | None) -> IssuePage:
+    async def list(self, *, scope, team_id, first: int, after: str | None) -> IssuePage:
         self.calls += 1
 
         return IssuePage(

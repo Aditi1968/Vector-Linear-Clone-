@@ -8,7 +8,9 @@ from app.db import connect, disconnect
 from app.graphql.router import build_graphql_router
 from app.graphql.schema import build_schema
 from app.http_limits import add_request_body_limit
+from app.rest.github import router as github_router
 from app.rest.health import router as health_router
+from app.rest.slack import router as slack_router
 from app.services.passwords import warm_password_hashing
 
 
@@ -62,5 +64,19 @@ def create_app() -> FastAPI:
         prefix="/graphql",
     )
     app.include_router(health_router)
+
+    # Mounted unconditionally, including on a deployment with no GitHub App.
+    # Gating the mount on configuration would make an unconfigured deployment
+    # answer 404 from the router and a configured one 404 from the handler,
+    # which are the same answer arrived at two ways -- and the second is the
+    # one that stays right when the settings change without a redeploy.
+    app.include_router(github_router)
+    # Mounted unconditionally, including on a deployment with no Slack
+    # credentials. The routes exist and answer 503 "not configured" rather
+    # than 404, because a mount that depended on configuration would make a
+    # misconfigured deployment indistinguishable from one where the code was
+    # never deployed -- and would mean the routing table differs between
+    # environments, which is the thing that makes a staging test meaningless.
+    app.include_router(slack_router)
 
     return app

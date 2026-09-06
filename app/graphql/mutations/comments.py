@@ -3,13 +3,13 @@ from strawberry.types import Info
 
 from app.domain.errors import ValidationError
 from app.graphql.inputs.comment import CommentCreateInput, CommentDeleteInput
+from app.graphql.scope import authorized_scope
 from app.graphql.types.comment import (
     CommentCreatePayload,
     CommentDeletePayload,
     CommentType,
 )
 from app.graphql.types.errors import ValidationErrorType
-from app.graphql.viewer import viewer_user_id
 
 
 @strawberry.type
@@ -17,10 +17,13 @@ class CommentMutation:
     """The write half of comments, merged into the root Mutation.
 
     Both resolvers begin by establishing WHO is acting, before they touch a
-    service or a workspace, and that ordering is the point rather than a
-    style: an unauthenticated request must perform no protected data lookup at
-    all, so the UNAUTHENTICATED error is raised while the request is still just
-    a session cookie that named nothing.
+    service, and that ordering is the point rather than a style: an
+    unauthenticated request must perform no protected data lookup at all, so
+    the UNAUTHENTICATED error is raised while the request is still just a
+    session cookie that named nothing. `authorized_scope` does that first, and
+    the author is then read off the scope it returns -- `scope.user_id` is the
+    membership row the database matched, so authorship and permission cannot
+    come from two lookups that disagree.
 
     Neither resolver accepts an author id. The viewer is the author on the way
     in and the only permitted deleter on the way out, and neither fact is
@@ -42,14 +45,13 @@ class CommentMutation:
         distinguishable error that the issue they named is real. See
         `CommentService.create`.
         """
-        author_id = await viewer_user_id(info)
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.comment_service.create(
                 scope=scope,
                 issue_id=input.issue_id,
-                author_id=author_id,
+                author_id=scope.user_id,
                 body=input.body,
             )
         except ValidationError as exc:
@@ -78,14 +80,13 @@ class CommentMutation:
         comments; that rule needs a role on this path, and half of it enforced
         here would read as all of it.
         """
-        author_id = await viewer_user_id(info)
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             deleted_id = await info.context.comment_service.delete(
                 scope=scope,
                 comment_id=input.id,
-                author_id=author_id,
+                author_id=scope.user_id,
             )
         except ValidationError as exc:
             return CommentDeletePayload(

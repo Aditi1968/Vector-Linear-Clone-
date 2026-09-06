@@ -14,6 +14,7 @@ type CommentConnection {
 }
 
 input CommentCreateInput {
+  workspaceSlug: String!
   issueId: UUID!
   body: String!
 }
@@ -24,6 +25,7 @@ type CommentCreatePayload {
 }
 
 input CommentDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -43,6 +45,7 @@ type Cycle {
 }
 
 input CycleCreateInput {
+  workspaceSlug: String!
   teamId: UUID!
   number: Int!
   startsAt: DateTime!
@@ -61,6 +64,7 @@ type CyclePayload {
 }
 
 input CycleUpdateInput {
+  workspaceSlug: String!
   id: UUID!
   number: Int!
   startsAt: DateTime!
@@ -73,6 +77,29 @@ scalar Date
 
 """Date with time (isoformat)"""
 scalar DateTime
+
+input GithubDisconnectInput {
+  workspaceSlug: String!
+}
+
+type GithubIntegration {
+  status: GithubIntegrationStatus!
+  accountLogin: String
+  connectedAt: DateTime
+  connectedById: UUID
+  repositories: [GithubRepository!]!
+}
+
+enum GithubIntegrationStatus {
+  UNCONFIGURED
+  DISCONNECTED
+  CONNECTED
+}
+
+type GithubRepository {
+  repositoryId: ID!
+  fullName: String!
+}
 
 input InvitationAcceptInput {
   token: String!
@@ -153,8 +180,39 @@ type Issue {
   parent: IssueSummary
   children(first: Int! = 10, after: String = null): IssueSummaryConnection!
   relations(first: Int! = 10, after: String = null): IssueRelationConnection!
+  activity(first: Int! = 10, after: String = null): IssueActivityConnection!
   labels: [Label!]!
   comments(first: Int! = 20, after: String = null): CommentConnection!
+}
+
+type IssueActivity {
+  id: UUID!
+  issueId: UUID!
+  actorId: UUID
+  kind: IssueActivityKind!
+  fromValue: String
+  toValue: String
+  createdAt: DateTime!
+}
+
+type IssueActivityConnection {
+  nodes: [IssueActivity!]!
+  pageInfo: PageInfo!
+}
+
+enum IssueActivityKind {
+  CREATED
+  TITLE_CHANGED
+  STATE_CHANGED
+  PRIORITY_CHANGED
+  ASSIGNEE_CHANGED
+  ARCHIVED
+  COMMENTED
+  LABEL_ATTACHED
+  LABEL_DETACHED
+  RELATION_ADDED
+  PROJECT_CHANGED
+  CYCLE_CHANGED
 }
 
 type IssueArchivePayload {
@@ -163,6 +221,7 @@ type IssueArchivePayload {
 }
 
 input IssueClearParentInput {
+  workspaceSlug: String!
   issueId: UUID!
 }
 
@@ -172,6 +231,8 @@ type IssueConnection {
 }
 
 input IssueCreateInput {
+  workspaceSlug: String!
+  teamId: UUID!
   title: String!
   description: String = null
   priority: Int! = 0
@@ -186,6 +247,7 @@ type IssueCreatePayload {
 }
 
 input IssueLabelInput {
+  workspaceSlug: String!
   issueId: UUID!
   labelId: UUID!
 }
@@ -213,6 +275,7 @@ type IssueRelationConnection {
 }
 
 input IssueRelationCreateInput {
+  workspaceSlug: String!
   sourceIssueId: UUID!
   targetIssueId: UUID!
   type: IssueRelationType!
@@ -224,6 +287,7 @@ type IssueRelationCreatePayload {
 }
 
 input IssueRelationDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -240,6 +304,7 @@ enum IssueRelationType {
 }
 
 input IssueSetCycleInput {
+  workspaceSlug: String!
   issueId: UUID!
   cycleId: UUID = null
 }
@@ -250,11 +315,13 @@ type IssueSetCyclePayload {
 }
 
 input IssueSetParentInput {
+  workspaceSlug: String!
   issueId: UUID!
   parentId: UUID!
 }
 
 input IssueSetProjectInput {
+  workspaceSlug: String!
   issueId: UUID!
   projectId: UUID = null
   milestoneId: UUID = null
@@ -281,6 +348,7 @@ type IssueSummaryConnection {
 }
 
 input IssueUpdateInput {
+  workspaceSlug: String!
   title: String
   description: String
   priority: Int
@@ -309,11 +377,13 @@ type LabelConnection {
 }
 
 input LabelCreateInput {
+  workspaceSlug: String!
   name: String!
   color: String = null
 }
 
 input LabelDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -328,6 +398,7 @@ type LabelPayload {
 }
 
 input LabelUpdateInput {
+  workspaceSlug: String!
   id: UUID!
   name: String!
   color: String!
@@ -367,7 +438,7 @@ input MemberRoleUpdateInput {
 type Mutation {
   issueCreate(input: IssueCreateInput!): IssueCreatePayload!
   issueUpdate(id: UUID!, input: IssueUpdateInput!): IssueUpdatePayload!
-  issueArchive(id: UUID!): IssueArchivePayload!
+  issueArchive(workspaceSlug: String!, id: UUID!): IssueArchivePayload!
   register(input: RegisterInput!): RegisterPayload!
   login(input: LoginInput!): LoginPayload!
   logout: LogoutPayload!
@@ -407,7 +478,7 @@ type Mutation {
   commentDelete(input: CommentDeleteInput!): CommentDeletePayload!
   cycleCreate(input: CycleCreateInput!): CyclePayload!
   cycleUpdate(input: CycleUpdateInput!): CyclePayload!
-  cycleDelete(id: UUID!): CycleDeletePayload!
+  cycleDelete(workspaceSlug: String!, id: UUID!): CycleDeletePayload!
   issueSetCycle(input: IssueSetCycleInput!): IssueSetCyclePayload!
   projectCreate(input: ProjectCreateInput!): ProjectPayload!
   projectUpdate(input: ProjectUpdateInput!): ProjectPayload!
@@ -422,6 +493,49 @@ type Mutation {
   issueClearParent(input: IssueClearParentInput!): IssueParentPayload!
   issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
   issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
+  githubDisconnect(input: GithubDisconnectInput!): GithubIntegration!
+  slackDisconnect(input: SlackDisconnectInput!): SlackDisconnectPayload!
+  notificationMarkRead(input: NotificationMarkReadInput!): NotificationMarkReadPayload!
+  notificationMarkAllRead(input: NotificationMarkAllReadInput!): NotificationMarkAllReadPayload!
+}
+
+type Notification {
+  id: UUID!
+  actorId: UUID
+  issueId: UUID!
+  kind: NotificationKind!
+  readAt: DateTime
+  createdAt: DateTime!
+}
+
+type NotificationConnection {
+  nodes: [Notification!]!
+  pageInfo: PageInfo!
+}
+
+enum NotificationKind {
+  ASSIGNED
+  COMMENTED
+  BLOCKED
+}
+
+input NotificationMarkAllReadInput {
+  workspaceSlug: String!
+}
+
+type NotificationMarkAllReadPayload {
+  markedCount: Int!
+  errors: [ValidationErrorType!]!
+}
+
+input NotificationMarkReadInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type NotificationMarkReadPayload {
+  notification: Notification
+  errors: [ValidationErrorType!]!
 }
 
 type PageInfo {
@@ -448,6 +562,7 @@ type ProjectConnection {
 }
 
 input ProjectCreateInput {
+  workspaceSlug: String!
   name: String!
   description: String = null
   state: ProjectState! = PLANNED
@@ -456,6 +571,7 @@ input ProjectCreateInput {
 }
 
 input ProjectDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -475,12 +591,14 @@ type ProjectMilestone {
 }
 
 input ProjectMilestoneCreateInput {
+  workspaceSlug: String!
   projectId: UUID!
   name: String!
   targetDate: Date = null
 }
 
 input ProjectMilestoneDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -495,6 +613,7 @@ type ProjectMilestonePayload {
 }
 
 input ProjectMilestoneUpdateInput {
+  workspaceSlug: String!
   id: UUID!
   name: String
   targetDate: Date
@@ -515,11 +634,13 @@ enum ProjectState {
 }
 
 input ProjectTeamInput {
+  workspaceSlug: String!
   projectId: UUID!
   teamId: UUID!
 }
 
 input ProjectUpdateInput {
+  workspaceSlug: String!
   id: UUID!
   name: String
   description: String
@@ -529,8 +650,8 @@ input ProjectUpdateInput {
 }
 
 type Query {
-  issue(id: UUID!): Issue
-  issues(first: Int! = 50, after: String = null): IssueConnection!
+  issue(workspaceSlug: String!, id: UUID!): Issue
+  issues(workspaceSlug: String!, teamId: UUID = null, first: Int! = 50, after: String = null): IssueConnection!
   me: User
 
   """
@@ -547,12 +668,17 @@ type Query {
   Invitations to this workspace that have not been accepted or expired. Admins and owners only.
   """
   invitations(workspaceSlug: String!): [WorkspaceInvitation!]!
-  label(id: UUID!): Label
-  labels(first: Int! = 50, after: String = null): LabelConnection!
-  cycle(id: UUID!): Cycle
-  cycles(teamId: UUID!): [Cycle!]!
-  project(id: UUID!): Project
-  projects(first: Int! = 50, after: String = null): ProjectConnection!
+  label(workspaceSlug: String!, id: UUID!): Label
+  labels(workspaceSlug: String!, first: Int! = 50, after: String = null): LabelConnection!
+  cycle(workspaceSlug: String!, id: UUID!): Cycle
+  cycles(workspaceSlug: String!, teamId: UUID!): [Cycle!]!
+  project(workspaceSlug: String!, id: UUID!): Project
+  projects(workspaceSlug: String!, first: Int! = 50, after: String = null): ProjectConnection!
+  search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
+  githubIntegration(workspaceSlug: String!): GithubIntegration!
+  slackIntegration(workspaceSlug: String!): SlackIntegration!
+  notifications(workspaceSlug: String!, unreadOnly: Boolean! = false, first: Int! = 50, after: String = null): NotificationConnection!
+  notificationUnreadCount(workspaceSlug: String!): Int!
 }
 
 input RegisterInput {
@@ -564,6 +690,31 @@ input RegisterInput {
 type RegisterPayload {
   user: User
   errors: [ValidationErrorType!]!
+}
+
+type SearchResults {
+  issues: [Issue!]!
+  projects: [Project!]!
+}
+
+input SlackDisconnectInput {
+  workspaceSlug: String!
+}
+
+type SlackDisconnectPayload {
+  integration: SlackIntegration!
+}
+
+type SlackIntegration {
+  status: SlackIntegrationStatus!
+  teamName: String
+  scopes: [String!]!
+}
+
+enum SlackIntegrationStatus {
+  UNCONFIGURED
+  DISCONNECTED
+  CONNECTED
 }
 
 type Team {

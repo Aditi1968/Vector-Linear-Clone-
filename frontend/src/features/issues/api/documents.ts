@@ -43,4 +43,5 @@ export {
   IssueCreateDocument,
   IssueDetailDocument,
   IssueListDocument,
+  WorkspaceTeamsDocument,
 } from '../../../generated/operations'

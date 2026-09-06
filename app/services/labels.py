@@ -3,6 +3,7 @@ from uuid import UUID
 
 import asyncpg
 
+from app.domain.activity import ActivityKind
 from app.domain.errors import ValidationError, ValidationIssue
 from app.domain.labels import LabelEntity
 from app.domain.pagination import (
@@ -15,6 +16,7 @@ from app.domain.pagination import (
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.labels import LabelRepository
+from app.services import activity
 
 
 NAME_MIN_LENGTH = 1
@@ -315,6 +317,7 @@ class LabelService:
         scope: WorkspaceScope,
         issue_id: UUID,
         label_id: UUID,
+        actor_id: UUID | None = None,
     ) -> None:
         """Apply a label to an issue, both in this workspace.
 
@@ -328,7 +331,8 @@ class LabelService:
         The count and the insert share a transaction so that the cap is
         evaluated against a consistent view. They are not serialised against
         each other -- see LABELS_PER_ISSUE_MAX for why the limit is
-        deliberately soft.
+        deliberately soft. The history row joins them in that transaction, so
+        a rolled-back attach leaves no record of an attach.
         """
         async with self._pool.acquire() as connection:
             async with connection.transaction():
@@ -388,12 +392,25 @@ class LabelService:
 
                     raise
 
+                # The label's id, not its name. A name is editable and
+                # deletable; the id is what the timeline can still resolve --
+                # or honestly fail to resolve -- a year from now.
+                await activity.record(
+                    connection,
+                    scope=scope,
+                    issue_id=issue_id,
+                    actor_id=actor_id,
+                    kind=ActivityKind.LABEL_ATTACHED,
+                    to_value=str(label_id),
+                )
+
     async def detach(
         self,
         *,
         scope: WorkspaceScope,
         issue_id: UUID,
         label_id: UUID,
+        actor_id: UUID | None = None,
     ) -> None:
         """Remove a label from an issue, both in this workspace.
 
@@ -401,6 +418,10 @@ class LabelService:
         successful no-op. Silence would make "the label is gone" and "the
         label was never there, and possibly neither was the issue"
         indistinguishable to a client that is about to update its cache.
+
+        The history row is written only when a row actually went, and inside
+        the same transaction: a timeline that recorded every ATTEMPT to
+        remove a label would report removals that never happened.
         """
         async with self._pool.acquire() as connection:
             async with connection.transaction():
@@ -410,6 +431,16 @@ class LabelService:
                     issue_id=issue_id,
                     label_id=label_id,
                 )
+
+                if detached:
+                    await activity.record(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                        actor_id=actor_id,
+                        kind=ActivityKind.LABEL_DETACHED,
+                        to_value=str(label_id),
+                    )
 
         if not detached:
             raise ValidationError(
