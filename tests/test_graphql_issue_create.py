@@ -123,6 +123,8 @@ async def test_valid_input_returns_issue_and_empty_errors():
         title="A valid title",
         description="described",
         priority=2,
+        # A new issue is in no cycle; nothing in issueCreate can put it in one.
+        cycle_id=None,
         completed_at=None,
         created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),

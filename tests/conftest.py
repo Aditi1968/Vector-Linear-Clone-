@@ -345,6 +345,7 @@ def as_record(entity: IssueEntity) -> dict:
         "title": entity.title,
         "description": entity.description,
         "priority": entity.priority,
+        "cycle_id": entity.cycle_id,
         "completed_at": entity.completed_at,
         "created_at": entity.created_at,
         "updated_at": entity.updated_at,
@@ -355,8 +356,12 @@ def normalize(sql: str) -> str:
     return " ".join(sql.split())
 
 
-def make_entity(index: int) -> IssueEntity:
-    """Deterministic entity; higher index means newer created_at."""
+def make_entity(index: int, *, cycle_id: UUID | None = None) -> IssueEntity:
+    """Deterministic entity; higher index means newer created_at.
+
+    In no cycle unless a test says otherwise: that is the ordinary state of
+    an issue, and a default cycle here would put every fake issue in one.
+    """
     created_at = BASE_TIME + timedelta(minutes=index)
 
     return IssueEntity(
@@ -364,6 +369,7 @@ def make_entity(index: int) -> IssueEntity:
         title=f"Issue {index}",
         description=None,
         priority=1,
+        cycle_id=cycle_id,
         completed_at=None,
         created_at=created_at,
         updated_at=created_at,

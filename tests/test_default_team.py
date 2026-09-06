@@ -36,9 +36,11 @@ from app.domain.errors import TeamNotFoundError
 from app.graphql.context import VectorContext
 from app.graphql.schema import build_schema
 from app.graphql.tenancy import RequestTenant
+from app.repositories.cycles import CycleRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.teams import TeamRepository
 from app.repositories.workspaces import WorkspaceRepository
+from app.services.cycles import CycleService
 from app.services.issues import IssueService
 from app.services.teams import TeamService
 from app.services.workspaces import WorkspaceService
@@ -269,6 +271,7 @@ async def wired(postgres_dsn):
                     # viewer.
                     auth_service=None,
                     membership_service=None,
+                    cycle_service=CycleService(pool=pool, repository=CycleRepository()),
                     team_service=team_service,
                     workspace_service=workspace_service,
                     environment="test",

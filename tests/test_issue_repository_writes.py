@@ -21,6 +21,7 @@ ENTITY_COLUMNS = (
     "title",
     "description",
     "priority",
+    "cycle_id",
     "completed_at",
     "created_at",
     "updated_at",

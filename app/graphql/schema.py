@@ -9,8 +9,10 @@ from strawberry.tools import merge_types
 from app.config import Environment
 from app.graphql.limits import operation_limit_extensions
 from app.graphql.mutations.auth import AuthMutation
+from app.graphql.mutations.cycles import CycleMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
 from app.graphql.queries.auth import AuthQuery
+from app.graphql.queries.cycles import CycleQuery
 from app.graphql.queries.issues import Query as IssueQuery
 from app.graphql.queries.memberships import MembershipQuery
 from app.graphql.queries.teams import TeamQuery
@@ -30,8 +32,10 @@ from app.graphql.queries.teams import TeamQuery
 #
 # Tuple order is SDL field order, so it stays stable across exports and
 # `frontend/schema.graphql` does not churn.
-Query = merge_types("Query", (IssueQuery, AuthQuery, TeamQuery, MembershipQuery))
-Mutation = merge_types("Mutation", (IssueMutation, AuthMutation))
+Query = merge_types(
+    "Query", (IssueQuery, AuthQuery, TeamQuery, MembershipQuery, CycleQuery)
+)
+Mutation = merge_types("Mutation", (IssueMutation, AuthMutation, CycleMutation))
 
 
 # The public error vocabulary. An error reaches a client with its own
@@ -120,6 +124,30 @@ def _mask_result(result):
         ]
 
     return result
+
+
+@strawberry.type
+class Query(IssueQuery, CycleQuery):
+    """The schema's single root query, composed one feature at a time.
+
+    GraphQL allows exactly one root query type, and a growing product wants
+    more than one file's worth of resolvers on it. Composing by inheritance
+    keeps each feature's reads in its own module -- so two features being
+    written at once do not edit the same class -- while the root that
+    clients see stays a single type.
+
+    The bases must not name the same field twice. Nothing checks that:
+    Python's MRO would quietly pick the first, and the schema would export
+    without complaint. Two features that both want `cycles` have to settle
+    it between themselves, and the exported SDL -- checked in, and diffed on
+    every change by `npm run graphql:schema:check` -- is where a collision
+    is visible.
+    """
+
+
+@strawberry.type
+class Mutation(IssueMutation, CycleMutation):
+    """The schema's single root mutation, composed the same way."""
 
 
 class _MaskedSchema(strawberry.Schema):

@@ -5,8 +5,10 @@ from strawberry.fastapi import BaseContext
 from app.config import Environment, get_settings
 from app.db import get_pool
 from app.domain.auth import UserEntity
+from app.graphql.loaders.cycles import CycleLoader
 from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
+from app.repositories.cycles import CycleRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.memberships import MembershipRepository
 from app.repositories.sessions import SessionRepository
@@ -14,6 +16,7 @@ from app.repositories.teams import TeamRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.auth import AuthService
+from app.services.cycles import CycleService
 from app.services.issues import IssueService
 from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
@@ -31,6 +34,7 @@ class VectorContext(BaseContext):
         team_service: TeamService,
         workspace_service: WorkspaceService,
         membership_service: MembershipService,
+        cycle_service: CycleService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -39,6 +43,7 @@ class VectorContext(BaseContext):
         self.issue_service = issue_service
         self.auth_service = auth_service
         self.membership_service = membership_service
+        self.cycle_service = cycle_service
 
         # The same two service objects `tenant` resolves through, exposed
         # directly for the resolvers that ask about teams and workspaces as
@@ -46,6 +51,18 @@ class VectorContext(BaseContext):
         # not second copies: one request gets one of each.
         self.team_service = team_service
         self.workspace_service = workspace_service
+
+        # Built here rather than taken as an argument, which is the one
+        # place in this class where construction beats injection. A
+        # DataLoader's cache must live exactly as long as the request, and
+        # this object is the request; a loader passed in is a loader whose
+        # lifetime is the caller's business, and a caller that built one per
+        # process -- or reused one across two requests -- would serve the
+        # second client the first client's cycles from cache, with nothing
+        # here able to tell. Over the same service the resolvers use, so a
+        # cycle read through `Issue.cycle` and one read through `cycle(id:)`
+        # cannot come from two differently-configured paths.
+        self.cycle_loader = CycleLoader(cycle_service)
 
         # Required, not defaulted. A context that could be built without a
         # tenant would let a resolver reach the services with no workspace
@@ -138,6 +155,7 @@ async def get_context() -> VectorContext:
             sessions=SessionRepository(),
             hasher=Argon2PasswordHasher(),
         ),
+        cycle_service=CycleService(pool=pool, repository=CycleRepository()),
         team_service=team_service,
         workspace_service=workspace_service,
         # Built here rather than resolved here: nothing in this function
