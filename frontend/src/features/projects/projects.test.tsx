@@ -60,9 +60,20 @@ function listData(nodes: readonly ProjectDetailFields[]): ProjectListData {
   return {
     projects: {
       __typename: 'ProjectConnection',
-      // The list document selects a subset of the detail fields, so a detail
-      // fixture satisfies it; the extra fields are simply not read.
-      nodes: nodes.map(({ description: _d, createdAt: _c, milestones: _m, ...row }) => row),
+      // The row selection is a strict subset of the detail selection, so the
+      // extra fields are dropped rather than sent. Built by picking rather
+      // than by destructuring the rest, because the fields to keep are the
+      // contract and a rest-spread would state the ones to discard.
+      nodes: nodes.map((node) => ({
+        __typename: node.__typename,
+        id: node.id,
+        name: node.name,
+        state: node.state,
+        targetDate: node.targetDate,
+        leadId: node.leadId,
+        teamIds: node.teamIds,
+        updatedAt: node.updatedAt,
+      })),
       pageInfo: { __typename: 'PageInfo', hasNextPage: false, endCursor: null },
     },
   }
