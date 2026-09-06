@@ -1,0 +1,288 @@
+# Every GraphQL document the projects feature sends.
+#
+# Source file. `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`; edit here, never there. The conventions this
+# file follows are set out at length in
+# `src/features/issues/api/operations.graphql` and are not restated -- except
+# for the one that is easy to get wrong and expensive to discover:
+#
+#   **`first` is a literal, never a variable.** `app/graphql/limits.py`
+#   prices a list field at `page size x fields below it` during *validation*,
+#   and a variable has no value at validation time, so `first: $first` is
+#   charged at `ASSUMED_PAGE_SIZE = 100` however small a page we meant to
+#   ask for. The failure is the whole document being refused, not a short
+#   page. The `25` below must equal `DEFAULT_PAGE_SIZE` in
+#   `src/lib/graphql/pagination.ts`.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`,
+# because codegen emits one module. Hence `ProjectTeams` rather than
+# `WorkspaceTeams`, which the issues feature already owns.
+
+# The row selection.
+#
+# `teamIds` is in the *row*, not just the detail, and that is a product
+# statement rather than an optimisation: a project spans teams, so "which
+# teams" is part of what a project is and belongs on the line that names it.
+# `milestones` is deliberately absent -- it is a nested list on 25 rows that
+# no row renders.
+fragment ProjectRowFields on Project {
+  id
+  name
+  state
+  targetDate
+  leadId
+  teamIds
+  updatedAt
+}
+
+# One milestone, as every screen that shows one needs it.
+#
+# `position` is selected although nothing renders it: it is the order the
+# repository sorts by (`ORDER BY position, id`), so a client that reorders
+# milestones for display would silently disagree with the server without it.
+fragment ProjectMilestoneFields on ProjectMilestone {
+  id
+  projectId
+  name
+  targetDate
+  position
+}
+
+# Everything the detail view shows. A strict superset of the row fields, by
+# construction: every mutation that returns a project selects this, so a
+# project written into the cache by a mutation can satisfy a later read of
+# the list.
+fragment ProjectDetailFields on Project {
+  ...ProjectRowFields
+  description
+  createdAt
+  milestones {
+    ...ProjectMilestoneFields
+  }
+}
+
+# One page of projects, newest first (`ORDER BY created_at DESC, id DESC`).
+#
+# Cursor pagination. `src/lib/graphql/cache.ts` carries the field policy that
+# merges pages; without it `fetchMore` would write page two under a cache key
+# nothing is watching. Cost: 25 x (7 + 2) = 225 of 1000.
+query ProjectList($workspaceSlug: String!, $after: String) {
+  projects(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+    nodes {
+      ...ProjectRowFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# One project by id. Nullable, so null is the ordinary answer "no such
+# project" and not an error.
+query ProjectDetail($workspaceSlug: String!, $id: UUID!) {
+  project(workspaceSlug: $workspaceSlug, id: $id) {
+    ...ProjectDetailFields
+  }
+}
+
+# The workspace's teams, for the membership editor.
+#
+# `name` as well as `key`, because `Project.teamIds` is a list of raw UUIDs
+# and this is the only thing that can turn one into something a person
+# recognises. A project whose team set includes an id this query does not
+# return is a team the viewer cannot see, and the UI says so rather than
+# printing the UUID.
+query ProjectTeams($workspaceSlug: String!) {
+  teams(workspaceSlug: $workspaceSlug) {
+    id
+    key
+    name
+  }
+}
+
+# The workspace's members, for the lead.
+#
+# `Project.leadId` is a bare UUID and there is no `Project.lead` field, so
+# this is the only thing that can turn it into a name -- and printing a UUID
+# at somebody is not showing them who leads a project. The same list backs
+# the form's lead picker, so one query serves both.
+#
+# A lead id this query does not return is a person the viewer cannot see (or
+# an account since removed); ../lib/people.ts says so rather than guessing.
+query ProjectMembers($workspaceSlug: String!) {
+  workspaceMembers(workspaceSlug: $workspaceSlug) {
+    userId
+    name
+    email
+  }
+}
+
+# The issues a project's screen filters, and the constraint behind it.
+#
+# There is no `project.issues` field and no `issues(projectId:)` argument, so
+# "the issues in this project" cannot be asked for. This asks for a page of
+# the workspace's issues and ../lib/grouping.ts keeps the ones whose
+# `projectId` matches. `teamId` is deliberately not sent: a project spans
+# teams, so scoping to one would hide the issues of every other team on it.
+#
+# `milestoneId` is selected because milestone progress is derived from it --
+# `ProjectMilestone` exposes no counts of its own.
+#
+# Cost: 25 x (7 + 2) = 225 of 1000.
+query ProjectIssues($workspaceSlug: String!, $after: String) {
+  issues(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+    nodes {
+      id
+      identifier
+      title
+      priority
+      completedAt
+      projectId
+      milestoneId
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# Create a project.
+#
+# Both failure channels are selected because the server uses both: `errors`
+# inside the payload is expected user input being rejected and arrives in
+# `data` over an HTTP 200; anything else is a top-level GraphQL error and
+# arrives as a rejected promise. A client reading one of the two either
+# discards validation feedback or reports an outage as a bad name.
+mutation ProjectCreate($input: ProjectCreateInput!) {
+  projectCreate(input: $input) {
+    project {
+      ...ProjectDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation ProjectUpdate($input: ProjectUpdateInput!) {
+  projectUpdate(input: $input) {
+    project {
+      ...ProjectDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation ProjectDelete($input: ProjectDeleteInput!) {
+  projectDelete(input: $input) {
+    deletedProjectId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Team membership. Both return the whole project, so `teamIds` on the
+# normalised entity is corrected by the response itself and no cache surgery
+# is needed here.
+mutation ProjectTeamAdd($input: ProjectTeamInput!) {
+  projectTeamAdd(input: $input) {
+    project {
+      ...ProjectDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation ProjectTeamRemove($input: ProjectTeamInput!) {
+  projectTeamRemove(input: $input) {
+    project {
+      ...ProjectDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Milestones.
+#
+# Create and delete return the milestone (or its id) rather than the project,
+# so `Project.milestones` -- a plain list field on the normalised project --
+# does not follow. ../api/useProjectMutations.ts refetches `ProjectDetail`
+# after those two rather than reaching into the cache; update needs no
+# refetch, because the milestone it returns *is* the normalised entity the
+# list already points at.
+mutation ProjectMilestoneCreate($input: ProjectMilestoneCreateInput!) {
+  projectMilestoneCreate(input: $input) {
+    milestone {
+      ...ProjectMilestoneFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation ProjectMilestoneUpdate($input: ProjectMilestoneUpdateInput!) {
+  projectMilestoneUpdate(input: $input) {
+    milestone {
+      ...ProjectMilestoneFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation ProjectMilestoneDelete($input: ProjectMilestoneDeleteInput!) {
+  projectMilestoneDelete(input: $input) {
+    deletedMilestoneId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Place an issue in a project, in one of its milestones, or in neither.
+#
+# The selection is exactly the two fields the placement changes, so the
+# normalised `Issue` is corrected in the cache and every screen reading it
+# follows -- including ../components/ProjectIssues.tsx, whose filter is on
+# `projectId`.
+mutation IssueSetProject($input: IssueSetProjectInput!) {
+  issueSetProject(input: $input) {
+    issue {
+      id
+      projectId
+      milestoneId
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

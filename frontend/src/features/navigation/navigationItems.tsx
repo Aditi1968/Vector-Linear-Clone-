@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { IssuesIcon } from '../../components'
+import { CycleIcon, IssuesIcon, ProjectIcon } from '../../components'
 import type { AppPaths } from '../../app/routes'
 
 export interface NavigationItem {
@@ -41,18 +41,18 @@ export interface NavigationItem {
 /**
  * The sidebar's navigation.
  *
- * One item, and that is not an oversight.
- *
- * Issues is the only product surface the backend can serve. Inbox, Projects,
- * Cycles, Views, Teams, Members and Settings are all absent rather than
+ * Three items, and the rule that governs the list has not changed: a surface
+ * appears here when the backend can serve it, and not before. Inbox, Views,
+ * Teams, Members and Settings are still absent rather than
  * present-and-greyed, because a greyed row still makes a claim -- it says the
  * feature exists and is temporarily unavailable, which is a different and
  * false statement about a product where the schema, the resolvers and the
  * tables for those concepts do not exist. Listing them would also quietly
  * commit the backend to a roadmap the frontend has no standing to set.
  *
- * The array shape is the extension point: when a surface becomes real, it is
- * one entry here.
+ * Projects and Cycles joined Issues because `projects`, `project`, `cycles`
+ * and `cycle` are now real query fields with real resolvers behind them --
+ * which is exactly the condition this list was written to wait for.
  */
 export const primaryNavigationItems: readonly NavigationItem[] = [
   {
@@ -60,5 +60,17 @@ export const primaryNavigationItems: readonly NavigationItem[] = [
     label: 'Issues',
     icon: <IssuesIcon />,
     to: (paths) => paths.issues(),
+  },
+  {
+    id: 'projects',
+    label: 'Projects',
+    icon: <ProjectIcon />,
+    to: (paths) => paths.projects(),
+  },
+  {
+    id: 'cycles',
+    label: 'Cycles',
+    icon: <CycleIcon />,
+    to: (paths) => paths.cycles(),
   },
 ]

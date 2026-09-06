@@ -1,7 +1,9 @@
 import type { RouteObject } from 'react-router-dom'
 
 import { AppLayout } from '../layout'
+import { CycleDetailPage, CycleListPage } from '../../features/cycles'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
+import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
 import { NotFound } from './NotFound'
 import { ROUTE_SEGMENTS, WORKSPACE_SLUG_PARAM } from './paths'
 import { RouteError } from './RouteError'
@@ -62,6 +64,22 @@ export const routes: RouteObject[] = [
       {
         path: ROUTE_SEGMENTS.issueDetail,
         element: <IssueDetailPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.projects,
+        element: <ProjectListPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.projectDetail,
+        element: <ProjectDetailPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.cycles,
+        element: <CycleListPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.cycleDetail,
+        element: <CycleDetailPage />,
       },
       {
         // Inside the parent, so an unknown URL still renders the shell.

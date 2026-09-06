@@ -21,8 +21,16 @@
  */
 const ISSUES_SEGMENT = 'issues'
 
+/** As above, for the two planning surfaces. */
+const PROJECTS_SEGMENT = 'projects'
+const CYCLES_SEGMENT = 'cycles'
+
 /** The dynamic segment carrying an issue id, as `useParams` will key it. */
 export const ISSUE_ID_PARAM = 'issueId'
+
+/** The same, for a project and for a cycle. */
+export const PROJECT_ID_PARAM = 'projectId'
+export const CYCLE_ID_PARAM = 'cycleId'
 
 /**
  * The dynamic segment carrying the workspace slug, as `useParams` keys it.
@@ -46,6 +54,10 @@ export const WORKSPACE_SLUG_PARAM = 'workspaceSlug'
 export const ROUTE_SEGMENTS = {
   issues: ISSUES_SEGMENT,
   issueDetail: `${ISSUES_SEGMENT}/:${ISSUE_ID_PARAM}`,
+  projects: PROJECTS_SEGMENT,
+  projectDetail: `${PROJECTS_SEGMENT}/:${PROJECT_ID_PARAM}`,
+  cycles: CYCLES_SEGMENT,
+  cycleDetail: `${CYCLES_SEGMENT}/:${CYCLE_ID_PARAM}`,
 } as const
 
 /** Every URL a component is allowed to navigate to. */
@@ -54,6 +66,21 @@ export interface AppPaths {
   issues: () => string
   /** One issue's detail view. */
   issue: (issueId: string) => string
+  /** The project list. */
+  projects: () => string
+  /** One project's detail view. */
+  project: (projectId: string) => string
+  /**
+   * The cycles screen.
+   *
+   * No team in the URL, although `cycles(teamId:)` requires one: which team
+   * a person is looking at is a control on the screen, not an address. A
+   * link to `/acme/cycles` has to resolve to *something* for anyone who
+   * follows it, and a slug plus a team id is a URL nobody can type.
+   */
+  cycles: () => string
+  /** One cycle's detail view. */
+  cycle: (cycleId: string) => string
 }
 
 /**
@@ -74,6 +101,14 @@ export function createAppPaths(scopePrefix = ''): AppPaths {
     // rule, and it will not be revisited when ids stop being UUIDs.
     issue: (issueId: string) =>
       `${scopePrefix}/${ISSUES_SEGMENT}/${encodeURIComponent(issueId)}`,
+
+    projects: () => `${scopePrefix}/${PROJECTS_SEGMENT}`,
+    project: (projectId: string) =>
+      `${scopePrefix}/${PROJECTS_SEGMENT}/${encodeURIComponent(projectId)}`,
+
+    cycles: () => `${scopePrefix}/${CYCLES_SEGMENT}`,
+    cycle: (cycleId: string) =>
+      `${scopePrefix}/${CYCLES_SEGMENT}/${encodeURIComponent(cycleId)}`,
   }
 }
 
