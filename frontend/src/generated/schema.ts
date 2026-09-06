@@ -63,6 +63,45 @@ export type CommentDeletePayload = {
   errors: Array<ValidationErrorType>;
 };
 
+export type Cycle = {
+  __typename?: 'Cycle';
+  createdAt: Scalars['DateTime']['output'];
+  endsAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  name?: Maybe<Scalars['String']['output']>;
+  number: Scalars['Int']['output'];
+  startsAt: Scalars['DateTime']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type CycleCreateInput = {
+  endsAt: Scalars['DateTime']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  number: Scalars['Int']['input'];
+  startsAt: Scalars['DateTime']['input'];
+  teamId: Scalars['UUID']['input'];
+};
+
+export type CycleDeletePayload = {
+  __typename?: 'CycleDeletePayload';
+  deletedCycleId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type CyclePayload = {
+  __typename?: 'CyclePayload';
+  cycle?: Maybe<Cycle>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type CycleUpdateInput = {
+  endsAt: Scalars['DateTime']['input'];
+  id: Scalars['UUID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  number: Scalars['Int']['input'];
+  startsAt: Scalars['DateTime']['input'];
+};
+
 export type Issue = {
   __typename?: 'Issue';
   /** When the issue was taken off the board. Always null here, because archived issues are absent from every query -- only the archive mutation's own result carries a value. */
@@ -74,6 +113,7 @@ export type Issue = {
   createdAt: Scalars['DateTime']['output'];
   /** Who filed the issue, or null where that is not known -- an issue created before accounts existed, or one whose author's account has since been deleted. */
   creatorId?: Maybe<Scalars['UUID']['output']>;
+  cycle?: Maybe<Cycle>;
   description?: Maybe<Scalars['String']['output']>;
   /** A calendar day, not an instant: the same day for every viewer, in every timezone. */
   dueDate?: Maybe<Scalars['Date']['output']>;
@@ -131,6 +171,17 @@ export type IssueLabelInput = {
 
 export type IssueLabelPayload = {
   __typename?: 'IssueLabelPayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
+};
+
+export type IssueSetCycleInput = {
+  cycleId?: InputMaybe<Scalars['UUID']['input']>;
+  issueId: Scalars['UUID']['input'];
+};
+
+export type IssueSetCyclePayload = {
+  __typename?: 'IssueSetCyclePayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
 };
@@ -214,10 +265,14 @@ export type Mutation = {
   __typename?: 'Mutation';
   commentCreate: CommentCreatePayload;
   commentDelete: CommentDeletePayload;
+  cycleCreate: CyclePayload;
+  cycleDelete: CycleDeletePayload;
+  cycleUpdate: CyclePayload;
   issueArchive: IssueArchivePayload;
   issueCreate: IssueCreatePayload;
   issueLabelAttach: IssueLabelPayload;
   issueLabelDetach: IssueLabelPayload;
+  issueSetCycle: IssueSetCyclePayload;
   issueUpdate: IssueUpdatePayload;
   labelCreate: LabelPayload;
   labelDelete: LabelDeletePayload;
@@ -238,6 +293,21 @@ export type MutationCommentDeleteArgs = {
 };
 
 
+export type MutationCycleCreateArgs = {
+  input: CycleCreateInput;
+};
+
+
+export type MutationCycleDeleteArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
+export type MutationCycleUpdateArgs = {
+  input: CycleUpdateInput;
+};
+
+
 export type MutationIssueArchiveArgs = {
   id: Scalars['UUID']['input'];
 };
@@ -255,6 +325,11 @@ export type MutationIssueLabelAttachArgs = {
 
 export type MutationIssueLabelDetachArgs = {
   input: IssueLabelInput;
+};
+
+
+export type MutationIssueSetCycleArgs = {
+  input: IssueSetCycleInput;
 };
 
 
@@ -296,6 +371,8 @@ export type PageInfo = {
 
 export type Query = {
   __typename?: 'Query';
+  cycle?: Maybe<Cycle>;
+  cycles: Array<Cycle>;
   issue?: Maybe<Issue>;
   issues: IssueConnection;
   label?: Maybe<Label>;
@@ -305,6 +382,16 @@ export type Query = {
   myWorkspaces: Array<WorkspaceMembership>;
   /** The teams in a workspace, each with the workflow states its issues can occupy. */
   teams: Array<Team>;
+};
+
+
+export type QueryCycleArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
+export type QueryCyclesArgs = {
+  teamId: Scalars['UUID']['input'];
 };
 
 

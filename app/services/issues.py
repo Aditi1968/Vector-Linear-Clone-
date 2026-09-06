@@ -32,6 +32,15 @@ ESTIMATE_MIN = 0
 FIRST_MIN = 1
 FIRST_MAX = 100
 
+# The constraint migrations/008_cycles.sql declares over
+# `(workspace_id, team_id, cycle_id)`. Named here because a violation is
+# only expected input for the constraint it was expected from: a bare
+# `except asyncpg.ForeignKeyViolationError` would also translate a future
+# constraint's refusal into "that cycle does not exist", which is how a
+# schema change becomes a wrong message to a client instead of a loud
+# failure to the operator.
+ISSUES_CYCLE_FK = "issues_cycle_fk"
+
 
 # Foreign keys whose violation is a client mistake, and the field error each
 # one becomes.
@@ -316,6 +325,69 @@ class IssueService:
                 scope=scope,
                 issue_id=issue_id,
             )
+
+    async def set_cycle(
+        self,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+        cycle_id: UUID | None,
+    ) -> IssueEntity:
+        """Put this workspace's issue in a cycle, or take it out of one.
+
+        Two expected failures, both reported as structured field errors
+        because both are things a client sent and can send differently:
+
+        * the issue is not this workspace's, or is not there at all -- the
+          UPDATE matches nothing and there is no second statement to ask why;
+        * the cycle is not the issue's team's, or is not there at all --
+          `issues_cycle_fk` refuses the statement, and the two cases are
+          indistinguishable from here on purpose. Telling them apart would
+          let a client holding one of its own issues discover which cycle
+          ids exist in teams it cannot see.
+
+        The FK translation is narrowed to that one constraint. The same
+        UPDATE can in principle violate others, and a violation nobody
+        predicted is not user input -- it goes out as the unexpected failure
+        it is rather than as advice to the client about a field.
+        """
+        async with self._pool.acquire() as connection:
+            # A write, so the service opens the transaction even though one
+            # statement is all it holds today.
+            async with connection.transaction():
+                try:
+                    entity = await self._repository.set_cycle(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                        cycle_id=cycle_id,
+                    )
+                except asyncpg.ForeignKeyViolationError as error:
+                    if error.constraint_name != ISSUES_CYCLE_FK:
+                        raise
+
+                    raise ValidationError(
+                        [
+                            ValidationIssue(
+                                field="cycleId",
+                                code="NOT_FOUND",
+                                message="Cycle not found",
+                            )
+                        ]
+                    ) from None
+
+            if entity is None:
+                raise ValidationError(
+                    [
+                        ValidationIssue(
+                            field="issueId",
+                            code="NOT_FOUND",
+                            message="Issue not found",
+                        )
+                    ]
+                )
+
+            return entity
 
     async def list(
         self,

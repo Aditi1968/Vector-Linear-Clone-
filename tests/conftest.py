@@ -169,21 +169,46 @@ FROM pg_tables
 WHERE schemaname = 'public'
 """
 
+# Extensions the migrations installed, dropped the same way and for the same
+# reason. A table is not the only thing a migration creates: 008 installs
+# btree_gist for `cycles_no_overlap`.
+#
+# 008 spells that `CREATE EXTENSION IF NOT EXISTS`, so an extension surviving
+# a reset would no longer break the next db file -- but dropping it is what
+# makes each file exercise the real install rather than the skip. Left
+# behind, only the FIRST db file in a session ever creates the extension and
+# every file after it takes the NOTICE path, so a migration that could not
+# install btree_gist at all would still look green in all but one file.
+#
+# `plpgsql` is excluded because it is not a migration's doing: it ships in
+# template1, so every database has it before any migration runs, and dropping
+# it would be resetting past the starting line rather than back to it.
+DROP_ALL_EXTENSIONS_SQL = """
+SELECT 'DROP EXTENSION ' || string_agg(format('%I', extname), ', ') || ' CASCADE'
+FROM pg_extension
+WHERE extname <> 'plpgsql'
+"""
+
 
 async def reset_schema(connection) -> None:
-    """Leave the test database with no tables at all.
+    """Leave the test database as the migrations will find it: empty.
 
     Every db test in this suite rebuilds the schema from the migrations, and
     every one of them has to start from nothing -- including nothing left
     behind by whichever file ran before it, since the container is shared for
     the whole session.
-    """
-    statement = await connection.fetchval(DROP_ALL_TABLES_SQL)
 
-    # None when the database is already empty: string_agg over no rows is
-    # NULL, so there is nothing to drop and nothing to run.
-    if statement is not None:
-        await connection.execute(statement)
+    "Nothing" means tables AND extensions. Extensions go second, so that
+    anything still depending on one has already been dropped with its table
+    and the CASCADE has nothing left to reach for.
+    """
+    for query in (DROP_ALL_TABLES_SQL, DROP_ALL_EXTENSIONS_SQL):
+        statement = await connection.fetchval(query)
+
+        # None when there is nothing of that kind: string_agg over no rows is
+        # NULL, so there is nothing to drop and nothing to run.
+        if statement is not None:
+            await connection.execute(statement)
 
 
 async def apply_all_migrations(connection) -> list[str]:
@@ -288,6 +313,7 @@ def graphql_context(**services) -> VectorContext:
         "membership_service",
         "label_service",
         "comment_service",
+        "cycle_service",
     }
     environment = services.pop("environment", "test")
     tenant = services.pop("tenant", None) or FakeTenant()
@@ -411,6 +437,7 @@ def as_record(entity: IssueEntity) -> dict:
         "creator_id": entity.creator_id,
         "estimate": entity.estimate,
         "due_date": entity.due_date,
+        "cycle_id": entity.cycle_id,
         "completed_at": entity.completed_at,
         "archived_at": entity.archived_at,
         "created_at": entity.created_at,
@@ -449,6 +476,9 @@ def make_entity(index: int, **overrides) -> IssueEntity:
         "creator_id": None,
         "estimate": None,
         "due_date": None,
+        # In no cycle unless a test says otherwise -- the ordinary state of
+        # an issue. Reachable through **overrides like every other field.
+        "cycle_id": None,
         "completed_at": None,
         "archived_at": None,
         "created_at": created_at,

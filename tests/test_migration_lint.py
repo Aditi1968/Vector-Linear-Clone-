@@ -59,6 +59,12 @@ _TRANSACTION_CONTROL = re.compile(
     re.IGNORECASE,
 )
 _EXISTENCE_GUARD = re.compile(r"\bIF\s+(?:NOT\s+)?EXISTS\b", re.IGNORECASE)
+
+# The one statement rule 2 does not apply to; see `find_if_not_exists`.
+# Anchored at the start of a statement, so it exempts `CREATE EXTENSION` and
+# nothing that merely mentions one -- `DROP EXTENSION IF EXISTS` is a
+# different statement and stays caught.
+_CREATE_EXTENSION = re.compile(r"\ACREATE\s+EXTENSION\b", re.IGNORECASE)
 _ON_CONFLICT = re.compile(r"\bON\s+CONFLICT\b", re.IGNORECASE)
 _DESTRUCTIVE = re.compile(
     r"\bDROP\s+TABLE\b|\bDROP\s+COLUMN\b|\bTRUNCATE\b|\bDELETE\s+FROM\b",
@@ -385,7 +391,7 @@ def find_transaction_control(sql: str) -> list[str]:
 
 
 def find_if_not_exists(sql: str) -> list[str]:
-    """Report IF NOT EXISTS and IF EXISTS alike, with no exemptions.
+    """Report IF NOT EXISTS and IF EXISTS, everywhere but CREATE EXTENSION.
 
     Defensive DDL lies at exactly the level that matters: CREATE TABLE IF
     NOT EXISTS does not compare columns and ADD COLUMN IF NOT EXISTS does
@@ -399,8 +405,59 @@ def find_if_not_exists(sql: str) -> list[str]:
     index renamed, or already dropped by hand -- passes silently.  A bare
     DROP INDEX is still allowed: it names an index that must exist, and
     says so by failing when it does not.
+
+    CREATE EXTENSION is exempt, and it is the only exemption
+    ---------------------------------------------------------
+    The reasoning above is about *shape*: a guard is forbidden because it
+    reports success without establishing that the existing object matches
+    the one the migration describes.  An extension has no shape for the
+    guard to hide.  It is present or absent, and neither spelling pins a
+    version -- bare ``CREATE EXTENSION`` installs the default version
+    exactly as the guarded form does -- so there is no mismatch for IF NOT
+    EXISTS to mask.  The blanket ban caught a statement its own
+    justification never covered.
+
+    What the ban cost is not hypothetical.  Bare ``CREATE EXTENSION``
+    fails outright, and permanently, against any database where the
+    extension is already installed -- by a platform default, by another
+    tool, or by an operator who installed it out of band -- because the
+    ledger never records a migration that errored.  Verified against
+    postgres:18, with the extension already present and a role holding no
+    CREATE privilege on the database:
+
+        CREATE EXTENSION btree_gist            -> ERROR: already exists
+        CREATE EXTENSION IF NOT EXISTS ...     -> NOTICE, skipping
+
+    The guarded form short-circuits *before* the privilege check, so it is
+    also the spelling that lets an unprivileged application role -- which
+    is what a managed Postgres hands out -- run a migration whose
+    extension the platform pre-installed.
+
+    Anchored per statement, so the exemption cannot spread.  ``DROP
+    EXTENSION IF EXISTS`` is a different statement and stays reported: an
+    extension that is not there is a schema this migration was not written
+    against, and dropping it silently is the failure rule 2 exists for.
+
+    See migrations/008_cycles.sql, which needs btree_gist for
+    ``cycles_no_overlap``.  Note that migrations/003_auth.sql cites the old
+    blanket ban as one of two reasons for rejecting CITEXT; that file is
+    immutable and still says so.  Its decision is unaffected -- its second
+    reason, that CITEXT stores whichever capitalisation registered first,
+    is independent of this rule and remains decisive on its own.
     """
-    return _violations(sql, _EXISTENCE_GUARD)
+    text = strip_comments(sql)
+    found: list[str] = []
+
+    for offset, statement in _iter_statements(text):
+        if _CREATE_EXTENSION.match(statement):
+            continue
+
+        found.extend(
+            _report(text, offset + match.start(), match.group())
+            for match in _EXISTENCE_GUARD.finditer(statement)
+        )
+
+    return found
 
 
 def find_on_conflict(sql: str) -> list[str]:
@@ -596,9 +653,6 @@ def test_clean_sql_reports_no_transaction_control(sql):
         "CREATE TABLE IF NOT EXISTS issues (id UUID);",
         "ALTER TABLE issues ADD COLUMN IF NOT EXISTS workspace_id UUID;",
         "CREATE INDEX IF NOT EXISTS issues_workspace_idx ON issues (workspace_id);",
-        # No exemption for extensions: 'already installed' is not 'installed
-        # at the version and schema this migration was written against'.
-        "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
         "create table if not exists issues (id UUID);",
         "CREATE TABLE IF   NOT\n    EXISTS issues (id UUID);",
     ],
@@ -635,6 +689,68 @@ def test_bare_if_exists_is_reported_too(sql):
 )
 def test_clean_ddl_reports_no_existence_guard(sql):
     assert find_if_not_exists(sql) == []
+
+
+# --- rule 2's one exemption: CREATE EXTENSION -------------------------
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "CREATE EXTENSION IF NOT EXISTS btree_gist;",
+        "create extension if not exists btree_gist;",
+        "CREATE EXTENSION IF   NOT\n    EXISTS btree_gist;",
+        'CREATE EXTENSION IF NOT EXISTS "btree_gist";',
+        "CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA public;",
+    ],
+)
+def test_create_extension_may_be_guarded(sql):
+    """The exemption itself; `find_if_not_exists` argues for it at length."""
+    assert find_if_not_exists(sql) == []
+
+
+def test_a_guarded_extension_is_clean_under_every_rule():
+    """The exact statement 008 needs, against all five rules rather than one.
+
+    Rule 2 is not the only rule that could refuse this line, and an
+    exemption that satisfied rule 2 while tripping another would leave 008
+    exactly as unshippable.
+    """
+    assert_clean_under_every_rule("CREATE EXTENSION IF NOT EXISTS btree_gist;")
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        # The exemption is anchored at CREATE EXTENSION, so every other
+        # statement rule 2 was written for is still caught -- including in a
+        # file that legitimately contains a guarded extension.
+        "CREATE EXTENSION IF NOT EXISTS btree_gist;\n"
+        "CREATE TABLE IF NOT EXISTS cycles (id UUID);",
+        "CREATE EXTENSION IF NOT EXISTS btree_gist;\n"
+        "ALTER TABLE issues ADD COLUMN IF NOT EXISTS cycle_id UUID;",
+        "CREATE EXTENSION IF NOT EXISTS btree_gist;\n"
+        "CREATE INDEX IF NOT EXISTS issues_cycle_idx ON issues (cycle_id);",
+        "CREATE EXTENSION IF NOT EXISTS btree_gist;\n"
+        "DROP INDEX IF EXISTS issues_created_at_id_idx;",
+        # DROP EXTENSION is a different statement and gets no exemption: an
+        # extension that is not there is a schema this file was not written
+        # against, which is the failure rule 2 exists for.
+        "DROP EXTENSION IF EXISTS btree_gist;",
+        "drop extension if exists btree_gist;",
+    ],
+)
+def test_the_exemption_does_not_spread_past_create_extension(sql):
+    assert find_if_not_exists(sql)
+
+
+def test_the_exemption_reports_the_right_line_in_a_mixed_file():
+    """A guarded extension must not shift the line number of a real
+    violation, which is what a rule that skipped text rather than statements
+    would do."""
+    sql = "CREATE EXTENSION IF NOT EXISTS btree_gist;\n\nCREATE TABLE IF NOT EXISTS t (id UUID);"
+
+    assert find_if_not_exists(sql) == ["line 3: IF NOT EXISTS"]
 
 
 def test_dropping_a_named_index_without_a_guard_is_clean_under_every_rule():

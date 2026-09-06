@@ -32,6 +32,42 @@ type CommentDeletePayload {
   errors: [ValidationErrorType!]!
 }
 
+type Cycle {
+  id: UUID!
+  number: Int!
+  name: String
+  startsAt: DateTime!
+  endsAt: DateTime!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input CycleCreateInput {
+  teamId: UUID!
+  number: Int!
+  startsAt: DateTime!
+  endsAt: DateTime!
+  name: String = null
+}
+
+type CycleDeletePayload {
+  deletedCycleId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type CyclePayload {
+  cycle: Cycle
+  errors: [ValidationErrorType!]!
+}
+
+input CycleUpdateInput {
+  id: UUID!
+  number: Int!
+  startsAt: DateTime!
+  endsAt: DateTime!
+  name: String = null
+}
+
 """Date (isoformat)"""
 scalar Date
 
@@ -79,6 +115,7 @@ type Issue {
   archivedAt: DateTime
   createdAt: DateTime!
   updatedAt: DateTime!
+  cycle: Cycle
   labels: [Label!]!
   comments(first: Int! = 20, after: String = null): CommentConnection!
 }
@@ -113,6 +150,16 @@ input IssueLabelInput {
 }
 
 type IssueLabelPayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
+}
+
+input IssueSetCycleInput {
+  issueId: UUID!
+  cycleId: UUID = null
+}
+
+type IssueSetCyclePayload {
   issue: Issue
   errors: [ValidationErrorType!]!
 }
@@ -199,6 +246,10 @@ type Mutation {
   issueLabelDetach(input: IssueLabelInput!): IssueLabelPayload!
   commentCreate(input: CommentCreateInput!): CommentCreatePayload!
   commentDelete(input: CommentDeleteInput!): CommentDeletePayload!
+  cycleCreate(input: CycleCreateInput!): CyclePayload!
+  cycleUpdate(input: CycleUpdateInput!): CyclePayload!
+  cycleDelete(id: UUID!): CycleDeletePayload!
+  issueSetCycle(input: IssueSetCycleInput!): IssueSetCyclePayload!
 }
 
 type PageInfo {
@@ -219,6 +270,8 @@ type Query {
   myWorkspace(slug: String!): WorkspaceMembership!
   label(id: UUID!): Label
   labels(first: Int! = 50, after: String = null): LabelConnection!
+  cycle(id: UUID!): Cycle
+  cycles(teamId: UUID!): [Cycle!]!
 }
 
 input RegisterInput {

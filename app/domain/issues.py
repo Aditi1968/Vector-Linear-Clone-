@@ -71,6 +71,12 @@ class IssueEntity:
     estimate: int | None
     due_date: date | None
 
+    # The cycle this issue is in, or None for none -- which is the ordinary
+    # state of an issue and not a missing value. Only the id: an entity that
+    # embedded the cycle would have to be loaded with one, and every issue
+    # read would then pay for a join whether or not the caller wanted it.
+    cycle_id: UUID | None
+
     # Derived from the workflow state on every write; never set directly.
     # See IssueService.complete_rule for the rule and why it lives there.
     completed_at: datetime | None

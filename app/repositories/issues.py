@@ -65,6 +65,7 @@ ISSUE_COLUMNS = """
                 issues.creator_id,
                 issues.estimate,
                 issues.due_date,
+                issues.cycle_id,
                 issues.completed_at,
                 issues.archived_at,
                 issues.created_at,
@@ -194,6 +195,11 @@ class IssueRepository:
         ForeignKeyViolationError, which the service translates for the two
         constraints a client can actually provoke and lets propagate for the
         rest.
+
+        `cycle_id` is not written and carries no default, so a new issue is
+        in no cycle. Accepting one here would mean validating a cycle
+        against a team the caller has only just named; `set_cycle` validates
+        it against the team the database has already stored.
         """
         row = await connection.fetchrow(
             f"""
@@ -469,6 +475,66 @@ class IssueRepository:
 
         return [self._to_entity(row) for row in rows]
 
+    async def set_cycle(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+        cycle_id: UUID | None,
+    ) -> IssueEntity | None:
+        """Move one issue into a cycle, or out of whatever cycle it is in.
+
+        None for `cycle_id` is the unassignment, and it is a real value here
+        rather than a skipped column: `SET cycle_id = $3` with a NULL bound
+        to it is one statement whether the issue is joining a cycle or
+        leaving one.
+
+        Nothing checks that the cycle belongs to this issue's team, and
+        nothing may. `issues_cycle_fk` references
+        `cycles (workspace_id, team_id, id)` using the issue's OWN stored
+        workspace and team, so a cycle from another team -- or another
+        tenant -- is refused by the server as part of this statement, and it
+        is refused against the issue's committed team rather than against
+        whatever a preceding SELECT read. A pre-check would be a second,
+        weaker copy of that rule: weaker because the issue could be moved to
+        another team between the two statements, and weaker because two
+        places that have to agree eventually will not. The violation reaches
+        IssueService, which is the layer that decides what a client is told.
+
+        `updated_at` is stamped here because the issue changed; the column
+        has no trigger behind it.
+
+        None means no row matched the id in this workspace -- the same
+        answer for an issue that does not exist and one belonging to another
+        tenant.
+        """
+        row = await connection.fetchrow(
+            """
+            UPDATE issues
+            SET cycle_id = $3,
+                updated_at = now()
+            WHERE workspace_id = $1 AND id = $2
+            RETURNING
+                id,
+                title,
+                description,
+                priority,
+                cycle_id,
+                completed_at,
+                created_at,
+                updated_at
+            """,
+            scope.workspace_id,
+            issue_id,
+            cycle_id,
+        )
+
+        if row is None:
+            return None
+
+        return self._to_entity(row)
+
     @staticmethod
     def _to_entity(row: asyncpg.Record) -> IssueEntity:
         return IssueEntity(
@@ -484,6 +550,7 @@ class IssueRepository:
             creator_id=row["creator_id"],
             estimate=row["estimate"],
             due_date=row["due_date"],
+            cycle_id=row["cycle_id"],
             completed_at=row["completed_at"],
             archived_at=row["archived_at"],
             created_at=row["created_at"],

@@ -10,9 +10,11 @@ from app.config import Environment
 from app.graphql.limits import operation_limit_extensions
 from app.graphql.mutations.auth import AuthMutation
 from app.graphql.mutations.comments import CommentMutation
+from app.graphql.mutations.cycles import CycleMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
 from app.graphql.mutations.labels import LabelMutation
 from app.graphql.queries.auth import AuthQuery
+from app.graphql.queries.cycles import CycleQuery
 from app.graphql.queries.issues import Query as IssueQuery
 from app.graphql.queries.labels import LabelQuery
 from app.graphql.queries.memberships import MembershipQuery
@@ -35,11 +37,11 @@ from app.graphql.queries.teams import TeamQuery
 # `frontend/schema.graphql` does not churn.
 Query = merge_types(
     "Query",
-    (IssueQuery, AuthQuery, TeamQuery, MembershipQuery, LabelQuery),
+    (IssueQuery, AuthQuery, TeamQuery, MembershipQuery, LabelQuery, CycleQuery),
 )
 Mutation = merge_types(
     "Mutation",
-    (IssueMutation, AuthMutation, LabelMutation, CommentMutation),
+    (IssueMutation, AuthMutation, LabelMutation, CommentMutation, CycleMutation),
 )
 
 
