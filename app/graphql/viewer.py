@@ -3,12 +3,23 @@ from uuid import UUID
 from graphql import GraphQLError
 from strawberry.types import Info
 
+from app.domain.errors import WorkspaceAccessDeniedError
+from app.domain.tenancy import AuthorizedWorkspaceScope
+
 
 # The message an unauthenticated caller is given, as a constant because it is
 # a contract rather than prose. UNAUTHENTICATED is in
 # `app.graphql.schema.PUBLIC_ERROR_CODES`, which means every message raised
 # under it reaches clients verbatim.
 UNAUTHENTICATED_MESSAGE = "Authentication required"
+
+# One message for a workspace that does not exist and for one the viewer does
+# not belong to, and the same string
+# `app.graphql.queries.memberships.WORKSPACE_NOT_FOUND_MESSAGE` publishes --
+# two spellings of one refusal would be a way to tell the two cases apart.
+# Phrased as a miss rather than a refusal, because a refusal confirms the
+# workspace is real.
+WORKSPACE_NOT_FOUND_MESSAGE = "Workspace not found"
 
 
 async def viewer_user_id(info: Info) -> UUID:
@@ -51,3 +62,76 @@ async def viewer_user_id(info: Info) -> UUID:
     identified: UUID = viewer.id
 
     return identified
+
+
+async def actor_user_id(info: Info) -> UUID | None:
+    """Who to record as having done this, or nobody.
+
+    The permissive half of the pair above, for the mutations that do not yet
+    require an identity -- labels, relations, issue edits. They record WHO
+    acted in the history and are answerable without knowing, so None here is
+    "a change with no actor" rather than a refusal, which is the same state
+    `issues.creator_id` has allowed since 006 and the same one a system action
+    is in.
+
+    It is deliberately NOT a fallback for `viewer_user_id`. Anything that
+    needs an identity to be correct -- writing a comment, reading an inbox --
+    calls that one and fails closed. This exists so that a mutation which is
+    open today records an honest actor when a session happens to be present,
+    instead of every history row claiming nobody did anything.
+
+    Shares the memoised `context.viewer()`, so a document mixing both pays for
+    one session lookup.
+    """
+    viewer = await info.context.viewer()
+
+    if viewer is None:
+        return None
+
+    identified: UUID = viewer.id
+
+    return identified
+
+
+async def authorized_scope(info: Info, slug: str) -> AuthorizedWorkspaceScope:
+    """The workspace this request may act in, or a refusal, in that order.
+
+    Two steps, and the order is the security property rather than a style.
+    `viewer_user_id` runs first and raises UNAUTHENTICATED before any lookup,
+    so an anonymous request performs no protected data access at all; only
+    then is the slug resolved, and it is resolved AGAINST the caller -- a
+    membership row, not a workspace row. A slug naming a real workspace the
+    caller does not belong to therefore reaches nothing.
+
+    The scope it returns carries `user_id` and `role` from the row the
+    database matched, which is what makes it an `AuthorizedWorkspaceScope`
+    and what everything downstream annotates when it must not be reachable by
+    a non-member. See `MembershipService.authorized_scope_for_slug`.
+
+    Only `WorkspaceAccessDeniedError` is translated. An asyncpg failure or a
+    bug is not a missing workspace and propagates to be masked; `from None`
+    keeps the domain exception out of the response.
+
+    Interim, and knowingly so: app/graphql/scope.py is the intended home for
+    this helper, and this lives in the module that already owns "who is
+    asking" until that lands.
+    """
+    user_id = await viewer_user_id(info)
+
+    try:
+        # Annotated rather than returned inline, as `viewer_user_id` is: the
+        # context attribute is untyped here, so returning it directly would
+        # satisfy any return type.
+        scope: AuthorizedWorkspaceScope = (
+            await info.context.membership_service.authorized_scope_for_slug(
+                slug=slug,
+                user_id=user_id,
+            )
+        )
+    except WorkspaceAccessDeniedError:
+        raise GraphQLError(
+            WORKSPACE_NOT_FOUND_MESSAGE,
+            extensions={"code": "NOT_FOUND"},
+        ) from None
+
+    return scope

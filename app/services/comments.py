@@ -2,8 +2,10 @@ from uuid import UUID
 
 import asyncpg
 
+from app.domain.activity import ActivityKind
 from app.domain.comments import CommentEntity
 from app.domain.errors import ValidationError, ValidationIssue
+from app.domain.notifications import NotificationKind
 from app.domain.pagination import (
     CommentPage,
     InvalidCursorError,
@@ -13,6 +15,7 @@ from app.domain.pagination import (
 )
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.comments import CommentRepository
+from app.services import activity
 
 
 BODY_MIN_LENGTH = 1
@@ -108,17 +111,49 @@ class CommentService:
         self._validate_body(body)
 
         async with self._pool.acquire() as connection:
-            # The service owns the transaction boundary: later this block will
-            # also carry the audit / sync / outbox writes.
+            # The service owns the transaction boundary, and it now carries
+            # three writes: the comment, the history row saying somebody
+            # commented, and an inbox item for everyone but the author. A
+            # comment that exists with nobody notified, or a notification
+            # pointing at a comment that was rolled back, are both states
+            # this block makes unreachable.
             async with connection.transaction():
                 try:
-                    return await self._repository.create(
+                    entity = await self._repository.create(
                         connection,
                         scope=scope,
                         issue_id=issue_id,
                         author_id=author_id,
                         body=body,
                     )
+
+                    # The comment's id, not its body. A history row is a
+                    # pointer to what happened, and copying the text here
+                    # would make a deleted comment readable from the
+                    # timeline -- which is the withdrawal not working.
+                    await activity.record(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                        actor_id=author_id,
+                        kind=ActivityKind.COMMENTED,
+                        to_value=str(entity.id),
+                    )
+
+                    # The assignee AND the issue's author: the two people a
+                    # comment on this issue is addressed to even when it
+                    # names nobody. The author is included here and nowhere
+                    # else, which is what `include_creator` marks.
+                    await activity.notify(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                        actor_id=author_id,
+                        kind=NotificationKind.COMMENTED,
+                        include_creator=True,
+                    )
+
+                    return entity
                 except asyncpg.ForeignKeyViolationError as exc:
                     if exc.constraint_name not in (
                         _UNKNOWN_ISSUE_CONSTRAINT,

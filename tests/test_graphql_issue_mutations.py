@@ -92,14 +92,21 @@ class RecordingIssueService:
         self._result = result
         self.patches: list[IssuePatch] = []
         self.archived: list[UUID] = []
+        # Every write records who did it now. These tests authenticate
+        # nobody, so this collects the None the resolver passes -- which is
+        # what shows the resolver asked, rather than the service defaulting
+        # on its own.
+        self.actors: list[UUID | None] = []
 
-    async def update(self, *, scope, issue_id, patch):
+    async def update(self, *, scope, issue_id, patch, actor_id=None):
         self.patches.append(patch)
+        self.actors.append(actor_id)
 
         return self._result
 
-    async def archive(self, *, scope, issue_id):
+    async def archive(self, *, scope, issue_id, actor_id=None):
         self.archived.append(issue_id)
+        self.actors.append(actor_id)
 
         return self._result
 

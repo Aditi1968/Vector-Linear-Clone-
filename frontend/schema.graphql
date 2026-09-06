@@ -122,8 +122,39 @@ type Issue {
   parent: IssueSummary
   children(first: Int! = 10, after: String = null): IssueSummaryConnection!
   relations(first: Int! = 10, after: String = null): IssueRelationConnection!
+  activity(first: Int! = 10, after: String = null): IssueActivityConnection!
   labels: [Label!]!
   comments(first: Int! = 20, after: String = null): CommentConnection!
+}
+
+type IssueActivity {
+  id: UUID!
+  issueId: UUID!
+  actorId: UUID
+  kind: IssueActivityKind!
+  fromValue: String
+  toValue: String
+  createdAt: DateTime!
+}
+
+type IssueActivityConnection {
+  nodes: [IssueActivity!]!
+  pageInfo: PageInfo!
+}
+
+enum IssueActivityKind {
+  CREATED
+  TITLE_CHANGED
+  STATE_CHANGED
+  PRIORITY_CHANGED
+  ASSIGNEE_CHANGED
+  ARCHIVED
+  COMMENTED
+  LABEL_ATTACHED
+  LABEL_DETACHED
+  RELATION_ADDED
+  PROJECT_CHANGED
+  CYCLE_CHANGED
 }
 
 type IssueArchivePayload {
@@ -348,6 +379,47 @@ type Mutation {
   issueClearParent(input: IssueClearParentInput!): IssueParentPayload!
   issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
   issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
+  notificationMarkRead(input: NotificationMarkReadInput!): NotificationMarkReadPayload!
+  notificationMarkAllRead(input: NotificationMarkAllReadInput!): NotificationMarkAllReadPayload!
+}
+
+type Notification {
+  id: UUID!
+  actorId: UUID
+  issueId: UUID!
+  kind: NotificationKind!
+  readAt: DateTime
+  createdAt: DateTime!
+}
+
+type NotificationConnection {
+  nodes: [Notification!]!
+  pageInfo: PageInfo!
+}
+
+enum NotificationKind {
+  ASSIGNED
+  COMMENTED
+  BLOCKED
+}
+
+input NotificationMarkAllReadInput {
+  workspaceSlug: String!
+}
+
+type NotificationMarkAllReadPayload {
+  markedCount: Int!
+  errors: [ValidationErrorType!]!
+}
+
+input NotificationMarkReadInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type NotificationMarkReadPayload {
+  notification: Notification
+  errors: [ValidationErrorType!]!
 }
 
 type PageInfo {
@@ -471,6 +543,8 @@ type Query {
   cycles(teamId: UUID!): [Cycle!]!
   project(id: UUID!): Project
   projects(first: Int! = 50, after: String = null): ProjectConnection!
+  notifications(workspaceSlug: String!, unreadOnly: Boolean! = false, first: Int! = 50, after: String = null): NotificationConnection!
+  notificationUnreadCount(workspaceSlug: String!): Int!
 }
 
 input RegisterInput {

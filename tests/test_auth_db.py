@@ -38,6 +38,8 @@ from app.services.passwords import Argon2PasswordHasher
 from app.services.tokens import generate_session_token, hash_session_token
 from scripts.apply_migration import apply_migration
 
+from tests.conftest import reset_schema
+
 
 pytestmark = pytest.mark.db
 
@@ -56,15 +58,6 @@ STORED_HASH = (
     "$argon2id$v=19$m=65536,t=3,p=4$"
     "B+uteoqvIScxtHiGUNLG8g$DUXzD54RXGyYbin0zmwql6nYUtjK9AP/fpPNiMVif6s"
 )
-
-# Everything an earlier test file in the same session may have left behind.
-# Dropped rather than assumed absent: the container is session-scoped, so
-# this file is not the only thing to have touched the database.
-DROP_EVERYTHING = """
-DROP TABLE IF EXISTS
-    sessions, users, issues, teams, workspaces, schema_migrations
-CASCADE
-"""
 
 INSERT_USER = """
 INSERT INTO users (email, password_hash, name)
@@ -107,7 +100,7 @@ async def prepared(postgres_dsn):
     connection = await asyncpg.connect(postgres_dsn)
 
     try:
-        await connection.execute(DROP_EVERYTHING)
+        await reset_schema(connection)
         await apply_auth_migration(connection)
     finally:
         await connection.close()
@@ -154,7 +147,7 @@ async def test_the_migration_applies_and_is_recorded_in_the_ledger(postgres_dsn)
     connection = await asyncpg.connect(postgres_dsn)
 
     try:
-        await connection.execute(DROP_EVERYTHING)
+        await reset_schema(connection)
 
         first = await apply_auth_migration(connection)
         second = await apply_auth_migration(connection)

@@ -27,6 +27,7 @@ from app.graphql.types.project import (
     ProjectStateType,
     ProjectType,
 )
+from app.graphql.viewer import actor_user_id
 
 
 T = TypeVar("T")
@@ -274,6 +275,7 @@ class ProjectMutation:
         of the projects API, because that is where a client looks for it.
         """
         scope = await info.context.tenant.scope()
+        actor_id = await actor_user_id(info)
 
         try:
             entity = await info.context.issue_service.set_project(
@@ -281,6 +283,7 @@ class ProjectMutation:
                 issue_id=input.issue_id,
                 project_id=input.project_id,
                 milestone_id=input.milestone_id,
+                actor_id=actor_id,
             )
         except ValidationError as exc:
             return IssueSetProjectPayload(issue=None, errors=_errors(exc))

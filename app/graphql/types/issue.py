@@ -10,6 +10,10 @@ from app.domain.errors import ValidationError
 from app.domain.issues import IssueEntity
 from app.domain.pagination import IssuePage
 from app.graphql.errors import bad_user_input
+from app.graphql.types.activity import (
+    DEFAULT_ACTIVITY_FIRST,
+    IssueActivityConnection,
+)
 from app.graphql.types.comment import (
     DEFAULT_COMMENT_FIRST,
     CommentConnection,
@@ -266,6 +270,45 @@ class IssueType:
             raise bad_user_input("Invalid pagination arguments", exc) from None
 
         return IssueRelationConnection.from_domain(page)
+
+    @strawberry.field
+    async def activity(
+        self,
+        info: Info,
+        first: int = DEFAULT_ACTIVITY_FIRST,
+        after: str | None = None,
+    ) -> IssueActivityConnection:
+        """What has happened to this issue, newest first.
+
+        Not `comments` and not a merged feed of the two. A comment is what
+        somebody wrote and can withdraw; this is what the system recorded
+        happening, and it is append-only. A client that wants them
+        interleaved selects both and merges on `createdAt`, which is a
+        rendering decision and belongs where the rendering is.
+
+        Paginated rather than batched, for the reason `comments` gives: a
+        page per key cannot be batched without a lateral join, and because
+        this field declares `first`, the complexity rule prices it properly
+        instead of letting a document buy a fan-out that measured as cheap.
+
+        The workspace comes from the request, never from the document, so
+        this cannot read another tenant's history even with a correct issue
+        id -- the page comes back empty, exactly as it does for an issue
+        nothing has happened to.
+        """
+        scope = await info.context.tenant.scope()
+
+        try:
+            page = await info.context.activity_service.list_for_issue(
+                scope=scope,
+                issue_id=self.id,
+                first=first,
+                after=after,
+            )
+        except ValidationError as exc:
+            raise bad_user_input("Invalid pagination arguments", exc) from None
+
+        return IssueActivityConnection.from_domain(page)
 
     @classmethod
     def from_entity(cls, entity: IssueEntity) -> "IssueType":

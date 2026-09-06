@@ -13,6 +13,7 @@ from app.graphql.inputs.relations import (
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import IssueType
 from app.graphql.types.relations import IssueRelationType
+from app.graphql.viewer import actor_user_id
 
 
 @strawberry.type
@@ -134,6 +135,7 @@ class RelationMutation:
         input: IssueRelationCreateInput,
     ) -> IssueRelationCreatePayload:
         scope = await info.context.tenant.scope()
+        actor_id = await actor_user_id(info)
 
         try:
             entity = await info.context.relation_service.create_relation(
@@ -141,6 +143,7 @@ class RelationMutation:
                 source_issue_id=input.source_issue_id,
                 target_issue_id=input.target_issue_id,
                 relation_type=input.type.to_domain(),
+                actor_id=actor_id,
             )
         except ValidationError as exc:
             return IssueRelationCreatePayload(

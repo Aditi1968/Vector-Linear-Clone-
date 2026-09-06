@@ -3,6 +3,7 @@ from uuid import UUID
 
 import asyncpg
 
+from app.domain.activity import IssueSnapshot
 from app.domain.issues import (
     TERMINAL_STATE_CATEGORIES,
     UNSET,
@@ -141,6 +142,66 @@ class IssueRepository:
             return None
 
         return self._to_entity(row)
+
+    async def lock_snapshot(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+    ) -> IssueSnapshot | None:
+        """The fields activity reports on, as they are now, held for the write.
+
+        `FOR UPDATE` is the whole point and not a precaution. Without it this
+        is an ordinary read: another transaction may commit between it and the
+        UPDATE that follows, and the history would then record "from A to C"
+        for a row that went A to B to C -- a wrong claim about the past, which
+        is worse than a missing one. The lock is taken by the same transaction
+        that is about to write, so the value read is the value updated.
+
+        It is held until that transaction ends, which serialises concurrent
+        edits of ONE issue. That is the cost, and it is the right one: two
+        simultaneous edits of the same issue already race for the last word,
+        and this makes the loser's history honest rather than making the
+        contention new.
+
+        Scoped by workspace, so another tenant's issue answers None -- the
+        same answer an id that exists nowhere gives.
+
+        `archived_at` is NOT in the predicate, unlike the reads. The writes
+        this precedes disagree about archived issues -- `update` excludes
+        them, `set_cycle` and `set_project` do not -- so filtering here would
+        change what one of them does. The write's own result decides: no row
+        updated means no activity to record.
+        """
+        row = await connection.fetchrow(
+            """
+            SELECT
+                title,
+                priority,
+                workflow_state_id,
+                assignee_id,
+                project_id,
+                cycle_id
+            FROM issues
+            WHERE workspace_id = $1 AND id = $2
+            FOR UPDATE
+            """,
+            scope.workspace_id,
+            issue_id,
+        )
+
+        if row is None:
+            return None
+
+        return IssueSnapshot(
+            title=row["title"],
+            priority=row["priority"],
+            workflow_state_id=row["workflow_state_id"],
+            assignee_id=row["assignee_id"],
+            project_id=row["project_id"],
+            cycle_id=row["cycle_id"],
+        )
 
     async def create(
         self,
@@ -512,20 +573,13 @@ class IssueRepository:
         tenant.
         """
         row = await connection.fetchrow(
-            """
+            f"""
             UPDATE issues
             SET cycle_id = $3,
                 updated_at = now()
             WHERE workspace_id = $1 AND id = $2
             RETURNING
-                id,
-                title,
-                description,
-                priority,
-                cycle_id,
-                completed_at,
-                created_at,
-                updated_at
+{ISSUE_COLUMNS}
             """,
             scope.workspace_id,
             issue_id,
@@ -568,7 +622,7 @@ class IssueRepository:
         the same answer another tenant's issue produces.
         """
         row = await connection.fetchrow(
-            """
+            f"""
             UPDATE issues
             SET
                 project_id = $3,
