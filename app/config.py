@@ -25,6 +25,60 @@ class Settings(BaseSettings):
     database_url: SecretStr
     environment: Environment
 
+    # --- GitHub App -----------------------------------------------------
+    #
+    # Every field below is optional, and that is the whole design. Vector is
+    # a product with a GitHub integration, not a GitHub client: a deployment
+    # that never connects a repository must boot, serve every request and
+    # pass every test with none of these set. So there is no default that
+    # stands in for a credential, and nothing here is validated against
+    # GitHub -- the only proof a key is right is a signature that verifies.
+    #
+    # With none of them set the integration reports itself UNCONFIGURED,
+    # which is a different answer from DISCONNECTED and has to stay
+    # different: "this deployment has no GitHub App" is an operator's problem
+    # and "this workspace has not connected it yet" is a user's. See
+    # app.services.github.GithubAppConfig, which is the one place that
+    # decides which of the two a deployment is in.
+    #
+    # The three secrets are SecretStr so that a settings object caught in a
+    # traceback, a repr or a log line prints `SecretStr('**********')` rather
+    # than the key itself. `get_secret_value()` is the deliberate act of
+    # unwrapping one, and it appears in exactly two places: signature
+    # verification and the config object below.
+    github_app_id: str | None = None
+
+    # The app's RSA private key, PEM-encoded, whole -- newlines and all.
+    # It signs the JWT that mints short-lived installation tokens, so it is
+    # the most valuable secret this process holds and it is deliberately not
+    # a database column: migrations/013_github_integration.sql says why.
+    github_app_private_key: SecretStr | None = None
+
+    # Shared with GitHub when the webhook is configured, and the only thing
+    # that distinguishes a delivery from a stranger POSTing JSON at the
+    # endpoint. Compared with hmac.compare_digest over the raw body; see
+    # app.services.github.verify_webhook_signature.
+    github_webhook_secret: SecretStr | None = None
+
+    github_client_id: str | None = None
+    github_client_secret: SecretStr | None = None
+
+    # Where the install callback is allowed to send a browser afterwards, as
+    # comma-separated origins ("https://app.vector.dev,http://localhost:5173").
+    #
+    # A plain string rather than a list because pydantic-settings parses a
+    # list-typed field from the environment as JSON, and an operator writing
+    # `GITHUB_REDIRECT_ALLOWLIST=https://app.vector.dev` would get a parse
+    # error rather than a setting. Split in one place --
+    # `GithubAppConfig.from_settings` -- so no other reader can disagree
+    # about what a separator is.
+    #
+    # Empty by default, which means "redirect nowhere": the callback answers
+    # with a plain page instead. That is the safe failure. An allowlist that
+    # defaulted to something would be a redirect target chosen by whoever
+    # wrote this file rather than by the deployment.
+    github_redirect_allowlist: str = ""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

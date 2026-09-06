@@ -74,6 +74,29 @@ scalar Date
 """Date with time (isoformat)"""
 scalar DateTime
 
+input GithubDisconnectInput {
+  workspaceSlug: String!
+}
+
+type GithubIntegration {
+  status: GithubIntegrationStatus!
+  accountLogin: String
+  connectedAt: DateTime
+  connectedById: UUID
+  repositories: [GithubRepository!]!
+}
+
+enum GithubIntegrationStatus {
+  UNCONFIGURED
+  DISCONNECTED
+  CONNECTED
+}
+
+type GithubRepository {
+  repositoryId: ID!
+  fullName: String!
+}
+
 input InvitationAcceptInput {
   token: String!
 }
@@ -422,6 +445,7 @@ type Mutation {
   issueClearParent(input: IssueClearParentInput!): IssueParentPayload!
   issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
   issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
+  githubDisconnect(input: GithubDisconnectInput!): GithubIntegration!
 }
 
 type PageInfo {
@@ -554,6 +578,7 @@ type Query {
   project(id: UUID!): Project
   projects(first: Int! = 50, after: String = null): ProjectConnection!
   search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
+  githubIntegration(workspaceSlug: String!): GithubIntegration!
 }
 
 input RegisterInput {

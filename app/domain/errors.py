@@ -110,6 +110,43 @@ class WorkspaceNotFoundError(Exception):
         super().__init__("Workspace not found")
 
 
+class GithubNotConfiguredError(Exception):
+    """A GitHub operation was attempted on a deployment with no GitHub App.
+
+    Distinct from "this workspace has not connected one", and the distinction
+    is the point: an unconfigured deployment cannot be fixed by any user
+    clicking anything, so a caller must not be offered a flow that begins by
+    redirecting them to GitHub with no client id.
+
+    Carries no configuration detail -- not which field is missing, not which
+    are present. Whoever raises this holds the settings and can say so in a
+    log that is already inside the trust boundary; a response that named the
+    missing key would be telling an anonymous caller how this deployment is
+    provisioned. Pure application code -- no Strawberry, FastAPI, asyncpg or
+    PostgreSQL.
+    """
+
+    def __init__(self):
+        super().__init__("GitHub integration is not configured")
+
+
+class GithubInstallationClaimedError(Exception):
+    """An installation id already belongs to another workspace.
+
+    Raised from the unique constraint rather than from a look-before-write,
+    because "taken" is a fact only the database holds and only its constraint
+    can decide without a window between the check and the insert -- the same
+    two-step EmailAlreadyRegisteredError describes.
+
+    The other workspace is deliberately not named, and neither is the fact
+    that it is a workspace on this deployment at all. Pure application code --
+    no Strawberry, FastAPI, asyncpg or PostgreSQL.
+    """
+
+    def __init__(self):
+        super().__init__("GitHub installation is already connected")
+
+
 class WorkspaceAccessDeniedError(Exception):
     """A (slug, user) pair yields no workspace the user may act in.
 

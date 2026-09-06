@@ -102,6 +102,64 @@ export type CycleUpdateInput = {
   startsAt: Scalars['DateTime']['input'];
 };
 
+export type GithubDisconnectInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type GithubIntegration = {
+  __typename?: 'GithubIntegration';
+  accountLogin?: Maybe<Scalars['String']['output']>;
+  connectedAt?: Maybe<Scalars['DateTime']['output']>;
+  connectedById?: Maybe<Scalars['UUID']['output']>;
+  repositories: Array<GithubRepository>;
+  status: GithubIntegrationStatus;
+};
+
+export type GithubIntegrationStatus =
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'UNCONFIGURED';
+
+export type GithubRepository = {
+  __typename?: 'GithubRepository';
+  fullName: Scalars['String']['output'];
+  repositoryId: Scalars['ID']['output'];
+};
+
+export type InvitationAcceptInput = {
+  token: Scalars['String']['input'];
+};
+
+export type InvitationAcceptPayload = {
+  __typename?: 'InvitationAcceptPayload';
+  errors: Array<ValidationErrorType>;
+  workspace?: Maybe<Workspace>;
+};
+
+export type InvitationCreateInput = {
+  email: Scalars['String']['input'];
+  role: WorkspaceRole;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type InvitationCreatePayload = {
+  __typename?: 'InvitationCreatePayload';
+  errors: Array<ValidationErrorType>;
+  invitation?: Maybe<WorkspaceInvitation>;
+  token?: Maybe<Scalars['String']['output']>;
+};
+
+export type InvitationRevokeInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type InvitationRevokePayload = {
+  __typename?: 'InvitationRevokePayload';
+  errors: Array<ValidationErrorType>;
+  revokedInvitationId?: Maybe<Scalars['UUID']['output']>;
+};
+
 export type Issue = {
   __typename?: 'Issue';
   /** When the issue was taken off the board. Always null here, because archived issues are absent from every query -- only the archive mutation's own result carries a value. */
@@ -365,6 +423,23 @@ export type LogoutPayload = {
   signedOut: Scalars['Boolean']['output'];
 };
 
+export type MemberRemoveInput = {
+  userId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type MemberRemovePayload = {
+  __typename?: 'MemberRemovePayload';
+  errors: Array<ValidationErrorType>;
+  removedUserId?: Maybe<Scalars['UUID']['output']>;
+};
+
+export type MemberRoleUpdateInput = {
+  role: WorkspaceRole;
+  userId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
 export type Mutation = {
   __typename?: 'Mutation';
   commentCreate: CommentCreatePayload;
@@ -372,6 +447,13 @@ export type Mutation = {
   cycleCreate: CyclePayload;
   cycleDelete: CycleDeletePayload;
   cycleUpdate: CyclePayload;
+  githubDisconnect: GithubIntegration;
+  /** Redeem an invitation token as the authenticated caller. */
+  invitationAccept: InvitationAcceptPayload;
+  /** Invite an email address to the workspace. Returns the raw invitation token once and never again. */
+  invitationCreate: InvitationCreatePayload;
+  /** Withdraw an invitation. Requires the admin or owner role. */
+  invitationRevoke: InvitationRevokePayload;
   issueArchive: IssueArchivePayload;
   issueClearParent: IssueParentPayload;
   issueCreate: IssueCreatePayload;
@@ -388,6 +470,10 @@ export type Mutation = {
   labelUpdate: LabelPayload;
   login: LoginPayload;
   logout: LogoutPayload;
+  /** Remove someone from the workspace. Requires the admin or owner role, and cannot remove the last owner. */
+  memberRemove: MemberRemovePayload;
+  /** Change a member's role. Requires the admin or owner role. */
+  memberRoleUpdate: WorkspaceMemberPayload;
   projectCreate: ProjectPayload;
   projectDelete: ProjectDeletePayload;
   projectMilestoneCreate: ProjectMilestonePayload;
@@ -397,6 +483,10 @@ export type Mutation = {
   projectTeamRemove: ProjectPayload;
   projectUpdate: ProjectPayload;
   register: RegisterPayload;
+  /** Create a team, seeded with the default workflow states. Requires the admin or owner role. */
+  teamCreate: TeamPayload;
+  /** Create a workspace. The authenticated caller becomes its owner. */
+  workspaceCreate: WorkspacePayload;
 };
 
 
@@ -422,6 +512,26 @@ export type MutationCycleDeleteArgs = {
 
 export type MutationCycleUpdateArgs = {
   input: CycleUpdateInput;
+};
+
+
+export type MutationGithubDisconnectArgs = {
+  input: GithubDisconnectInput;
+};
+
+
+export type MutationInvitationAcceptArgs = {
+  input: InvitationAcceptInput;
+};
+
+
+export type MutationInvitationCreateArgs = {
+  input: InvitationCreateInput;
+};
+
+
+export type MutationInvitationRevokeArgs = {
+  input: InvitationRevokeInput;
 };
 
 
@@ -501,6 +611,16 @@ export type MutationLoginArgs = {
 };
 
 
+export type MutationMemberRemoveArgs = {
+  input: MemberRemoveInput;
+};
+
+
+export type MutationMemberRoleUpdateArgs = {
+  input: MemberRoleUpdateInput;
+};
+
+
 export type MutationProjectCreateArgs = {
   input: ProjectCreateInput;
 };
@@ -543,6 +663,16 @@ export type MutationProjectUpdateArgs = {
 
 export type MutationRegisterArgs = {
   input: RegisterInput;
+};
+
+
+export type MutationTeamCreateArgs = {
+  input: TeamCreateInput;
+};
+
+
+export type MutationWorkspaceCreateArgs = {
+  input: WorkspaceCreateInput;
 };
 
 export type PageInfo = {
@@ -660,6 +790,9 @@ export type Query = {
   __typename?: 'Query';
   cycle?: Maybe<Cycle>;
   cycles: Array<Cycle>;
+  githubIntegration: GithubIntegration;
+  /** Invitations to this workspace that have not been accepted or expired. Admins and owners only. */
+  invitations: Array<WorkspaceInvitation>;
   issue?: Maybe<Issue>;
   issues: IssueConnection;
   label?: Maybe<Label>;
@@ -669,8 +802,11 @@ export type Query = {
   myWorkspaces: Array<WorkspaceMembership>;
   project?: Maybe<Project>;
   projects: ProjectConnection;
+  search: SearchResults;
   /** The teams in a workspace, each with the workflow states its issues can occupy. */
   teams: Array<Team>;
+  /** Everyone in a workspace, with the role each holds. Members only. */
+  workspaceMembers: Array<WorkspaceMember>;
 };
 
 
@@ -681,6 +817,16 @@ export type QueryCycleArgs = {
 
 export type QueryCyclesArgs = {
   teamId: Scalars['UUID']['input'];
+};
+
+
+export type QueryGithubIntegrationArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryInvitationsArgs = {
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
@@ -722,7 +868,19 @@ export type QueryProjectsArgs = {
 };
 
 
+export type QuerySearchArgs = {
+  first?: Scalars['Int']['input'];
+  query: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
 export type QueryTeamsArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryWorkspaceMembersArgs = {
   workspaceSlug: Scalars['String']['input'];
 };
 
@@ -738,6 +896,12 @@ export type RegisterPayload = {
   user?: Maybe<User>;
 };
 
+export type SearchResults = {
+  __typename?: 'SearchResults';
+  issues: Array<Issue>;
+  projects: Array<Project>;
+};
+
 export type Team = {
   __typename?: 'Team';
   createdAt: Scalars['DateTime']['output'];
@@ -746,6 +910,19 @@ export type Team = {
   key: Scalars['String']['output'];
   name: Scalars['String']['output'];
   workflowStates: Array<WorkflowState>;
+};
+
+export type TeamCreateInput = {
+  /** The prefix of this team's issue identifiers -- the ENG in ENG-42. 1-10 uppercase letters and digits, starting with a letter. Unique within the workspace. */
+  key: Scalars['String']['input'];
+  name: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type TeamPayload = {
+  __typename?: 'TeamPayload';
+  errors: Array<ValidationErrorType>;
+  team?: Maybe<Team>;
 };
 
 export type User = {
@@ -790,11 +967,49 @@ export type Workspace = {
   slug: Scalars['String']['output'];
 };
 
+export type WorkspaceCreateInput = {
+  name: Scalars['String']['input'];
+  /** The workspace's URL segment. Lowercase letters, digits and hyphens; must start and end with a letter or digit. */
+  slug: Scalars['String']['input'];
+};
+
+/** An outstanding invitation to join a workspace. */
+export type WorkspaceInvitation = {
+  __typename?: 'WorkspaceInvitation';
+  createdAt: Scalars['DateTime']['output'];
+  email: Scalars['String']['output'];
+  expiresAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  role: WorkspaceRole;
+};
+
+/** One person in a workspace, and the role they hold there. */
+export type WorkspaceMember = {
+  __typename?: 'WorkspaceMember';
+  createdAt: Scalars['DateTime']['output'];
+  email: Scalars['String']['output'];
+  name?: Maybe<Scalars['String']['output']>;
+  role: WorkspaceRole;
+  userId: Scalars['UUID']['output'];
+};
+
+export type WorkspaceMemberPayload = {
+  __typename?: 'WorkspaceMemberPayload';
+  errors: Array<ValidationErrorType>;
+  member?: Maybe<WorkspaceMember>;
+};
+
 export type WorkspaceMembership = {
   __typename?: 'WorkspaceMembership';
   createdAt: Scalars['DateTime']['output'];
   role: WorkspaceRole;
   workspace: Workspace;
+};
+
+export type WorkspacePayload = {
+  __typename?: 'WorkspacePayload';
+  errors: Array<ValidationErrorType>;
+  workspace?: Maybe<Workspace>;
 };
 
 export type WorkspaceRole =
