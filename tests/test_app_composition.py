@@ -41,7 +41,9 @@ def build_client(application) -> httpx.AsyncClient:
     for the same reason: the real one borrows a pool that does not exist.
     """
     application.dependency_overrides[get_context] = lambda: VectorContext(
-        issue_service=None
+        issue_service=None,
+        auth_service=None,
+        environment="test",
     )
 
     return httpx.AsyncClient(

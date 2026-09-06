@@ -9,11 +9,19 @@ from app.graphql.router import build_graphql_router
 from app.graphql.schema import build_schema
 from app.http_limits import add_request_body_limit
 from app.rest.health import router as health_router
+from app.services.passwords import warm_password_hashing
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await connect()
+
+    # Builds the decoy hash the log-in path verifies against when no account
+    # matches the submitted address. It costs one argon2 hash, and paying for
+    # it here is the point: otherwise the first unknown-address log-in of the
+    # process pays for two hashes where a wrong-password log-in pays for one,
+    # which is exactly the timing difference the decoy exists to erase.
+    await warm_password_hashing()
 
     try:
         yield

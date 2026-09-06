@@ -4,11 +4,26 @@ import strawberry
 from graphql import GraphQLError
 from strawberry.extensions import DisableIntrospection, MaskErrors
 from strawberry.extensions.base_extension import SchemaExtension
+from strawberry.tools import merge_types
 
 from app.config import Environment
 from app.graphql.limits import operation_limit_extensions
-from app.graphql.mutations.issues import Mutation
-from app.graphql.queries.issues import Query
+from app.graphql.mutations.auth import AuthMutation
+from app.graphql.mutations.issues import Mutation as IssueMutation
+from app.graphql.queries.auth import AuthQuery
+from app.graphql.queries.issues import Query as IssueQuery
+
+
+# The two root types, assembled from one class per feature.
+#
+# `merge_types` rather than plain inheritance for one property: it counts the
+# field names it is merging and warns on a collision instead of silently
+# letting the first class in the tuple win. Two features that both define a
+# root field called `me` or `issues` is a mistake nobody would see in a
+# schema that still builds, and this is a repository where several people add
+# root fields at once.
+Query = merge_types("Query", (IssueQuery, AuthQuery))
+Mutation = merge_types("Mutation", (IssueMutation, AuthMutation))
 
 
 # The public error vocabulary. An error reaches a client with its own

@@ -204,7 +204,9 @@ async def test_batched_documents_are_refused_rather_than_amplified(
     service = RecordingIssueService()
     application = create_app()
     application.dependency_overrides[get_context] = lambda: VectorContext(
-        issue_service=service
+        issue_service=service,
+        auth_service=None,
+        environment="test",
     )
 
     batch = [
@@ -243,7 +245,9 @@ async def test_an_internal_failure_is_masked_over_the_real_http_stack(
 
     application = create_app()
     application.dependency_overrides[get_context] = lambda: VectorContext(
-        issue_service=Exploding()
+        issue_service=Exploding(),
+        auth_service=None,
+        environment="production",
     )
 
     async with httpx.AsyncClient(

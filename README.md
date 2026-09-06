@@ -18,7 +18,7 @@ export $(grep -v '^#' .env | xargs)
 | Variable | Values | Purpose |
 | --- | --- | --- |
 | `DATABASE_URL` | PostgreSQL DSN | The database the pool connects to. |
-| `ENVIRONMENT` | `development` \| `test` \| `production` | Gates GraphiQL and schema introspection. |
+| `ENVIRONMENT` | `development` \| `test` \| `production` | Gates GraphiQL, schema introspection, and the session cookie's `Secure` flag. |
 
 Both are required and neither has a default. `ENVIRONMENT` especially: a
 default would have to be *some* environment, and any deployment that forgot

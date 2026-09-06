@@ -23,6 +23,53 @@ class ValidationError(Exception):
         self.issues = issues
 
 
+class AuthenticationError(Exception):
+    """A login attempt did not establish an identity.
+
+    One exception for every way that can happen: no account with that
+    address, and the wrong password for an account that exists. They are
+    deliberately indistinguishable, because a caller who can tell them apart
+    can enumerate which addresses have accounts here by reading error codes,
+    and an address is not the kind of thing this service gets to disclose.
+
+    That indistinguishability is a property of the whole login path, not of
+    this class -- the timing has to match too, which is AuthService's job.
+    Kept separate from ValidationError because the two say different things:
+    ValidationError means the input was malformed and can be corrected by
+    looking at it, this means the input was well-formed and wrong. Folding
+    them together would put "your password is incorrect" in the same channel
+    as "your password is too long", and only one of those may say why.
+
+    Carries no email, no user id and no detail. Pure application code -- no
+    Strawberry, FastAPI, asyncpg or PostgreSQL.
+    """
+
+    def __init__(self):
+        super().__init__("Authentication failed")
+
+
+class EmailAlreadyRegisteredError(Exception):
+    """A registration lost the race for an address that is already taken.
+
+    Raised by the repository, because "taken" is a fact only the database
+    holds and only its unique constraint can decide without a window between
+    the check and the insert. Translated into a ValidationError by the
+    service, because that is the layer that decides what a client is told.
+
+    The two-step exists so that no asyncpg exception has to travel upward to
+    be interpreted. A UniqueViolationError says nothing on its own -- it
+    could be any constraint on any table -- and reading its constraint name
+    is SQL knowledge, which belongs with the SQL.
+
+    Carries no address, for the same reason WorkspaceNotFoundError carries no
+    slug. Pure application code -- no Strawberry, FastAPI, asyncpg or
+    PostgreSQL.
+    """
+
+    def __init__(self):
+        super().__init__("Email already registered")
+
+
 class WorkspaceNotFoundError(Exception):
     """A workspace slug did not resolve to a workspace.
 
