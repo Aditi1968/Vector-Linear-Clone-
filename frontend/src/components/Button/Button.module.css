@@ -1,0 +1,163 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+
+  min-width: 0;
+  border: var(--border-width) solid transparent;
+  border-radius: var(--radius-md);
+
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+  text-decoration: none;
+
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+/* Focus is deliberately absent from this file. The global `:focus-visible`
+ * rule in src/styles/base.css supplies the one indicator every focusable
+ * element in the product uses; restating it here is how a codebase ends up
+ * with four subtly different rings. */
+
+/* ---------------------------------------------------------------- */
+/* Sizes                                                             */
+/* ---------------------------------------------------------------- */
+
+.sm {
+  height: var(--control-height-sm);
+  padding-inline: var(--space-4);
+  font-size: var(--text-xs);
+}
+
+.md {
+  height: var(--control-height-md);
+  padding-inline: var(--space-5);
+  font-size: var(--text-sm);
+}
+
+/* Square, so an icon-only button is a circle-of-influence around the glyph
+ * rather than a wide slab with a lot of dead space. */
+.iconOnly.sm {
+  width: var(--control-height-sm);
+  padding-inline: 0;
+}
+
+.iconOnly.md {
+  width: var(--control-height-md);
+  padding-inline: 0;
+}
+
+/* ---------------------------------------------------------------- */
+/* Variants                                                          */
+/* ---------------------------------------------------------------- */
+
+.primary {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-text-on-accent);
+}
+
+.primary:hover:not(:disabled) {
+  background-color: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.primary:active:not(:disabled) {
+  background-color: var(--color-accent-active);
+  border-color: var(--color-accent-active);
+}
+
+.secondary {
+  background-color: var(--color-surface);
+  border-color: var(--color-border-strong);
+  color: var(--color-text-primary);
+}
+
+.secondary:hover:not(:disabled) {
+  background-color: var(--color-surface-hover);
+}
+
+.secondary:active:not(:disabled) {
+  background-color: var(--color-surface-active);
+}
+
+.ghost {
+  background-color: transparent;
+  border-color: transparent;
+  color: var(--color-text-secondary);
+}
+
+.ghost:hover:not(:disabled) {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+.ghost:active:not(:disabled) {
+  background-color: var(--color-surface-active);
+}
+
+.danger {
+  background-color: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-text-on-accent);
+}
+
+.danger:hover:not(:disabled) {
+  background-color: var(--color-danger-hover);
+  border-color: var(--color-danger-hover);
+}
+
+/* ---------------------------------------------------------------- */
+/* Disabled                                                          */
+/* ---------------------------------------------------------------- */
+
+/**
+ * One disabled treatment for every variant, and it is not `opacity`.
+ *
+ * Fading a button with `opacity` also fades it *towards its backdrop*, so the
+ * same rule produces a different contrast ratio on every surface the button
+ * is placed on -- and the one it lands on in a sidebar rail is usually the
+ * worst. Explicit flat colours give a disabled control a known contrast
+ * wherever it sits, and `--color-text-disabled` is deliberately still a
+ * readable neutral: a control the user cannot use yet is exactly the control
+ * they most need to be able to read.
+ */
+.button:disabled {
+  background-color: var(--color-surface-subtle);
+  border-color: var(--color-border);
+  color: var(--color-text-disabled);
+}
+
+.ghost:disabled {
+  background-color: transparent;
+  border-color: transparent;
+}
+
+/* ---------------------------------------------------------------- */
+/* Slots                                                             */
+/* ---------------------------------------------------------------- */
+
+.icon {
+  display: inline-flex;
+  /* Slightly larger than the label so the glyph reads at the same optical
+   * weight as the text beside it. */
+  font-size: 1.05em;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------- */
+/* Full width                                                        */
+/* ---------------------------------------------------------------- */
+
+.fullWidth {
+  width: 100%;
+}

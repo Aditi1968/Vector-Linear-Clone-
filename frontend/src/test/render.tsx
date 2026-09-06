@@ -1,0 +1,126 @@
+import { render, screen, within } from '@testing-library/react'
+import type { RenderResult } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import type { UserEvent } from '@testing-library/user-event'
+import { StrictMode } from 'react'
+import { RouterProvider, createMemoryRouter } from 'react-router-dom'
+
+import { AppProviders } from '../app/providers/AppProviders'
+import { routes } from '../app/routes'
+import { createTestClient } from './client'
+import { ControlledLink } from './controlledLink'
+
+/**
+ * Mount the real application against a controllable network.
+ *
+ * Everything below the link is production code: the real route table, the
+ * real `AppLayout`, the real pages, the real hooks, and -- the part that
+ * matters most for the pagination tests -- the real `createCache()`, which is
+ * the only place the `issues` field policy exists. A test that swapped in a
+ * plain `new InMemoryCache()` would still render rows and would still pass a
+ * naive "two pages appear" assertion, while proving nothing about the merge,
+ * the dedupe or the `after: null` reset. So the cache is never stubbed here,
+ * and there is no second copy of the policy in this directory to drift from
+ * the first.
+ *
+ * A fresh client per render, because a cache is mutable state: sharing one
+ * between tests would let a list loaded in one test satisfy a query in the
+ * next, which is the kind of leak that makes a suite pass in order and fail
+ * in isolation.
+ */
+
+export interface RenderAppOptions {
+  /** Where the router starts. Defaults to the issue list. */
+  initialPath?: string
+  /**
+   * Mount inside `<StrictMode>`, as `src/main.tsx` does.
+   *
+   * Off by default. StrictMode double-invokes effects, which is a stress test
+   * worth running deliberately -- it is the condition the cache policy's
+   * `after: null` reset branch and the create-action slot's identity-checked
+   * cleanup both exist to survive -- but it also makes "how many requests
+   * were sent" an ambiguous question, and most tests here ask exactly that.
+   */
+  strictMode?: boolean
+}
+
+export interface RenderAppResult extends RenderResult {
+  /** The network. Nothing resolves until this is told to. */
+  link: ControlledLink
+  /** `userEvent`, already set up, so tests do not each configure one. */
+  user: UserEvent
+  /** The URL the router is currently showing. */
+  currentPath: () => string
+}
+
+export function renderApp({
+  initialPath = '/issues',
+  strictMode = false,
+}: RenderAppOptions = {}): RenderAppResult {
+  const link = new ControlledLink()
+  const client = createTestClient(link)
+
+  const router = createMemoryRouter(routes, { initialEntries: [initialPath] })
+
+  const tree = (
+    <AppProviders client={client}>
+      <RouterProvider router={router} />
+    </AppProviders>
+  )
+
+  const view = render(strictMode ? <StrictMode>{tree}</StrictMode> : tree)
+
+  return {
+    ...view,
+    link,
+    user: userEvent.setup(),
+    currentPath: () => router.state.location.pathname,
+  }
+}
+
+/**
+ * The page's content region.
+ *
+ * Queries are scoped through this rather than through `screen` wherever the
+ * shell renders something similar -- the sidebar has a list of navigation
+ * links, and an unscoped `getAllByRole('link')` would count them as issue
+ * rows.
+ */
+export function main(): HTMLElement {
+  return screen.getByRole('main')
+}
+
+/** The issue list itself. Throws if the list is not on screen. */
+export function issueList(): HTMLElement {
+  return within(main()).getByRole('list')
+}
+
+/**
+ * The rows currently rendered, in order.
+ *
+ * Whole rows are links (see `IssueRow`), so this is a role query and not a
+ * class or test-id lookup: if the row stopped being a link -- a `<div
+ * onClick>`, say -- this would fail, which is the correct outcome, because
+ * that change would break keyboard users.
+ */
+export function issueRows(): HTMLElement[] {
+  return within(issueList()).getAllByRole('link')
+}
+
+/**
+ * The text of every rendered row, in order.
+ *
+ * The unit the pagination assertions are written in: text rather than DOM
+ * nodes, because duplicate rows -- the failure those tests exist to catch --
+ * show up in a list of strings as a repeated entry and in a list of nodes as
+ * nothing at all.
+ *
+ * `textContent` and not the computed accessible name. They are close here but
+ * not the same: the priority badge's visible "1 Urgent" is `aria-hidden` and
+ * so is absent from the name while present in the text. Claims about a row's
+ * *name* are made with `toHaveAccessibleName` at the point they are made;
+ * this is for order and identity.
+ */
+export function issueRowTexts(): string[] {
+  return issueRows().map((row) => row.textContent ?? '')
+}

@@ -1,0 +1,11 @@
+Owned by the test teammate. Setup files and render helpers.
+
+vitest, jsdom, @testing-library/{react,dom,user-event,jest-dom} are already
+installed -- package.json should not need editing. `npm test` runs
+`vitest run`; vitest.config.ts is yours and is already listed in
+tsconfig.node.json so it is type-checked and linted on arrival.
+
+Mount components inside AppProviders (src/app/providers/AppProviders.tsx),
+passing a client from createApolloClient() for cache isolation per test.
+
+Placeholder so git tracks the directory; delete it with the first real file.

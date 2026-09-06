@@ -439,3 +439,250 @@ jobs:
         # --pull refuses a base image the runner may already have cached, so
         # the build is against the base the Dockerfile actually names.
         run: docker build --pull --file Dockerfile --tag vector:ci .
+
+  graphql-contract:
+    name: GraphQL schema contract
+    runs-on: ubuntu-24.04
+
+    # frontend/schema.graphql is a checked-in copy of a value that is really
+    # derived: the Strawberry schema is the source of truth, and the SDL is
+    # what the frontend's codegen consumes. Two files, one truth, and nothing
+    # tying them together -- which is the same failure the `locks` job exists
+    # to catch. A resolver gains a field, the SDL is not re-exported, and the
+    # generated TypeScript keeps describing a schema the server no longer
+    # serves. Nothing fails: the frontend compiles, the tests pass against
+    # types that are fiction, and the mismatch surfaces as a runtime null in
+    # a browser.
+    #
+    # Python-only, and deliberately not merged into the `frontend` job below.
+    # This gate imports the application to read the schema; that one needs a
+    # Node toolchain and node_modules. Combining them would make every
+    # frontend lint failure wait on a pip install, and would mean a job that
+    # is red for two unrelated reasons at once.
+    #
+    # No database, no DSN, no secret. Verified locally with DATABASE_URL and
+    # ENVIRONMENT unset and no server running: build_schema() takes the
+    # environment as an argument rather than reading settings, so exporting
+    # the SDL never opens a connection. The SDL is also identical for
+    # development, test and production -- DisableIntrospection is an
+    # extension, not a type-system change -- so the workflow-level
+    # `ENVIRONMENT: test` cannot skew what this exports.
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install locked development dependencies
+        # The same one-file, hash-checked install the Python jobs above use.
+        # strawberry-graphql==0.326.0 is already in this lock because the
+        # application depends on it, so exporting the schema needs no tool
+        # that is not already pinned, and no second dependency strategy.
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Require the checked-in SDL to be tracked
+        # This is the step that makes the drift check mean anything, and it
+        # runs before the export rather than after it.
+        #
+        # `git diff` compares the work tree against the index, so it is blind
+        # to a file that is not in the index. If frontend/schema.graphql were
+        # missing, or present but never committed, the export below would
+        # create it, `git diff --exit-code` would find nothing to compare and
+        # exit 0, and the job would report that the SDL matches a file that
+        # does not exist. A gate that passes when its subject is absent is
+        # worse than no gate, because it is reported as evidence.
+        #
+        # `git ls-files --error-unmatch` asks the index directly, so it fails
+        # for both the missing and the merely-untracked case. It also covers
+        # the case a later .gitignore edit could introduce: `git status`
+        # stays silent about an ignored untracked file, but a *tracked* file
+        # keeps showing its modifications whatever .gitignore says, so
+        # proving tracked-ness here is what keeps the diff below honest.
+        run: |
+          if ! git ls-files --error-unmatch -- frontend/schema.graphql >/dev/null 2>&1; then
+            echo "::error::frontend/schema.graphql is not tracked by git. The GraphQL schema contract cannot be checked against a file that is not committed: export it and commit it."
+            exit 1
+          fi
+
+      - name: Re-export the SDL from the Strawberry schema
+        # Deleted first, then regenerated. This is a deliberate difference
+        # from the `locks` job, which recompiles over its output in place.
+        #
+        # Overwriting in place cannot tell "the exporter produced exactly
+        # this" from "the exporter produced nothing at all". A script that
+        # exits 0 without writing -- an early return, an exception swallowed
+        # somewhere, a flag that quietly became a no-op -- leaves the
+        # committed file untouched, and the diff below then reports a clean
+        # tree. Removing the file first makes not-writing-it indistinguishable
+        # from writing it wrongly: the file is gone, and its absence is a
+        # deletion that `git diff` reports and fails on.
+        #
+        # The exporter is the one thing here that is a contract with code
+        # rather than with git: this argv has to match the script that writes
+        # frontend/schema.graphql, and CI calls the *generator* rather than a
+        # `graphql:schema:check` wrapper on purpose. A check script decides
+        # for itself what counts as agreement; the comparison below does not
+        # get a say, which is the property that makes it a gate. A missing or
+        # renamed script fails this step outright -- python exits non-zero on
+        # an unreadable path -- so the gate cannot quietly stop running.
+        #
+        # The redirect is the interface, not a shortcut. export_schema.py
+        # writes SDL to stdout and parses no arguments at all, so a plausible
+        # looking `--out frontend/schema.graphql` is accepted, ignored, and
+        # exits 0 having written nothing. Do not add one back.
+        #
+        # PYTHONPATH=. is load-bearing. Running the script by path puts
+        # frontend/scripts/ on sys.path[0], not the repository root, and
+        # `import app` inside it then fails with ModuleNotFoundError.
+        run: |
+          rm -f frontend/schema.graphql
+          PYTHONPATH=. python frontend/scripts/export_schema.py > frontend/schema.graphql
+
+      - name: Fail if the exported SDL differs from the checked-in copy
+        # Scoped to the one path, so the failure names the contract that
+        # broke rather than anything else in the tree.
+        #
+        # Byte-for-byte, which is the only comparison available and is
+        # stricter than it looks: the exporter has to emit the file exactly
+        # as pre-commit leaves it, trailing newline included, because the
+        # `lint` job runs end-of-file-fixer over this same file.
+        run: |
+          if ! git diff --exit-code -- frontend/schema.graphql; then
+            echo "::error::frontend/schema.graphql is out of date with the Strawberry schema. Re-export it and commit the result, then regenerate the frontend types: npm run graphql:codegen."
+            exit 1
+          fi
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        # Every npm step belongs in frontend/, and repeating
+        # `working-directory:` on each of them is six chances to forget it
+        # once. The two git steps opt out explicitly with `git -C`, which
+        # also makes it obvious that they are reasoning about the repository
+        # and not about the package.
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          # Pinned to a major, matching how python-version is pinned to
+          # "3.12" rather than a patch: the runner supplies current security
+          # patches, and the version the gates run against is still a
+          # decision recorded in this file. 22 is the active LTS line and
+          # satisfies the `engines.node: >=20.19` that frontend/package.json
+          # declares.
+          node-version: "22"
+          cache: npm
+          # Relative to the workspace root, not to the job's
+          # working-directory: `uses:` steps do not inherit that default.
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Require the lockfile and the generated sources to be tracked
+        # Same reasoning as the SDL gate above, applied to everything this
+        # job either consumes or regenerates.
+        #
+        # package-lock.json is included because `npm ci` refuses to run
+        # without it -- so a missing lockfile fails loudly here, naming the
+        # problem, instead of thirty lines into an npm error.
+        #
+        # The generated TypeScript is included because codegen recreates it:
+        # if it were never committed, regenerating would produce an untracked
+        # file, and an untracked file is invisible to `git diff`. Checking
+        # tracked-ness first is what stops "never committed" from reading as
+        # "up to date".
+        run: |
+          missing=0
+
+          for path in frontend/package-lock.json frontend/schema.graphql frontend/src/generated/schema.ts frontend/src/generated/operations.ts; do
+            if ! git -C "${GITHUB_WORKSPACE}" ls-files --error-unmatch -- "${path}" >/dev/null 2>&1; then
+              echo "::error::${path} is not tracked by git; it must be committed for the frontend gates to check anything."
+              missing=1
+            fi
+          done
+
+          exit "${missing}"
+
+      - name: Install locked dependencies
+        # `npm ci`, never `npm install`. The difference is the whole point:
+        # `npm install` is allowed to update package-lock.json to satisfy
+        # package.json, so it would silently repair the exact drift worth
+        # failing on, and would install a dependency tree no developer has.
+        # `npm ci` installs the lockfile as written and exits non-zero when
+        # package.json and the lockfile disagree -- which makes npm lock
+        # drift a gate this job already enforces, for free.
+        #
+        # It also deletes node_modules first, so nothing a cache restored can
+        # survive into the build.
+        run: npm ci
+
+      - name: Regenerate the GraphQL types from the SDL and the operations
+        # Deleted first, then regenerated, for the reason given on the SDL
+        # export above: a codegen run that writes nothing must not be able to
+        # look like a codegen run that confirmed the committed output.
+        #
+        # frontend/schema.graphql is NOT deleted -- codegen reads it. Whether
+        # it matches the backend is the other job's question; this one asks
+        # only whether the generated TypeScript matches the SDL and the
+        # operations next to it.
+        run: |
+          rm -f src/generated/schema.ts src/generated/operations.ts
+          npm run graphql:codegen
+
+      - name: Fail if the generated types are out of date
+        # `git status --porcelain` rather than `git diff`, and scoped to the
+        # generated tree rather than to the one file, because this step has
+        # to catch three different outcomes and `git diff` only sees two of
+        # them:
+        #
+        #   * modified   -- the committed types no longer match the SDL;
+        #   * deleted    -- codegen did not write the file back;
+        #   * untracked  -- codegen emitted an output nobody committed, which
+        #                   `git diff` would not mention at all.
+        #
+        # --untracked-files=all lists individual files rather than collapsing
+        # a new directory into one entry, so the error names what appeared.
+        run: |
+          drift="$(git -C "${GITHUB_WORKSPACE}" status --porcelain --untracked-files=all -- frontend/src/generated)"
+
+          if [ -n "${drift}" ]; then
+            echo "${drift}"
+            git -C "${GITHUB_WORKSPACE}" diff -- frontend/src/generated
+            echo "::error::The generated GraphQL types are out of date with frontend/schema.graphql and the operations beside it. Run npm run graphql:codegen and commit the result."
+            exit 1
+          fi
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: TypeScript
+        # `tsc -b`, which type-checks without emitting. It runs before the
+        # build because `npm run build` is `tsc -b && vite build`: when the
+        # types are wrong, failing here says so in one line instead of
+        # halfway through a bundle.
+        run: npm run typecheck
+
+      - name: Vitest
+        # One-shot. `npm test` is `vitest run`, not the watching `vitest`,
+        # which in a non-interactive runner would hold the job open until the
+        # job timeout and report a cancellation rather than a test result.
+        run: npm test
+
+      - name: Build
+        # Last, because it is the slowest gate and the least specific: if the
+        # types or the tests are wrong, the earlier steps have already said
+        # which. Building proves the application still compiles and bundles
+        # against the dependency tree the lockfile pins.
+        run: npm run build

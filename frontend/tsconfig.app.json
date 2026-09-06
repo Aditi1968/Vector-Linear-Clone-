@@ -1,0 +1,54 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "esnext",
+    "types": ["vite/client"],
+    "allowArbitraryExtensions": true,
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+
+    /* Type safety.
+     *
+     * `strict` is added here deliberately: the create-vite template ships
+     * without it, so a project scaffolded from the template and left alone
+     * has implicit `any` on every unannotated parameter.
+     *
+     * `noUncheckedIndexedAccess` is the one addition beyond `strict` that
+     * changes how code must be written -- `array[0]` is `T | undefined`
+     * rather than `T`. It is on because the alternative is a type system
+     * that certifies as safe exactly the out-of-bounds reads that produce
+     * "cannot read property of undefined" at runtime.
+     *
+     * `exactOptionalPropertyTypes` is deliberately *not* on: it rejects the
+     * ordinary React and Apollo idiom of passing an explicit `undefined` for
+     * an optional prop, and the friction it would add across every feature
+     * outweighs what it catches here. */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+    /* Linting */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedSideEffectImports": true
+  },
+
+  /* Covers `src/test/` too, so the test teammate's files are type-checked by
+   * `npm run typecheck` without further configuration. If that teammate
+   * enables vitest's `globals: true`, `"vitest/globals"` has to be added to
+   * `types` above -- importing `describe`/`it`/`expect` from `vitest`
+   * explicitly needs no such change and is the simpler option. */
+  "include": ["src"]
+}

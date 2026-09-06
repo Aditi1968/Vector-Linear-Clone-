@@ -1,0 +1,186 @@
+# Every GraphQL document this feature sends.
+#
+# This file is the source. `npm run graphql:codegen` builds two files from
+# it and from `schema.graphql`:
+#
+#     src/generated/schema.ts       the schema as TypeScript
+#     src/generated/operations.ts   the types and TypedDocumentNodes for the
+#                                   operations below
+#
+# Edit here, never there.
+#
+# Nothing outside `./` imports a document, and no presentational component
+# imports one. Components consume the hooks in this directory
+# (./useIssueList, ./useIssueDetail, ./useCreateIssue), which consume the
+# generated document nodes through ./documents.ts. That is not layering for
+# its own sake: backend Phase 1b-5 makes issue operations workspace-aware,
+# which changes these documents' arguments and variables. Confining that to
+# this directory is what keeps the change from reaching every screen that
+# renders an issue.
+#
+# ================================================================
+# Why the page size is a literal and `first` is not a variable
+# ================================================================
+#
+# This is the one thing about these documents that is not obvious, is not a
+# matter of taste, and fails in a way that does not look like its cause.
+#
+# `app/graphql/limits.py` refuses a document over `MAX_COMPLEXITY = 1000`
+# during *validation* -- before a resolver runs, before the database is
+# touched. Complexity for a list field is
+#
+#     page size x (fields selected below it)
+#
+# and the page size comes from `_page_size`, which reads it in the order the
+# server itself resolves it: the value written in the document, then the
+# argument's declared default, then `ASSUMED_PAGE_SIZE = 100`.
+#
+# A GraphQL *variable* has no value at validation time -- variables arrive
+# with the request, the document is validated before them. `_as_page_size`
+# receives a `VariableNode`, `int()` on it raises, and the argument falls
+# through to `ASSUMED_PAGE_SIZE`. So `first: $first` is charged at 100 no
+# matter that we would have sent 25.
+#
+# Measured against the real schema (the Lead re-ran these; they are not
+# estimates):
+#
+#     issues(first: $first, after: $after), all 7 node fields + pageInfo   900
+#     ...the same with __typename added throughout                        900
+#     two variable-page-size `issues` selections in one document          1800  REFUSED
+#     issues(first: 25, after: $after), all 7 node fields + pageInfo       225
+#
+# This document selects 6 node fields (no `description`) plus 2 on
+# `pageInfo`, so as a variable it would cost `100 x 8 = 800` and as written
+# it costs `25 x 8 = 200`.
+#
+# Being precise about the cliff, because someone will rely on this number:
+# the check is `measured.complexity > MAX_COMPLEXITY`, strictly greater. At
+# 900, one more scalar reaches exactly 1000 and still passes; it takes two to
+# be refused. The margin is thinner than it sounds all the same -- 900 of
+# 1000 to fetch a single page leaves nothing for a document to grow into.
+#
+# What makes this worth a literal rather than a comfortable margin is the
+# *shape* of the failure, not its distance. Exceeding the budget is a
+# top-level validation error with no resolver run, so it presents as the
+# entire query failing rather than as a short page or a slow one -- and it
+# would appear the moment someone put a second list field in one document.
+#
+# `__typename` is free: `is_introspection_key` in the limits rule skips any
+# field whose name starts with `__`, so the typenames Apollo adds to every
+# selection set cost nothing against this budget -- confirmed by the second
+# row of the table above.
+#
+# If you are here because you are writing another list query: do not reach
+# for `$first`. It is the obvious thing to do and it is priced at 100.
+#
+# ----------------------------------------------------------------
+# The one thing a .graphql file cannot do, and what covers it
+# ----------------------------------------------------------------
+#
+# A GraphQL document has no way to interpolate a TypeScript constant, so the
+# `25` below is written out where `src/lib/graphql/pagination.ts` also
+# declares `DEFAULT_PAGE_SIZE = 25`. That is two places holding one number,
+# which is exactly the kind of thing that drifts -- so it is pinned by a
+# test rather than by a convention: `./documents.test.ts` reads the literal
+# out of the parsed document and asserts it equals `DEFAULT_PAGE_SIZE`.
+# Changing one without the other is a failing test, not a silent 4x
+# complexity increase in production.
+#
+# The constraint on the value itself: `DEFAULT_PAGE_SIZE` must stay within
+# 1..100 (`app.services.issues.FIRST_MIN`/`FIRST_MAX`) or every list request
+# comes back as `BAD_USER_INPUT`, and low enough that `size x fields` stays
+# under 1000.
+
+# The row selection, as a fragment so that the list query and the create
+# mutation cannot drift apart.
+#
+# That they cannot drift is load-bearing for the cache update in ./cache.ts.
+# After a create, the new issue is written into the cached list by reading
+# the list query out of the cache, prepending, and writing it back. If the
+# mutation's selection ever stopped covering a field the list selects, the
+# prepended entity would be incomplete, the *next* read of the list document
+# would return null for missing data, and the list would go blank -- silently,
+# and nowhere near the edit that caused it. A shared fragment makes that
+# impossible rather than merely unlikely.
+fragment IssueRowFields on Issue {
+  id
+  title
+  priority
+  completedAt
+  createdAt
+  updatedAt
+}
+
+# The detail selection: every field the schema exposes on `Issue`.
+#
+# A strict superset of `IssueRowFields`, by construction rather than by
+# repetition -- see the note above.
+fragment IssueDetailFields on Issue {
+  ...IssueRowFields
+  description
+}
+
+# One page of issues, newest first.
+#
+# Cursor pagination, never offset: `after` carries the opaque keyset cursor
+# the server built from the last row it returned (`created_at`, `id`), and
+# there is no page number or row count anywhere in this feature to compute an
+# offset from even if someone wanted to.
+#
+# Cost: 25 x (6 + 2) = 200 of 1000.
+query IssueList($after: String) {
+  # 25 is a LITERAL and must stay one. As $first it is charged at
+  # ASSUMED_PAGE_SIZE = 100 during validation, which prices this selection at
+  # 800 of 1000 instead of 200. It must equal `DEFAULT_PAGE_SIZE` in
+  # src/lib/graphql/pagination.ts; ./documents.test.ts asserts that it does.
+  # See the long note at the top of this file for the measurements.
+  issues(first: 25, after: $after) {
+    nodes {
+      ...IssueRowFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# One issue by id.
+#
+# `issue(id:)` returns `Issue` **nullable**, so a null result is an ordinary
+# answer meaning "no such issue" and not an error condition. Cost: 1 x 7 = 7.
+query IssueDetail($id: UUID!) {
+  issue(id: $id) {
+    ...IssueDetailFields
+  }
+}
+
+# Create an issue.
+#
+# Both failure channels are selected, because the server uses both and they
+# mean different things:
+#
+#   - `errors` inside the payload is *expected user input* being rejected --
+#     a title that is empty or over 500 characters, a priority outside 0..4.
+#     It arrives in `data` with an HTTP 200 and no GraphQL `errors` array.
+#   - a top-level GraphQL error is anything else: an outage, a bug, a
+#     transport failure. It arrives as a rejected promise from `mutate`.
+#
+# A client that reads only one of the two either silently discards validation
+# feedback or reports a database outage as a bad title. ./useCreateIssue
+# reads both.
+#
+# The `issue` selection uses the detail fragment, which is what lets the
+# cache update in ./cache.ts write the new row into the list.
+mutation IssueCreate($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    issue {
+      ...IssueDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

@@ -1,0 +1,50 @@
+"""Date with time (isoformat)"""
+scalar DateTime
+
+type Issue {
+  id: UUID!
+  title: String!
+  description: String
+  priority: Int!
+  completedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type IssueConnection {
+  nodes: [Issue!]!
+  pageInfo: PageInfo!
+}
+
+input IssueCreateInput {
+  title: String!
+  description: String = null
+  priority: Int! = 0
+}
+
+type IssueCreatePayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
+}
+
+type Mutation {
+  issueCreate(input: IssueCreateInput!): IssueCreatePayload!
+}
+
+type PageInfo {
+  hasNextPage: Boolean!
+  endCursor: String
+}
+
+type Query {
+  issue(id: UUID!): Issue
+  issues(first: Int! = 50, after: String = null): IssueConnection!
+}
+
+scalar UUID
+
+type ValidationErrorType {
+  field: String!
+  code: String!
+  message: String!
+}

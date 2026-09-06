@@ -1,0 +1,17 @@
+/**
+ * The global stylesheet. The only CSS file imported from application code
+ * that is not a `.module.css`.
+ *
+ * Order is load-bearing: tokens must be defined before anything reads them,
+ * and the element baseline must come before component modules so that a
+ * component's own rules win on equal specificity. Vite inlines these
+ * `@import`s at build time, so this costs no extra request.
+ *
+ * Nothing else belongs here. Utility classes, component styles and layout
+ * rules go in a `.module.css` next to the component that owns them, which is
+ * what stops this file from slowly becoming the place where every specificity
+ * fight is settled.
+ */
+
+@import './tokens.css';
+@import './base.css';

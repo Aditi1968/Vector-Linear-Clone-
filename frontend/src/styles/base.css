@@ -1,0 +1,199 @@
+/**
+ * Element-level baseline.
+ *
+ * Not a third-party reset. A reset normalises every element in the HTML
+ * vocabulary; this file normalises the dozen that Vector actually renders,
+ * and states a default for each. Everything below either removes a UA default
+ * that fights a component (margins, form-control font inheritance) or
+ * establishes a token-backed default so components do not each restate it.
+ *
+ * Component styling belongs in the component's own `.module.css`. Nothing
+ * here targets a class.
+ */
+
+/* Border-box everywhere. The `inherit` form lets a subtree opt out if it ever
+ * has to host third-party markup that assumes content-box. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  box-sizing: border-box;
+  /* Not `scroll-behavior: smooth` unconditionally -- see the reduced-motion
+   * block at the bottom. */
+  -webkit-text-size-adjust: 100%;
+}
+
+/* UA margins on headings, paragraphs and lists are a typographic system from
+ * a document renderer. Application layout supplies its own spacing, and
+ * inheriting both means every component starts by cancelling one. */
+body,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+figure,
+blockquote,
+dl,
+dd,
+ol,
+ul {
+  margin: 0;
+}
+
+ol[role='list'],
+ul[role='list'] {
+  padding: 0;
+  list-style: none;
+}
+
+body {
+  min-height: 100dvh;
+  margin: 0;
+  background-color: var(--color-bg-app);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-regular);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-normal);
+  /* Grayscale antialiasing on macOS: the default subpixel rendering makes
+   * 13px medium-weight text on light surfaces look noticeably heavier than
+   * the same text on Windows. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Belt and braces with the layout's own `min-width: 0`: keeps a single long
+   * unbroken token (a URL, an id) from widening the page. */
+  overflow-wrap: break-word;
+}
+
+/* Headings inherit size by default and are given one explicitly by whatever
+ * renders them. Heading *level* is a document-structure decision and must not
+ * be chosen for its size; decoupling the two here is what makes that
+ * possible. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-size: inherit;
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+}
+
+/* Form controls do not inherit typography from `body` in any browser. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: default;
+}
+
+a {
+  color: var(--color-text-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+code,
+kbd,
+pre,
+samp {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+}
+
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+svg {
+  /* Icons are drawn in `currentColor` and sized by their container, so they
+   * track the text they sit beside without per-icon colour props. */
+  fill: none;
+  flex: none;
+}
+
+hr {
+  height: var(--border-width);
+  border: 0;
+  background-color: var(--color-border);
+}
+
+/* ------------------------------------------------------------------ */
+/* Focus                                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One focus indicator, defined once, applied to everything focusable.
+ *
+ * `:focus-visible` rather than `:focus`, so a mouse click on a button does
+ * not leave a ring behind -- while every keyboard path still shows one. This
+ * is the only mechanism by which focus is styled; a component that wants a
+ * different indicator changes the tokens, and no component is permitted to
+ * write `outline: none` without replacing the affordance.
+ *
+ * `outline` is the transparent placeholder and `box-shadow` draws the ring,
+ * because a box-shadow ring follows `border-radius` and an outline (in older
+ * engines) does not. The transparent outline is what keeps the indicator
+ * visible in forced-colours/high-contrast modes, where box-shadows are
+ * dropped entirely.
+ */
+:focus-visible {
+  outline: var(--focus-ring-width) solid transparent;
+  outline-offset: var(--focus-ring-offset);
+  box-shadow: var(--focus-ring);
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline-color: Highlight;
+  }
+}
+
+::selection {
+  background-color: var(--color-accent-subtle);
+  color: var(--color-text-primary);
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Honour the OS-level reduced-motion preference globally rather than asking
+ * every component to remember. Durations are collapsed rather than set to
+ * `0s` on the animation itself: a `0.01ms` animation still fires its
+ * `animationend`, so behaviour that depends on the event keeps working.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

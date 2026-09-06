@@ -1,0 +1,28 @@
+.content {
+  padding: var(--layout-content-padding-block) var(--layout-content-padding-inline);
+  /* Without this a wide child -- a table, a long unbroken id -- makes the
+   * whole page scroll horizontally instead of scrolling inside itself. */
+  min-width: 0;
+}
+
+/**
+ * Optional reading measure.
+ *
+ * Not the default: a list of issues should use the width it is given, and
+ * capping it leaves a dense tool looking like a blog. Reserved for prose-ish
+ * screens -- an issue's description, an empty state -- where an unbounded
+ * line length is genuinely harder to read.
+ */
+.constrained {
+  max-width: var(--layout-content-max-width);
+}
+
+/**
+ * `48rem` is `--layout-breakpoint-compact` in src/styles/tokens.css. Media
+ * queries cannot read custom properties, so the literal is repeated here.
+ */
+@media (max-width: 47.999rem) {
+  .content {
+    padding-inline: var(--space-5);
+  }
+}

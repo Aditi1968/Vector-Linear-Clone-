@@ -6,3 +6,7 @@ __pycache__/
 .env
 .env.local
 CLAUDE.md
+
+# Frontend build artefacts (frontend/).
+node_modules/
+dist/

@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
+    "target": "es2023",
+    "lib": ["ES2023"],
+
+    /* No ambient type packages. The create-vite template puts `["node"]`
+     * here, which requires `@types/node`; this project does not depend on it,
+     * and nothing in the build config below uses a Node global. Keeping the
+     * list empty and explicit means adding one is a decision rather than an
+     * accident of whatever ends up in node_modules/@types. */
+    "types": [],
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "module": "nodenext",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "noEmit": true,
+
+    /* Type safety -- the same bar as the application code. */
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+
+    /* Linting */
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "erasableSyntaxOnly": true,
+    "noFallthroughCasesInSwitch": true
+  },
+
+  /* `vitest.config.ts` belongs to the test teammate and does not exist yet.
+   * It is listed anyway so that it is type-checked and lintable the moment
+   * it appears -- `include` entries that match nothing are not an error, as
+   * long as the project matches at least one file overall. */
+  "include": ["vite.config.ts", "vitest.config.ts"]
+}

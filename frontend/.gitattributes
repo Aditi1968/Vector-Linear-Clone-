@@ -1,0 +1,22 @@
+# The two artefacts a CI drift check regenerates and diffs are pinned to LF.
+#
+# Same reasoning as the root .gitattributes, which pins the dependency locks
+# for the same reason: a generator writes LF, and a checkout under
+# `core.autocrlf=true` -- or a commit from a contributor with
+# `autocrlf=false` on Windows -- can put CRLF on disk. The gate then
+# regenerates, every line differs from the committed bytes, and CI reports
+# the whole file as drifted on a tree nobody touched.
+#
+# That failure is worse here than a phantom diff, because these gates exist
+# precisely to answer "did the contract change?". A line-ending mismatch
+# answers "yes" every time, and the honest answer stops being legible.
+#
+# `graphql-codegen.mjs` already writes LF explicitly for the generated
+# TypeScript; this covers the SDL, which has no such guard, and makes the
+# guarantee a property of the repository rather than of one generator.
+#
+# Deliberately narrow: only the generated artefacts under frontend/, not a
+# blanket `* text=auto eol=lf`. Line-ending policy for the whole tree is a
+# decision to take on purpose, not a side effect of adding a codegen step.
+schema.graphql        text eol=lf
+src/generated/**      text eol=lf

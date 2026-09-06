@@ -1,0 +1,1 @@
+export { graphqlUrl } from './env'

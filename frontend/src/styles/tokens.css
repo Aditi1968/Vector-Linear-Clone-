@@ -1,0 +1,258 @@
+/**
+ * Vector design tokens.
+ *
+ * Two layers, and the split is the point:
+ *
+ *   1. PRIMITIVES (`--vector-*`) are raw values. This file is the only place
+ *      in the codebase where a hex colour, a font stack, or a shadow geometry
+ *      is written down.
+ *   2. SEMANTICS (`--color-*`, `--space-*`, `--text-*`, ...) name a *role*
+ *      and point at a primitive.
+ *
+ * Components consume semantics only. A component that reaches for
+ * `--vector-indigo-600` has hardcoded a colour just as surely as if it had
+ * written the hex, because it has recorded *which* colour rather than *what
+ * the colour is for*. `--color-accent` survives a rebrand; `--vector-indigo-600`
+ * does not.
+ *
+ * Light mode only, deliberately. Every token lives on `:root` rather than
+ * inside a `.theme-light` class, so adding dark mode later means adding one
+ * `@media (prefers-color-scheme: dark)` block that re-points the *semantic*
+ * layer at different primitives -- no component and no primitive changes. That
+ * is architecture for a theme system, not a theme system; this phase does not
+ * ship one.
+ *
+ * Contrast: every foreground/background pair used for text below was checked
+ * against WCAG AA (4.5:1 for body text, 3:1 for large text and for the focus
+ * ring against its adjacent surface). The ratios are recorded next to the
+ * tokens so a future edit that breaks one is visible in review rather than in
+ * an audit.
+ */
+
+:root {
+  /* Tells the UA to render form controls, scrollbars and the canvas in light
+   * treatments. Without it a browser in dark mode paints native controls dark
+   * inside our light surfaces. */
+  color-scheme: light;
+
+  /* ================================================================== */
+  /* PRIMITIVES -- raw values, referenced only by the semantic layer     */
+  /* ================================================================== */
+
+  /* Neutrals. A slightly cool ramp: pure grey reads as dirty next to the
+   * indigo accent, and a faint blue cast is what makes a dense monochrome
+   * interface look intentional rather than unfinished. */
+  --vector-gray-0: #ffffff;
+  --vector-gray-25: #fcfcfd;
+  --vector-gray-50: #f7f8fa;
+  --vector-gray-100: #eef0f4;
+  --vector-gray-200: #e4e7ec;
+  --vector-gray-300: #d3d8e0;
+  --vector-gray-400: #a6aeba;
+  --vector-gray-500: #69717f; /* 4.9:1 on gray-0 -- the lightest text neutral */
+  --vector-gray-600: #5c6573; /* 5.9:1 on gray-0 */
+  --vector-gray-700: #3f4754;
+  --vector-gray-800: #272d38;
+  --vector-gray-900: #151922; /* 16.4:1 on gray-0 */
+
+  /* Accent. Indigo rather than blue: blue is what an unvisited link is, and a
+   * product accent that collides with link colour makes "is this clickable?"
+   * ambiguous in exactly the dense lists this UI is built out of. */
+  --vector-indigo-50: #eef0fe;
+  --vector-indigo-100: #dfe2fc;
+  --vector-indigo-200: #c4c9f7;
+  --vector-indigo-500: #5b5bd6; /* 5.4:1 on gray-0 */
+  --vector-indigo-600: #4f4fc4;
+  --vector-indigo-700: #4141a8;
+
+  --vector-red-50: #fef1f1;
+  --vector-red-200: #f6cccb;
+  --vector-red-600: #c8322f; /* 5.3:1 on gray-0 */
+  --vector-red-700: #a72724;
+
+  --vector-green-50: #edf9f2;
+  --vector-green-200: #bfe5d0;
+  --vector-green-600: #1a7f4b; /* 5.0:1 on gray-0 */
+  --vector-green-700: #14653c;
+
+  /* Type. System stacks: a webfont is a network dependency and a layout-shift
+   * source, and neither is worth paying for chrome the user reads past. */
+  --vector-font-sans:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+  --vector-font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
+    monospace;
+
+  /* Shadows. Tinted with the neutral hue rather than pure black -- black
+   * shadows on a cool grey surface read as grime. */
+  --vector-shadow-color: 218deg 25% 18%;
+
+  /* ================================================================== */
+  /* SEMANTIC -- what components are allowed to use                      */
+  /* ================================================================== */
+
+  /* --- Background layers ------------------------------------------- */
+  /* `sunken` sits *behind* content (the sidebar rail); `app` is the page
+   * canvas; surfaces sit on top. Three layers is enough for this product and
+   * few enough that "which one" is never a guess. */
+  --color-bg-sunken: var(--vector-gray-50);
+  --color-bg-app: var(--vector-gray-0);
+
+  /* --- Surface layers ---------------------------------------------- */
+  --color-surface: var(--vector-gray-0);
+  --color-surface-raised: var(--vector-gray-0);
+  --color-surface-subtle: var(--vector-gray-50);
+  --color-surface-hover: var(--vector-gray-100);
+  --color-surface-active: var(--vector-gray-200);
+  --color-surface-selected: var(--vector-indigo-50);
+
+  /* --- Borders ------------------------------------------------------ */
+  --color-border-subtle: var(--vector-gray-100);
+  --color-border: var(--vector-gray-200);
+  --color-border-strong: var(--vector-gray-300);
+
+  /* --- Text --------------------------------------------------------- */
+  --color-text-primary: var(--vector-gray-900);
+  --color-text-secondary: var(--vector-gray-600);
+  --color-text-muted: var(--vector-gray-500);
+  --color-text-on-accent: var(--vector-gray-0);
+  --color-text-accent: var(--vector-indigo-600);
+  --color-text-danger: var(--vector-red-600);
+  --color-text-success: var(--vector-green-700);
+  /* Text inside a control the UI has switched off. Deliberately *not* a text
+   * token below AA: a disabled control still has to be readable, because "I
+   * cannot use this yet" is information the user needs. It is distinguished
+   * from enabled text by weight and by an adjacent visible marker, never by
+   * contrast alone. */
+  --color-text-disabled: var(--vector-gray-500);
+
+  /* --- Accent ------------------------------------------------------- */
+  --color-accent: var(--vector-indigo-500);
+  --color-accent-hover: var(--vector-indigo-600);
+  --color-accent-active: var(--vector-indigo-700);
+  --color-accent-subtle: var(--vector-indigo-50);
+  --color-accent-border: var(--vector-indigo-200);
+
+  /* --- Status ------------------------------------------------------- */
+  --color-danger: var(--vector-red-600);
+  --color-danger-hover: var(--vector-red-700);
+  --color-danger-subtle: var(--vector-red-50);
+  --color-danger-border: var(--vector-red-200);
+
+  --color-success: var(--vector-green-600);
+  --color-success-hover: var(--vector-green-700);
+  --color-success-subtle: var(--vector-green-50);
+  --color-success-border: var(--vector-green-200);
+
+  /* --- Focus ring --------------------------------------------------- */
+  /* Ring *plus* offset ring in the surface colour, so the indicator stays
+   * visible when the focused control sits directly on a coloured background
+   * and a plain outline would blend into it. */
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+  --focus-ring-color: var(--vector-indigo-500);
+  --focus-ring: 0 0 0 var(--focus-ring-offset) var(--color-bg-app),
+    0 0 0 calc(var(--focus-ring-offset) + var(--focus-ring-width))
+      var(--focus-ring-color);
+
+  /* --- Spacing ------------------------------------------------------ */
+  /* A 4px base with two half-steps at the small end. Dense UI spends most of
+   * its budget between 4 and 12px, and a pure 4/8/16 ramp forces a choice
+   * between "touching" and "loose" exactly where the decisions matter. */
+  --space-0: 0;
+  --space-1: 0.125rem; /*  2px */
+  --space-2: 0.25rem; /*  4px */
+  --space-3: 0.375rem; /*  6px */
+  --space-4: 0.5rem; /*  8px */
+  --space-5: 0.75rem; /* 12px */
+  --space-6: 1rem; /* 16px */
+  --space-7: 1.5rem; /* 24px */
+  --space-8: 2rem; /* 32px */
+  --space-9: 3rem; /* 48px */
+  --space-10: 4rem; /* 64px */
+
+  /* --- Radii -------------------------------------------------------- */
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  /* --- Borders ------------------------------------------------------ */
+  --border-width: 1px;
+
+  /* --- Typography --------------------------------------------------- */
+  --font-sans: var(--vector-font-sans);
+  --font-mono: var(--vector-font-mono);
+
+  /* Base is 13px, not 16px. This is an information-dense tool whose primary
+   * surface is a list of hundreds of rows; 16px body text is a reading size
+   * and costs roughly a fifth of the rows on screen. `rem` throughout, so a
+   * user who raises their browser's font size still scales the whole UI. */
+  --text-2xs: 0.6875rem; /* 11px -- badges, meta */
+  --text-xs: 0.75rem; /* 12px -- secondary/meta */
+  --text-sm: 0.8125rem; /* 13px -- BODY DEFAULT */
+  --text-md: 0.875rem; /* 14px -- emphasised body */
+  --text-lg: 1rem; /* 16px -- section titles */
+  --text-xl: 1.25rem; /* 20px -- page titles */
+  --text-2xl: 1.5rem; /* 24px -- display */
+
+  --leading-none: 1;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Negative tracking on large type only; small text needs its default
+   * spacing to stay legible. */
+  --tracking-tight: -0.011em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.02em;
+
+  /* --- Elevation ---------------------------------------------------- */
+  --shadow-sm: 0 1px 2px hsl(var(--vector-shadow-color) / 0.06);
+  --shadow-md:
+    0 2px 4px hsl(var(--vector-shadow-color) / 0.06),
+    0 4px 12px hsl(var(--vector-shadow-color) / 0.08);
+  --shadow-lg:
+    0 4px 8px hsl(var(--vector-shadow-color) / 0.06),
+    0 12px 32px hsl(var(--vector-shadow-color) / 0.12);
+
+  /* --- Motion ------------------------------------------------------- */
+  /* Chrome feedback should be perceptible but never something you wait on.
+   * Anything over ~120ms on a hover state reads as lag in a dense UI. */
+  --duration-instant: 60ms;
+  --duration-fast: 100ms;
+  --duration-moderate: 160ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+
+  /* --- Layering ----------------------------------------------------- */
+  /* Named, and few. The failure mode this prevents is `z-index: 9999`
+   * appearing in a component because nobody knew what it had to beat. */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-overlay: 100;
+  --z-skip-link: 1000;
+
+  /* --- Layout ------------------------------------------------------- */
+  --layout-sidebar-width: 14.5rem;
+  --layout-content-padding-inline: var(--space-7);
+  --layout-content-padding-block: var(--space-6);
+  --layout-content-max-width: 68rem;
+  /* Minimum hit target for chrome controls. Below AAA's 44px because this is
+   * a pointer-first desktop tool, but large enough that the controls are not
+   * a precision task. */
+  --control-height-sm: 1.75rem; /* 28px */
+  --control-height-md: 2rem; /* 32px */
+
+  /* The single viewport width at which the shell stops being a two-column
+   * layout. Recorded here as the one source of truth -- but note that CSS
+   * media queries cannot read custom properties, so the literal `48rem` is
+   * repeated in the `@media` blocks that use it. Change both together; they
+   * are cross-referenced by comment at every use site. */
+  --layout-breakpoint-compact: 48rem;
+}

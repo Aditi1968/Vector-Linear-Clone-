@@ -1,0 +1,104 @@
+/**
+ * The persistent left rail.
+ *
+ * Sticky at `100dvh` rather than `position: fixed`. Fixed would take the rail
+ * out of flow and force the main column to carry a compensating margin equal
+ * to the rail's width -- a duplicated constant in two files that silently
+ * breaks the moment one of them changes. As a sticky flex item the rail
+ * *occupies* its width, so the main column is positioned by the layout rather
+ * than by arithmetic.
+ *
+ * `align-self: flex-start` is required: the default `stretch` would size the
+ * item to the full height of a long page, and a sticky element as tall as its
+ * container has nowhere to travel and never sticks.
+ */
+.sidebar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  align-self: flex-start;
+
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--space-5);
+
+  width: var(--layout-sidebar-width);
+  height: 100dvh;
+  padding: var(--space-5) var(--space-4);
+
+  background-color: var(--color-bg-sunken);
+  border-right: var(--border-width) solid var(--color-border);
+  /* A rail that will one day hold more sections than fit. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Compact layout                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Below the breakpoint the rail becomes a bar across the top and the shell
+ * stacks. See AppLayout.module.css for the reasoning behind choosing this
+ * over an off-canvas drawer.
+ *
+ * It becomes `position: static` here on purpose. Both the rail and the page
+ * header want `top: 0`, and two sticky elements at the same offset overlap.
+ * Stacking them would mean the header's offset had to equal the bar's height
+ * -- a second magic constant that breaks whenever the bar's content changes
+ * height. Letting the bar scroll away leaves exactly one sticky element on
+ * screen, and the page header is the one worth keeping.
+ *
+ * `48rem` is `--layout-breakpoint-compact` in src/styles/tokens.css. Media
+ * queries cannot read custom properties, so the literal is repeated here;
+ * the two must change together.
+ */
+@media (max-width: 47.999rem) {
+  .sidebar {
+    position: static;
+    /* Required, not redundant. `.shell` becomes a column at this breakpoint,
+     * which flips the flex cross axis to horizontal -- so the
+     * `align-self: flex-start` that keeps the rail stickable in the wide
+     * layout would here shrink the bar to the width of its contents. */
+    align-self: stretch;
+
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-4);
+
+    width: auto;
+    height: auto;
+    padding: var(--space-4) var(--space-5);
+
+    border-right: none;
+    border-bottom: var(--border-width) solid var(--color-border);
+    overflow: visible;
+  }
+
+  .actions {
+    flex-direction: row;
+    align-items: center;
+    /* Pushes the actions -- and the nav that follows them in the DOM -- to
+     * the trailing edge, leaving the brand at the leading edge. An auto
+     * margin rather than `order`, because `order` would separate visual
+     * position from tab order (WCAG 2.4.3) while this does not: the DOM
+     * order and the reading order stay identical in both layouts. */
+    margin-inline-start: auto;
+  }
+
+  /* `Button`'s `fullWidth` is right in a vertical rail and wrong in a
+   * horizontal bar. Two classes plus an element beat the single class of
+   * `.fullWidth`, so this wins regardless of the order the two modules end
+   * up in the bundle -- which is not something to leave to chance. */
+  .actions > button {
+    width: auto;
+  }
+}

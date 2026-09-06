@@ -1,0 +1,473 @@
+/*
+ * Styles for the issues feature.
+ *
+ * Scoped as a CSS module and colocated with the feature. Every colour, space,
+ * radius and size comes from `src/styles/tokens.css` -- there is not one
+ * literal hex value or pixel measurement below, which is what makes a theme
+ * change a change to the token file and not a sweep through features.
+ *
+ * Deliberately absent, because `src/styles/base.css` already owns them:
+ * `box-sizing`, heading and list resets, form-control font inheritance, the
+ * `:focus-visible` ring, and the reduced-motion override. Restating any of
+ * them here is how a codebase ends up with four subtly different focus rings.
+ *
+ * Also absent: buttons and visually-hidden text. Those are
+ * `components/Button` and `components/VisuallyHidden`.
+ */
+
+/* ------------------------------------------------------------------ list */
+
+.list {
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.listItem + .listItem {
+  border-top: var(--border-width) solid var(--color-border-subtle);
+}
+
+.row {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+  color: var(--color-text-primary);
+  text-decoration: none;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.row:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.rowTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.rowCompleted {
+  flex: 0 0 auto;
+  color: var(--color-text-success);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+/* -------------------------------------------------------- priority badge */
+
+.priority {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-1) var(--space-3);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-subtle);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-normal);
+  white-space: nowrap;
+}
+
+.priorityValue {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-weight: var(--weight-semibold);
+}
+
+.priorityName {
+  color: var(--color-text-secondary);
+}
+
+/*
+ * Colour carries no information that the number and the name do not already
+ * carry, which is the rule that keeps this readable for a colour-blind user:
+ * the tint is a scanning aid on top of text, never the text's replacement.
+ */
+.priority[data-priority='1'] {
+  border-color: var(--color-danger-border);
+  background-color: var(--color-danger-subtle);
+}
+
+.priority[data-priority='1'] .priorityName {
+  color: var(--color-text-danger);
+}
+
+.priority[data-priority='2'],
+.priority[data-priority='3'] {
+  border-color: var(--color-border-strong);
+  background-color: var(--color-surface-subtle);
+}
+
+.priority[data-priority='2'] .priorityName {
+  color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
+}
+
+.priority[data-priority='4'] {
+  background-color: var(--color-surface);
+}
+
+/* ---------------------------------------------------------------- states */
+
+/*
+ * Three visibly different things, not one spinner with three captions. A
+ * skeleton shaped like the list that is coming; a dashed, centred panel for
+ * "there is nothing here"; a bordered danger panel with a retry for "asking
+ * failed". Three unrelated situations with three different next actions.
+ */
+
+.skeletonList {
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.skeletonRow {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  padding: var(--space-4) var(--space-5);
+}
+
+.skeletonRow + .skeletonRow {
+  border-top: var(--border-width) solid var(--color-border-subtle);
+}
+
+.skeletonBar {
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-hover);
+  background-image: linear-gradient(
+    90deg,
+    var(--color-surface-hover) 25%,
+    var(--color-surface-subtle) 37%,
+    var(--color-surface-hover) 63%
+  );
+  background-size: 400% 100%;
+  height: var(--space-5);
+  animation: issueSkeletonShimmer 1.4s ease infinite;
+}
+
+@keyframes issueSkeletonShimmer {
+  from {
+    background-position: 100% 50%;
+  }
+
+  to {
+    background-position: 0 50%;
+  }
+}
+
+.skeletonBadge {
+  flex: 0 0 auto;
+  width: var(--space-10);
+}
+
+.skeletonTitle {
+  flex: 1 1 auto;
+}
+
+.skeletonMeta {
+  flex: 0 0 auto;
+  width: var(--space-9);
+}
+
+.skeletonBlock {
+  margin-bottom: var(--space-7);
+}
+
+.skeletonHeading {
+  max-width: 28ch;
+  height: var(--space-7);
+}
+
+.skeletonPanel {
+  height: var(--space-10);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-9) var(--space-7);
+  border: var(--border-width) dashed var(--color-border-strong);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-bg-sunken);
+  text-align: center;
+}
+
+.emptyTitle {
+  color: var(--color-text-primary);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+}
+
+.emptyBody {
+  max-width: 44ch;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: flex-start;
+  padding: var(--space-6);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-danger-subtle);
+}
+
+.errorTitle {
+  color: var(--color-text-danger);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.errorBody {
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+/* ----------------------------------------------------------- list footer */
+
+.listFooter {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: center;
+  padding-top: var(--space-6);
+  min-height: var(--space-9);
+}
+
+/*
+ * "Loading more" looks nothing like "loading": a small inline line beneath a
+ * list that is still entirely on screen, where the button used to be.
+ */
+.loadingMore {
+  display: inline-flex;
+  gap: var(--space-4);
+  align-items: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.spinner {
+  display: inline-block;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: var(--radius-full);
+  width: var(--space-5);
+  height: var(--space-5);
+  animation: issueSpin 0.7s linear infinite;
+}
+
+@keyframes issueSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.endOfList {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.inlineError {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-danger);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+/* -------------------------------------------------------------- composer */
+
+.composer {
+  margin-bottom: var(--space-6);
+  padding: var(--space-6);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-subtle);
+}
+
+.composerHeading {
+  margin-bottom: var(--space-5);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-5);
+}
+
+.fieldLabel {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.field input,
+.field textarea,
+.field select {
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface);
+  font-size: var(--text-sm);
+}
+
+.field textarea {
+  min-height: var(--space-10);
+  line-height: var(--leading-normal);
+  resize: vertical;
+}
+
+.field input[aria-invalid='true'],
+.field select[aria-invalid='true'] {
+  border-color: var(--color-danger);
+}
+
+.fieldHint {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.fieldError {
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+}
+
+.charCount {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.charCountOver {
+  color: var(--color-text-danger);
+  font-weight: var(--weight-medium);
+}
+
+.formError {
+  margin-bottom: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}
+
+.composerActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+/* ---------------------------------------------------------------- detail */
+
+.backLink {
+  display: inline-block;
+  margin-bottom: var(--space-6);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  text-decoration: none;
+}
+
+.backLink:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+.detailFacts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--space-3) var(--space-7);
+  margin-bottom: var(--space-8);
+  padding: var(--space-5) var(--space-6);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+}
+
+.detailFactLabel {
+  color: var(--color-text-muted);
+}
+
+.detailFactValue {
+  overflow-wrap: anywhere;
+}
+
+.detailId {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.detailSectionHeading {
+  margin-bottom: var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.description {
+  font-size: var(--text-md);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.descriptionEmpty {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-style: italic;
+}
+
+/* ------------------------------------------------------------- footnotes */
+
+.footnote {
+  margin-top: var(--space-8);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.shortcutHint {
+  display: inline-block;
+  padding-inline: var(--space-2);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface);
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+  line-height: var(--leading-normal);
+}

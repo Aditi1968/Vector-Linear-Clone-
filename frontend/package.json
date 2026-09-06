@@ -1,0 +1,49 @@
+{
+  "name": "vector-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b",
+    "lint": "eslint .",
+    "graphql:schema": "node scripts/graphql-schema.mjs write",
+    "graphql:schema:check": "node scripts/graphql-schema.mjs check",
+    "graphql:codegen": "node scripts/graphql-codegen.mjs write",
+    "graphql:check": "node scripts/graphql-codegen.mjs check",
+    "test": "vitest run",
+    "test:watch": "vitest --passWithNoTests",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@apollo/client": "^4.2.12",
+    "graphql": "^16.14.2",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.3",
+    "rxjs": "^7.8.2"
+  },
+  "devDependencies": {
+    "@graphql-codegen/cli": "7.4.0",
+    "@graphql-codegen/typed-document-node": "7.1.0",
+    "@graphql-codegen/typescript": "6.1.0",
+    "@graphql-codegen/typescript-operations": "6.1.6",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "@vitejs/plugin-react": "^6.1.1",
+    "eslint": "^10.10.0",
+    "jsdom": "^29.1.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.69.0",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  }
+}

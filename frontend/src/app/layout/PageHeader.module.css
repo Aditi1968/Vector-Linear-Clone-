@@ -1,0 +1,77 @@
+/**
+ * Sticky, and full-bleed rather than inset.
+ *
+ * The padding lives on this element rather than on `<main>` so that the
+ * header's background and bottom rule reach the edges of the content column.
+ * A header inset by a parent's padding leaves a strip of page background
+ * either side, and content scrolling up through that strip is visible in the
+ * gap.
+ */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  min-height: var(--space-10);
+
+  padding: var(--space-5) var(--layout-content-padding-inline);
+
+  background-color: var(--color-bg-app);
+  border-bottom: var(--border-width) solid var(--color-border);
+}
+
+.titleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  /* Takes the free space so `.actions` sits at the trailing edge without an
+   * auto margin, and shrinks first when the two compete. */
+  flex: 1 1 auto;
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  letter-spacing: var(--tracking-tight);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.description {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+/**
+ * `48rem` is `--layout-breakpoint-compact` in src/styles/tokens.css. Media
+ * queries cannot read custom properties, so the literal is repeated here.
+ */
+@media (max-width: 47.999rem) {
+  .header {
+    padding-inline: var(--space-5);
+  }
+
+  .title {
+    font-size: var(--text-lg);
+  }
+}

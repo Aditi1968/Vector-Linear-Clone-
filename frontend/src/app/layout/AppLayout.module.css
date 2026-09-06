@@ -1,0 +1,137 @@
+/**
+ * The two-column shell.
+ *
+ * Flex rather than grid. A grid with `grid-template-columns: <rail> 1fr`
+ * would state the rail's width in the parent, which is exactly the coupling
+ * the layout should avoid: the rail then cannot change its own width without
+ * editing a different file, and the compact layout has to restate the whole
+ * template. With flex the rail declares its own `width` and `flex: none`, and
+ * the shell only has to say "side by side" -- which, in the compact layout,
+ * becomes "stacked" in one declaration.
+ */
+.shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100dvh;
+  background-color: var(--color-bg-app);
+}
+
+/**
+ * `min-width: 0` is not optional.
+ *
+ * A flex item's default `min-width` is `auto`, meaning "never shrink below
+ * my content's intrinsic width". One wide table or one long unbroken issue
+ * id in the main column would therefore widen the flex line, push the layout
+ * past the viewport, and give the whole page a horizontal scrollbar --
+ * dragging the sticky sidebar out of view with it. This single declaration is
+ * what makes wide content scroll inside the main column instead of breaking
+ * the shell.
+ */
+.main {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/**
+ * The skip link moves focus here, which `tabIndex={-1}` makes possible.
+ *
+ * Both states are suppressed, including `:focus-visible`. Chrome *does* match
+ * `:focus-visible` on a programmatically focused element when the focus
+ * followed a keyboard interaction -- which is precisely the skip link's only
+ * use -- so leaving it alone would draw the global ring around the entire
+ * main column. A glowing box the size of the page is not a focus indicator;
+ * it is a rendering bug that happens to be spec-compliant.
+ *
+ * Removing it does not fail WCAG 2.4.7, which applies to keyboard-operable
+ * components: `tabindex="-1"` keeps this element out of the tab order, so it
+ * is never focused by tabbing. The feedback the user gets is the scroll to
+ * the content and the page heading being announced.
+ *
+ * Two classes beat the global `:focus-visible`, so this wins regardless of
+ * the order the stylesheets end up in the bundle.
+ */
+.main:focus,
+.main:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Skip link                                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A persistent sidebar puts the same handful of controls in front of the main
+ * content on every single page. Without a skip link, a keyboard or
+ * screen-reader user tabs past all of them to reach the content, on every
+ * navigation, forever. WCAG 2.4.1.
+ *
+ * Hidden by movement, not by `display: none` -- an element that is not
+ * rendered cannot receive focus, so a `display: none` skip link is one that
+ * can never be reached. It sits above the viewport and slides in when
+ * focused.
+ */
+.skipLink {
+  position: absolute;
+  top: var(--space-4);
+  left: var(--space-4);
+  z-index: var(--z-skip-link);
+
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-accent-border);
+  border-radius: var(--radius-md);
+
+  background-color: var(--color-surface-raised);
+  color: var(--color-text-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+
+  transform: translateY(calc(-100% - var(--space-6)));
+  transition: transform var(--duration-moderate) var(--ease-standard);
+}
+
+/* No `box-shadow` above, deliberately. The global `:focus-visible` rule draws
+ * the ring with `box-shadow`, and at equal specificity the winner would
+ * depend on stylesheet order in the bundle -- so a decorative shadow here
+ * could silently suppress the focus indicator on the one element whose entire
+ * purpose is to be found by keyboard. The link is only ever visible while
+ * focused, so it had nothing to gain from a resting shadow anyway. */
+
+.skipLink:focus {
+  transform: translateY(0);
+}
+
+/* ------------------------------------------------------------------ */
+/* Compact layout                                                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Below the breakpoint the shell stacks: the rail becomes a bar across the
+ * top and the content sits beneath it.
+ *
+ * Chosen over an off-canvas drawer, which is the more expected pattern and
+ * the wrong one here. A drawer needs a toggle button, an overlay, a focus
+ * trap, focus restoration on close, `Escape` handling, `aria-expanded`,
+ * `inert` on the content behind it, and a body-scroll lock -- an accessibility
+ * surface roughly the size of everything else in this shell, added to hide a
+ * navigation region that currently contains one link. It would also introduce
+ * open/closed state into chrome that has none.
+ *
+ * The cost of stacking is a bar of vertical space at the top of small
+ * viewports. With one nav item that bar is a single row, and it scrolls away
+ * with the page rather than being pinned. When the navigation grows past what
+ * fits in a row, this is the decision to revisit -- and the seam for it is
+ * `primaryNavigationItems`, so the revisit is contained.
+ *
+ * `48rem` is `--layout-breakpoint-compact` in src/styles/tokens.css. Media
+ * queries cannot read custom properties, so the literal is repeated here;
+ * the two must change together.
+ */
+@media (max-width: 47.999rem) {
+  .shell {
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,9 @@
+Owned by the features teammate. Feature slices, e.g. features/issues/.
+
+Route elements are wired in src/app/routes/routes.tsx: replace the imports
+from ./placeholders with the real screens, one line each.
+
+Build URLs with useAppPaths() from src/app/routes -- never string literals.
+Page size and the issues cache policy already exist in src/lib/graphql/.
+
+Placeholder so git tracks the directory; delete it with the first real file.
