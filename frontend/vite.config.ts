@@ -22,43 +22,55 @@ const BACKEND_ORIGIN = 'http://127.0.0.1:8000'
  */
 const GRAPHQL_PATH = '/graphql'
 
+/**
+ * The proxy table, shared by `vite` and `vite preview`.
+ *
+ * Declared once and used twice because Vite reads `server.proxy` and
+ * `preview.proxy` as two independent options: neither inherits from the
+ * other, and a table given only to `server` leaves `npm run preview` -- the
+ * only way to look at the real production bundle locally -- as the one mode
+ * where every GraphQL response is silently discarded by CORS. That failure
+ * looks like a broken build rather than a missing proxy, which is what makes
+ * one definition worth more than the second copy it prevents.
+ */
+const proxy = {
+  /**
+   * LOAD-BEARING. This is not a convenience, and removing it breaks the
+   * application in the browser -- while leaving every test green.
+   *
+   * The backend installs no CORS middleware (verified: there is no
+   * `CORSMiddleware` anywhere under `app/`). A page served from Vite's
+   * dev origin (`http://localhost:5173`) that called
+   * `http://127.0.0.1:8000/graphql` directly would be making a
+   * cross-origin request. Because Apollo sends
+   * `content-type: application/json`, that request is not "simple", so
+   * the browser preflights it with OPTIONS -- the backend answers the
+   * preflight without `Access-Control-Allow-Origin`, and the browser
+   * discards the real response before any JavaScript sees it. `curl`
+   * against the same URL succeeds throughout, because `curl` does not
+   * enforce CORS. That asymmetry is what makes this worth a comment.
+   *
+   * Adding CORS to the backend is the other way to fix it, and is not
+   * available: the backend is frozen for this phase. Proxying costs no
+   * backend change and has a second benefit that outlives the freeze --
+   * the app talks to a same-origin URL, so cookie-based auth (Phase
+   * 1b-5 and later) needs no `SameSite=None`, no credentialed-CORS
+   * allow-list, and no origin echoing.
+   *
+   * Only `/graphql` is proxied. `/healthz` and `/readyz` are deliberately
+   * left off: the product never calls them, and proxying the whole
+   * backend would quietly expose every future endpoint to the dev origin.
+   */
+  [GRAPHQL_PATH]: {
+    target: BACKEND_ORIGIN,
+    // The backend does not inspect Host, and preserving it keeps dev
+    // logs honest about where the request claimed to be going.
+    changeOrigin: false,
+  },
+}
+
 export default defineConfig({
   plugins: [react()],
-  server: {
-    proxy: {
-      /**
-       * LOAD-BEARING. This is not a convenience, and removing it breaks the
-       * application in the browser -- while leaving every test green.
-       *
-       * The backend installs no CORS middleware (verified: there is no
-       * `CORSMiddleware` anywhere under `app/`). A page served from Vite's
-       * dev origin (`http://localhost:5173`) that called
-       * `http://127.0.0.1:8000/graphql` directly would be making a
-       * cross-origin request. Because Apollo sends
-       * `content-type: application/json`, that request is not "simple", so
-       * the browser preflights it with OPTIONS -- the backend answers the
-       * preflight without `Access-Control-Allow-Origin`, and the browser
-       * discards the real response before any JavaScript sees it. `curl`
-       * against the same URL succeeds throughout, because `curl` does not
-       * enforce CORS. That asymmetry is what makes this worth a comment.
-       *
-       * Adding CORS to the backend is the other way to fix it, and is not
-       * available: the backend is frozen for this phase. Proxying costs no
-       * backend change and has a second benefit that outlives the freeze --
-       * the app talks to a same-origin URL, so cookie-based auth (Phase
-       * 1b-5 and later) needs no `SameSite=None`, no credentialed-CORS
-       * allow-list, and no origin echoing.
-       *
-       * Only `/graphql` is proxied. `/healthz` and `/readyz` are deliberately
-       * left off: the product never calls them, and proxying the whole
-       * backend would quietly expose every future endpoint to the dev origin.
-       */
-      [GRAPHQL_PATH]: {
-        target: BACKEND_ORIGIN,
-        // The backend does not inspect Host, and preserving it keeps dev
-        // logs honest about where the request claimed to be going.
-        changeOrigin: false,
-      },
-    },
-  },
+  server: { proxy },
+  preview: { proxy },
 })
