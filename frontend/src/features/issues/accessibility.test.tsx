@@ -81,14 +81,21 @@ describe('accessibility', () => {
   it('puts the chrome before the content in the tab order, and skips what cannot be used', async () => {
     const { user } = await renderPopulatedList()
 
-    const path = await tabPath(user, 4)
+    const path = await tabPath(user, 6)
 
     // The skip link is first, which is the only position it works from.
     expect(path[0]).toBe('Skip to main content')
     expect(path[1]).toBe('New issue')
-    expect(path[2]).toBe('Issues')
-    // Then the content, in the order it is read.
-    expect(path[3]).toContain('Alpha')
+
+    // Then the whole of the sidebar's navigation, in its rendered order, and
+    // only then the content. Asserted as a relative order rather than as
+    // fixed indices: the nav is a list that grows as surfaces become real
+    // (Projects and Cycles joined Issues when their resolvers landed), and
+    // the property this test is about -- chrome before content -- does not
+    // depend on how many entries it has.
+    const firstContent = path.findIndex((entry) => entry.includes('Alpha'))
+    expect(firstContent).toBeGreaterThan(-1)
+    expect(path.slice(2, firstContent)).toEqual(['Issues', 'Projects', 'Cycles'])
 
     // The search affordance is disabled, so no keyboard user can land on it
     // and wonder why nothing happens.
