@@ -102,7 +102,9 @@ describe('application shell', () => {
   /* ---------------------------------------------------------------- */
 
   describe('the workspace in the URL', () => {
-    it('shows skeletons rather than a spinner while it is being resolved', async () => {
+    // Synchronous, and the only test here that is. It asserts the state
+    // *before* the shell query lands, so it must not flush it first.
+    it('shows skeletons rather than a spinner while it is being resolved', () => {
       renderApp({ shell: null })
 
       // The shell query gates every authenticated screen, so this is what the

@@ -84,7 +84,7 @@ function routesWith(extra: RouteObject): RouteObject[] {
   ]
 }
 
-function renderAt(table: RouteObject[], path: string): void {
+async function renderAt(table: RouteObject[], path: string): Promise<void> {
   const link = new ControlledLink()
 
   // The shell will not render a child until it knows the viewer belongs to
@@ -101,15 +101,19 @@ function renderAt(table: RouteObject[], path: string): void {
       <RouterProvider router={router} />
     </AppProviders>,
   )
+
+  // The shell renders skeletons until `WorkspaceShell` has answered, so the
+  // throwing route below has not mounted yet at the end of `render`.
+  await link.idle()
 }
 
 describe('RouteError', () => {
-  it('reports a thrown error without revealing anything about it', () => {
+  it('reports a thrown error without revealing anything about it', async () => {
     // React logs every error an boundary catches, and `RouteError` logs the
     // detail itself. Silenced so the run stays readable, and asserted below.
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
+    await renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
 
     // Something controlled rendered: not a blank page, and not a crash that
     // took the render down with it.
@@ -158,7 +162,7 @@ describe('RouteError', () => {
   it('shows the status of a thrown route response', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    renderAt(
+    await renderAt(
       routesWith({
         path: 'missing',
         loader: () => {
@@ -190,10 +194,10 @@ describe('RouteError', () => {
     expect(document.body.textContent).not.toContain('Unexpected Application Error')
   })
 
-  it('renders standalone rather than inside the shell, deliberately', () => {
+  it('renders standalone rather than inside the shell, deliberately', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
+    await renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
 
     /*
       `RouteError` owns its own `<main>`, and that is *not* the duplicate

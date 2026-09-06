@@ -234,7 +234,7 @@ export const VIEWER_ID = '00000000-0000-4000-8000-00000000aa01'
 /** One membership, as `WorkspaceShell` selects it. */
 export function membership(
   slug: string,
-  { name = slug, role = 'MEMBER' as WorkspaceRole } = {},
+  { name = slug, role = 'MEMBER' }: { name?: string; role?: WorkspaceRole } = {},
 ): WorkspaceShellQuery['myWorkspaces'][number] {
   return {
     __typename: 'WorkspaceMembership',

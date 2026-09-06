@@ -167,16 +167,20 @@ export type AppPaths = {
 /**
  * Bind every builder to one workspace.
  *
- * The cast is the only one in this file and it is contained: `Object.entries`
- * widens the values to a union of the builders, which no spread call can
- * satisfy structurally even though every member takes `(slug, ...string[])`.
- * `./paths.test.ts` asserts the bound set and the slug-first set agree.
+ * Two type moves, and both are contained. `builders` widens the object to a
+ * uniform signature, because `Object.entries` would otherwise hand back a
+ * union of the individual builders that no spread call can satisfy -- even
+ * though every member really does take `(slug, ...string[])`. The result is
+ * then asserted back to `AppPaths`, which `Object.fromEntries` cannot infer.
+ * Neither assertion can drift from the truth silently: ./paths.test.ts builds
+ * every path both ways and asserts they agree.
  */
 export function createAppPaths(workspaceSlug: string): AppPaths {
-  const entries = Object.entries(paths).map(([name, build]) => [
+  const builders: Record<string, (...args: string[]) => string> = paths
+
+  const entries = Object.entries(builders).map(([name, build]) => [
     name,
-    (...rest: string[]) =>
-      (build as (...args: string[]) => string)(workspaceSlug, ...rest),
+    (...rest: string[]) => build(workspaceSlug, ...rest),
   ])
 
   return Object.fromEntries(entries) as AppPaths
