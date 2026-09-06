@@ -5,7 +5,6 @@ import { PageContent, PageHeader } from '../../../app/layout'
 import { PROJECT_ID_PARAM, useAppPaths } from '../../../app/routes'
 import {
   Badge,
-  Button,
   Dialog,
   ErrorState,
   Menu,

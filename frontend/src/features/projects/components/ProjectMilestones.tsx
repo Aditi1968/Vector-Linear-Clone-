@@ -7,8 +7,8 @@ import {
   Menu,
   ProgressIndicator,
 } from '../../../components'
-import type { MenuItem, ProjectIssue, ProjectMilestone } from '../api'
-import type { MilestoneDraft } from '../api'
+import type { MenuItem } from '../../../components'
+import type { MilestoneDraft, ProjectIssue, ProjectMilestone } from '../api'
 import { closedCount, formatDay, issuesInMilestone } from '../lib/projects'
 import styles from '../projects.module.css'
 
