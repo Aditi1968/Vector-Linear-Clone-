@@ -35,11 +35,11 @@
 -- the constraints absent, and no record that anything happened.
 
 
--- [FK TARGET -- DECLARED IN 006, NOT HERE] The three foreign keys below all
+-- [FK TARGET -- DECLARED IN 007, NOT HERE] The three foreign keys below all
 -- reference `issues (workspace_id, id)`, and PostgreSQL allows a foreign key
 -- to reference only a UNIQUE-constrained column SET. That constraint is
 -- `issues_workspace_id_key`, and this file DEPENDS on it rather than
--- declaring it: migrations/006 adds it, for exactly the reason 002 adds
+-- declaring it: migrations/007 adds it, for exactly the reason 002 adds
 -- teams_workspace_id_key.
 --
 -- It looks redundant beside `issues_pkey` on (id) and is not. A unique key
@@ -49,19 +49,23 @@
 -- success. The whole tenant guarantee of this file rests on that one
 -- constraint existing.
 --
--- MERGE NOTE (2026-09-06): 006 owns it because it is the lowest-numbered
--- pending migration and therefore the only one every later migration can
--- depend on. Several of 006-010 need to reference an issue by tenant pair --
--- relations here, and labels, comments and project membership elsewhere --
--- and exactly one of them may declare it: two declarations means the second
--- to run fails on the duplicate name, and two identical unique indexes on
--- one table would be write amplification with no reader.
+-- MERGE NOTE (2026-09-06): 007 declares it because 007 is the first
+-- migration that needs it -- its `issue_labels` and `comments` tables hang
+-- composite foreign keys off `issues` the same way this file does. 006 does
+-- not, and could not have been the natural home for it: its own composite
+-- keys reference `workspace_members` rather than `issues`.
 --
--- The practical consequence for anyone running this file alone: applying
--- 001-005 and then 010 fails at the first composite foreign key below, with
--- "there is no unique constraint matching given keys for referenced table".
--- That is this dependency being reported, not a defect in either file. The
--- chain is applied in order, with 006 present.
+-- Exactly one migration may declare it. Two declarations means the second to
+-- run fails on the duplicate name, and two identical unique indexes on one
+-- table would be write amplification with no reader. So anything later than
+-- 007 that needs an issue's tenant pair -- this file, and project membership
+-- elsewhere -- depends on it and must not re-add it.
+--
+-- 010 REQUIRES 007. Applying the chain with 007 skipped fails at the first
+-- composite foreign key below, with "there is no unique constraint matching
+-- given keys for referenced table". That error names this dependency; it is
+-- not a defect in either file. 007 sorts ahead of 010, so a chain applied in
+-- filename order already satisfies it.
 
 
 -- Nullable, and permanently so: "has no parent" is the ordinary state of an
