@@ -1,61 +1,22 @@
-from uuid import UUID
-
 import strawberry
 from graphql import GraphQLError
 from strawberry.types import Info
 
 from app.domain.errors import WorkspaceAccessDeniedError
 from app.graphql.types.membership import WorkspaceMembershipType
+from app.graphql.viewer import viewer_user_id
 
-
-# The two messages these resolvers publish, as constants because they are a
-# contract rather than prose. Both codes are in
-# `app.graphql.schema.PUBLIC_ERROR_CODES`, which means every message ever
-# raised under them reaches clients verbatim.
-UNAUTHENTICATED_MESSAGE = "Authentication required"
 
 # One message for a workspace that does not exist and for one the viewer does
-# not belong to. Phrased as a miss rather than a refusal, because a refusal
-# would confirm the workspace is real. The server does not know which case it
-# is in -- see WorkspaceAccessDeniedError -- so this is the only answer it
-# could give truthfully anyway.
+# not belong to. A constant because it is a contract rather than prose:
+# NOT_FOUND is in `app.graphql.schema.PUBLIC_ERROR_CODES`, so this string
+# reaches clients verbatim.
+#
+# Phrased as a miss rather than a refusal, because a refusal would confirm the
+# workspace is real. The server does not know which case it is in -- see
+# WorkspaceAccessDeniedError -- so this is the only answer it could give
+# truthfully anyway.
 WORKSPACE_NOT_FOUND_MESSAGE = "Workspace not found"
-
-
-async def _viewer_user_id(info: Info) -> UUID:
-    """The authenticated viewer, or an UNAUTHENTICATED error.
-
-    Fails closed and fails first. The viewer is resolved from the session
-    cookie the request actually presented, and is None when it presented
-    none, presented an expired one, or presented one that names no session.
-    None means UNAUTHENTICATED in all three cases: the resolver is not told
-    which, and must not be, because a client that could tell an expired
-    session from a forged one can probe for live sessions.
-
-    The alternative shapes are both accidents waiting: reading a user id out
-    of a field argument would let any caller name any user, and treating an
-    absent viewer as "no memberships" would answer an unauthenticated
-    stranger with an empty list, which reads to a client exactly like a
-    successfully authenticated account that belongs to nothing.
-
-    Raised before the membership service is touched, so an unauthenticated
-    request performs no protected data lookup at all. `context.viewer()` is
-    memoised per request, so two protected fields in one document share a
-    single session lookup rather than each making their own.
-    """
-    viewer = await info.context.viewer()
-
-    if viewer is None:
-        raise GraphQLError(
-            UNAUTHENTICATED_MESSAGE,
-            extensions={"code": "UNAUTHENTICATED"},
-        )
-
-    # Annotated rather than returned inline: the context attribute is untyped
-    # here, so returning it directly would satisfy any return type.
-    identified: UUID = viewer.id
-
-    return identified
 
 
 @strawberry.type
@@ -86,7 +47,7 @@ class MembershipQuery:
         while the list is small by construction. A `first` argument added here
         must be added to PAGE_SIZE_ARGUMENTS' reasoning too.
         """
-        user_id = await _viewer_user_id(info)
+        user_id = await viewer_user_id(info)
 
         memberships = await info.context.membership_service.list_for_user(
             user_id=user_id
@@ -110,7 +71,7 @@ class MembershipQuery:
         would mean two spellings of a slug address one tenant, which is what
         `workspaces_slug_format` exists to prevent.
         """
-        user_id = await _viewer_user_id(info)
+        user_id = await viewer_user_id(info)
 
         try:
             membership = await info.context.membership_service.membership_for_slug(

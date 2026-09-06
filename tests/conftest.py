@@ -93,12 +93,29 @@ class ExplodingPool:
         raise AssertionError("pool.acquire() must not be called for invalid input")
 
 
+class _NullTransaction:
+    """What `FakeConnection.transaction()` hands back: a shape, not a scope."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc_info):
+        return False
+
+
 class FakeConnection:
     """Records every query issued against it and replays canned rows.
 
     `row` and `value` default to None so a repository's not-found path is
     the default behaviour of the fake rather than something a test has to
     arrange.
+
+    `transaction()` is a no-op context manager rather than a recorded call.
+    Services open one around every write, so a fake without it fails with an
+    AttributeError from inside the service -- which reports the fixture rather
+    than the behaviour. It commits nothing and rolls back nothing, because
+    there is no server here to do either; a test whose subject is transaction
+    boundaries needs a real one.
     """
 
     def __init__(self, rows=None, row=None, value=None):
@@ -106,6 +123,14 @@ class FakeConnection:
         self.row = row
         self.value = value
         self.queries: list[dict] = []
+
+    def transaction(self):
+        return _NullTransaction()
+
+    async def execute(self, query, *args):
+        self.queries.append({"query": query, "args": args})
+
+        return "INSERT 0 1"
 
     async def fetch(self, query, *args):
         self.queries.append({"query": query, "args": args})
@@ -261,6 +286,8 @@ def graphql_context(**services) -> VectorContext:
         "workspace_service",
         "auth_service",
         "membership_service",
+        "label_service",
+        "comment_service",
     }
     environment = services.pop("environment", "test")
     tenant = services.pop("tenant", None) or FakeTenant()

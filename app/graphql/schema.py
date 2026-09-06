@@ -9,9 +9,12 @@ from strawberry.tools import merge_types
 from app.config import Environment
 from app.graphql.limits import operation_limit_extensions
 from app.graphql.mutations.auth import AuthMutation
+from app.graphql.mutations.comments import CommentMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
+from app.graphql.mutations.labels import LabelMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.issues import Query as IssueQuery
+from app.graphql.queries.labels import LabelQuery
 from app.graphql.queries.memberships import MembershipQuery
 from app.graphql.queries.teams import TeamQuery
 
@@ -30,8 +33,14 @@ from app.graphql.queries.teams import TeamQuery
 #
 # Tuple order is SDL field order, so it stays stable across exports and
 # `frontend/schema.graphql` does not churn.
-Query = merge_types("Query", (IssueQuery, AuthQuery, TeamQuery, MembershipQuery))
-Mutation = merge_types("Mutation", (IssueMutation, AuthMutation))
+Query = merge_types(
+    "Query",
+    (IssueQuery, AuthQuery, TeamQuery, MembershipQuery, LabelQuery),
+)
+Mutation = merge_types(
+    "Mutation",
+    (IssueMutation, AuthMutation, LabelMutation, CommentMutation),
+)
 
 
 # The public error vocabulary. An error reaches a client with its own
@@ -46,11 +55,11 @@ Mutation = merge_types("Mutation", (IssueMutation, AuthMutation))
 # a masked error: "Internal server error" gives a browser no reason to send
 # the user to a login screen, and no reason to stop retrying. Both are safe
 # to publish because the messages raised under them are fixed strings that
-# describe the request rather than the server -- see
-# app.graphql.queries.memberships, which is the only module that raises
-# either, and note in particular that its NOT_FOUND message is deliberately
-# the same for a workspace that does not exist and one the viewer may not
-# see.
+# describe the request rather than the server. There are exactly two of them:
+# `app.graphql.viewer.UNAUTHENTICATED_MESSAGE`, raised wherever a request must
+# have an identity, and `app.graphql.queries.memberships`'s NOT_FOUND, which is
+# deliberately the same message for a workspace that does not exist and one the
+# viewer may not see.
 PUBLIC_ERROR_CODES = frozenset({"BAD_USER_INPUT", "UNAUTHENTICATED", "NOT_FOUND"})
 
 # What a masked error says. Deliberately uninformative: an attacker must

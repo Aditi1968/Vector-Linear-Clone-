@@ -25,11 +25,50 @@ export type Scalars = {
   UUID: { input: string; output: string; }
 };
 
+export type Comment = {
+  __typename?: 'Comment';
+  authorId: Scalars['UUID']['output'];
+  body: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  editedAt?: Maybe<Scalars['DateTime']['output']>;
+  id: Scalars['UUID']['output'];
+  issueId: Scalars['UUID']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type CommentConnection = {
+  __typename?: 'CommentConnection';
+  nodes: Array<Comment>;
+  pageInfo: PageInfo;
+};
+
+export type CommentCreateInput = {
+  body: Scalars['String']['input'];
+  issueId: Scalars['UUID']['input'];
+};
+
+export type CommentCreatePayload = {
+  __typename?: 'CommentCreatePayload';
+  comment?: Maybe<Comment>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type CommentDeleteInput = {
+  id: Scalars['UUID']['input'];
+};
+
+export type CommentDeletePayload = {
+  __typename?: 'CommentDeletePayload';
+  deletedCommentId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
 export type Issue = {
   __typename?: 'Issue';
   /** When the issue was taken off the board. Always null here, because archived issues are absent from every query -- only the archive mutation's own result carries a value. */
   archivedAt?: Maybe<Scalars['DateTime']['output']>;
   assigneeId?: Maybe<Scalars['UUID']['output']>;
+  comments: CommentConnection;
   /** When the issue stopped being worked on. Derived from the workflow state's category and not settable directly: it is non-null exactly while the issue sits in a completed or canceled state. */
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   createdAt: Scalars['DateTime']['output'];
@@ -42,6 +81,7 @@ export type Issue = {
   id: Scalars['UUID']['output'];
   /** The name this issue is known by outside the product -- ENG-42. Its team's key, a hyphen, and the issue's number. */
   identifier: Scalars['String']['output'];
+  labels: Array<Label>;
   /** Sequential within the team and never reused. Unique only alongside the team; two teams both have a number 42. */
   number: Scalars['Int']['output'];
   priority: Scalars['Int']['output'];
@@ -49,6 +89,12 @@ export type Issue = {
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
   workflowStateId: Scalars['UUID']['output'];
+};
+
+
+export type IssueCommentsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
 };
 
 export type IssueArchivePayload = {
@@ -78,6 +124,17 @@ export type IssueCreatePayload = {
   issue?: Maybe<Issue>;
 };
 
+export type IssueLabelInput = {
+  issueId: Scalars['UUID']['input'];
+  labelId: Scalars['UUID']['input'];
+};
+
+export type IssueLabelPayload = {
+  __typename?: 'IssueLabelPayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
+};
+
 export type IssueUpdateInput = {
   assigneeId?: InputMaybe<Scalars['UUID']['input']>;
   description?: InputMaybe<Scalars['String']['input']>;
@@ -92,6 +149,48 @@ export type IssueUpdatePayload = {
   __typename?: 'IssueUpdatePayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
+};
+
+export type Label = {
+  __typename?: 'Label';
+  color: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type LabelConnection = {
+  __typename?: 'LabelConnection';
+  nodes: Array<Label>;
+  pageInfo: PageInfo;
+};
+
+export type LabelCreateInput = {
+  color?: InputMaybe<Scalars['String']['input']>;
+  name: Scalars['String']['input'];
+};
+
+export type LabelDeleteInput = {
+  id: Scalars['UUID']['input'];
+};
+
+export type LabelDeletePayload = {
+  __typename?: 'LabelDeletePayload';
+  deletedLabelId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type LabelPayload = {
+  __typename?: 'LabelPayload';
+  errors: Array<ValidationErrorType>;
+  label?: Maybe<Label>;
+};
+
+export type LabelUpdateInput = {
+  color: Scalars['String']['input'];
+  id: Scalars['UUID']['input'];
+  name: Scalars['String']['input'];
 };
 
 export type LoginInput = {
@@ -113,12 +212,29 @@ export type LogoutPayload = {
 
 export type Mutation = {
   __typename?: 'Mutation';
+  commentCreate: CommentCreatePayload;
+  commentDelete: CommentDeletePayload;
   issueArchive: IssueArchivePayload;
   issueCreate: IssueCreatePayload;
+  issueLabelAttach: IssueLabelPayload;
+  issueLabelDetach: IssueLabelPayload;
   issueUpdate: IssueUpdatePayload;
+  labelCreate: LabelPayload;
+  labelDelete: LabelDeletePayload;
+  labelUpdate: LabelPayload;
   login: LoginPayload;
   logout: LogoutPayload;
   register: RegisterPayload;
+};
+
+
+export type MutationCommentCreateArgs = {
+  input: CommentCreateInput;
+};
+
+
+export type MutationCommentDeleteArgs = {
+  input: CommentDeleteInput;
 };
 
 
@@ -132,9 +248,34 @@ export type MutationIssueCreateArgs = {
 };
 
 
+export type MutationIssueLabelAttachArgs = {
+  input: IssueLabelInput;
+};
+
+
+export type MutationIssueLabelDetachArgs = {
+  input: IssueLabelInput;
+};
+
+
 export type MutationIssueUpdateArgs = {
   id: Scalars['UUID']['input'];
   input: IssueUpdateInput;
+};
+
+
+export type MutationLabelCreateArgs = {
+  input: LabelCreateInput;
+};
+
+
+export type MutationLabelDeleteArgs = {
+  input: LabelDeleteInput;
+};
+
+
+export type MutationLabelUpdateArgs = {
+  input: LabelUpdateInput;
 };
 
 
@@ -157,6 +298,8 @@ export type Query = {
   __typename?: 'Query';
   issue?: Maybe<Issue>;
   issues: IssueConnection;
+  label?: Maybe<Label>;
+  labels: LabelConnection;
   me?: Maybe<User>;
   myWorkspace: WorkspaceMembership;
   myWorkspaces: Array<WorkspaceMembership>;
@@ -171,6 +314,17 @@ export type QueryIssueArgs = {
 
 
 export type QueryIssuesArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
+
+export type QueryLabelArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
+export type QueryLabelsArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
 };

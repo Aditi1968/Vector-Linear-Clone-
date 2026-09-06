@@ -33,7 +33,6 @@ import asyncpg
 import pytest
 
 from app.domain.errors import TeamNotFoundError
-from app.graphql.context import VectorContext
 from app.graphql.schema import build_schema
 from app.graphql.tenancy import RequestTenant
 from app.repositories.issues import IssueRepository
@@ -50,6 +49,7 @@ from tests.conftest import (
     FakeConnection,
     FakePool,
     apply_all_migrations,
+    graphql_context,
     normalize,
     reset_schema,
 )
@@ -197,7 +197,7 @@ async def wired(postgres_dsn):
     later one inside the bootstrap workspace makes "oldest" falsifiable --
     with a single team, every selection rule agrees.
 
-    The context is the product's own `VectorContext` holding the product's
+    The context is the product's own context object holding the product's
     own `RequestTenant`, not a fake. That is the point of this section: the
     fakes elsewhere prove the resolvers forward what they are handed, and
     only this proves the thing that hands it to them works against a
@@ -259,7 +259,15 @@ async def wired(postgres_dsn):
 
         try:
             yield (
-                VectorContext(
+                # Through the shared helper rather than `VectorContext(...)`
+                # directly, so that a service added to the context does not
+                # break a fixture that has no opinion about it. The slots this
+                # names get real objects over a real pool; the rest get
+                # `UnusedService`, which fails with a sentence naming what was
+                # reached -- this suite exercises the tenancy path only, and no
+                # resolver it reaches resolves a viewer, writes a label or
+                # writes a comment.
+                graphql_context(
                     issue_service=IssueService(
                         pool=pool,
                         repository=IssueRepository(),
@@ -272,10 +280,8 @@ async def wired(postgres_dsn):
                     # precisely so that an unauthenticated create still has
                     # somewhere to land.
                     auth_service=AnonymousAuthService(),
-                    membership_service=None,
                     team_service=team_service,
                     workspace_service=workspace_service,
-                    environment="test",
                     tenant=RequestTenant(
                         workspace_service=workspace_service,
                         team_service=team_service,
