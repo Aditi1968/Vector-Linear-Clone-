@@ -18,6 +18,7 @@ from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
+from app.repositories.invitations import InvitationRepository
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.labels import LabelRepository
@@ -212,6 +213,14 @@ async def get_context() -> VectorContext:
         membership_service=MembershipService(
             pool=pool,
             repository=MembershipRepository(),
+            # Creating a workspace writes the workspace and its owner's
+            # membership in one transaction, and accepting an invitation
+            # writes the acceptance and the membership it grants in another.
+            # SQL against each table still belongs to the repository that
+            # owns it; the service is what holds the boundary they are
+            # written inside.
+            workspaces=WorkspaceRepository(),
+            invitations=InvitationRepository(),
         ),
         project_service=ProjectService(
             pool=pool,

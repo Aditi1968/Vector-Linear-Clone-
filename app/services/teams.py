@@ -1,12 +1,34 @@
+import re
 from collections import defaultdict
 from uuid import UUID
 
 import asyncpg
 
-from app.domain.errors import TeamNotFoundError
+from app.domain.errors import TeamNotFoundError, ValidationError, ValidationIssue
 from app.domain.teams import TeamWorkflow, WorkflowStateEntity
-from app.domain.tenancy import WorkspaceScope
+from app.domain.tenancy import (
+    AuthorizedWorkspaceScope,
+    WorkspaceScope,
+    require_workspace_admin,
+)
 from app.repositories.teams import TeamRepository
+
+
+NAME_MAX_LENGTH = 200
+
+# `teams_key_format` in migration 005, restated so a client is told what is
+# wrong with its key instead of receiving a masked CHECK violation. Uppercase,
+# no hyphen and no leading digit, because the key is rendered `<key>-<number>`
+# and either would make ENG-42 ambiguous to parse.
+KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9]{0,9}$")
+
+# The one violation of `teams_workspace_key_unique` that is an ordinary
+# consequence of client input rather than a defect. Keyed on the constraint
+# name for the reason app/services/projects.py sets out: two constraints on one
+# statement raise the same exception class and mean different things, so
+# anything this service did not name is re-raised and masked rather than
+# reported to a client as a correctable mistake.
+TEAM_KEY_UNIQUE_CONSTRAINT = "teams_workspace_key_unique"
 
 
 class TeamService:
@@ -98,6 +120,118 @@ class TeamService:
             )
             for team in teams
         ]
+
+    async def create(
+        self,
+        *,
+        scope: AuthorizedWorkspaceScope,
+        name: str,
+        key: str,
+    ) -> TeamWorkflow:
+        """Create a team with a usable board, or refuse.
+
+        The board is the part that is easy to leave out and impossible to
+        notice: `issues.workflow_state_id` is NOT NULL and resolved from the
+        team's own states, so a team created without them accepts no issues at
+        all, and the failure surfaces later as a masked error on an unrelated
+        mutation. Both writes are therefore one transaction -- a team with no
+        board is not a halfway result, it is a team nobody can use.
+
+        Requires admin or owner. The scope carries the role because only a
+        lookup in `workspace_members` can produce one; see
+        AuthorizedWorkspaceScope.
+
+        The states are read back rather than reconstructed from the constant
+        that seeded them, so the payload describes rows that exist with the
+        ids a client will use.
+        """
+        require_workspace_admin(scope)
+
+        self._validate(name=name, key=key)
+
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                try:
+                    team = await self._repository.create(
+                        connection,
+                        workspace_id=scope.workspace_id,
+                        name=name.strip(),
+                        key=key,
+                    )
+                except asyncpg.UniqueViolationError as exc:
+                    if exc.constraint_name != TEAM_KEY_UNIQUE_CONSTRAINT:
+                        raise
+
+                    # `from None`: asyncpg's error carries the offending row in
+                    # its `detail`, and chaining it would carry that into every
+                    # traceback and log line above here.
+                    raise ValidationError(
+                        [
+                            ValidationIssue(
+                                field="key",
+                                code="KEY_TAKEN",
+                                message="A team in this workspace already uses this key",
+                            )
+                        ]
+                    ) from None
+
+                await self._repository.seed_default_workflow_states(
+                    connection,
+                    workspace_id=scope.workspace_id,
+                    team_id=team.id,
+                )
+
+                states = await self._repository.list_workflow_states(
+                    connection,
+                    scope.workspace_id,
+                    [team.id],
+                )
+
+        return TeamWorkflow(team=team, workflow_states=tuple(states))
+
+    @staticmethod
+    def _validate(*, name: str, key: str) -> None:
+        """Reject what the client can correct, before a connection is taken.
+
+        The two checks below are the application's copy of
+        `teams_name_present`-shaped intent and `teams_key_format`. They exist
+        because a CHECK violation reaches a client as a masked internal error,
+        which a form cannot render and a person cannot act on; the constraints
+        remain the backstop for every write that does not come through here.
+        """
+        issues = []
+
+        if not name.strip():
+            issues.append(
+                ValidationIssue(
+                    field="name",
+                    code="REQUIRED",
+                    message="Name is required",
+                )
+            )
+        elif len(name.strip()) > NAME_MAX_LENGTH:
+            issues.append(
+                ValidationIssue(
+                    field="name",
+                    code="TOO_LONG",
+                    message=f"Name must be at most {NAME_MAX_LENGTH} characters",
+                )
+            )
+
+        if not KEY_PATTERN.match(key):
+            issues.append(
+                ValidationIssue(
+                    field="key",
+                    code="INVALID",
+                    message=(
+                        "Key must be 1-10 characters, uppercase letters and "
+                        "digits, starting with a letter"
+                    ),
+                )
+            )
+
+        if issues:
+            raise ValidationError(issues)
 
     async def allocate_issue_number(
         self,

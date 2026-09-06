@@ -45,7 +45,9 @@ from app.domain.errors import WorkspaceAccessDeniedError, WorkspaceNotFoundError
 from app.domain.memberships import WorkspaceMembershipEntity
 from app.domain.tenancy import WORKSPACE_ROLES, AuthorizedWorkspaceScope, WorkspaceScope
 from app.graphql.types.membership import WorkspaceRoleType
+from app.repositories.invitations import InvitationRepository
 from app.repositories.memberships import MembershipRepository
+from app.repositories.workspaces import WorkspaceRepository
 from app.services.memberships import MEMBERSHIP_LIST_LIMIT, MembershipService
 from scripts.apply_migration import apply_migration, read_migration
 
@@ -626,7 +628,18 @@ async def test_the_listing_statement_takes_no_workspace_argument():
 def build_service(row=None) -> tuple[MembershipService, FakePool]:
     pool = FakePool(FakeConnection(row=row))
 
-    return MembershipService(pool=pool, repository=MembershipRepository()), pool
+    # The two write-side repositories are real but unreachable from anything
+    # this section calls: every test below exercises a read, and a FakePool
+    # would fail loudly if one of them were touched.
+    return (
+        MembershipService(
+            pool=pool,
+            repository=MembershipRepository(),
+            workspaces=WorkspaceRepository(),
+            invitations=InvitationRepository(),
+        ),
+        pool,
+    )
 
 
 async def test_a_member_resolves_to_a_scope_carrying_their_role():
@@ -857,7 +870,12 @@ async def membership_service(postgres_dsn):
         )
 
         try:
-            yield MembershipService(pool=pool, repository=MembershipRepository())
+            yield MembershipService(
+                pool=pool,
+                repository=MembershipRepository(),
+                workspaces=WorkspaceRepository(),
+                invitations=InvitationRepository(),
+            )
         finally:
             checked_out = pool.get_size() - pool.get_idle_size()
 

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Final
 from uuid import UUID
 
 
@@ -80,3 +81,25 @@ class TeamWorkflow:
 
     team: TeamEntity
     workflow_states: tuple[WorkflowStateEntity, ...]
+
+
+# The board every new team starts with: one state per category, in the order a
+# board renders them.
+#
+# The same five rows migrations/005_team_workflows.sql seeds onto every team
+# that existed when it ran, restated here because a team created afterwards has
+# to get the same board and a migration cannot reach forward to do it. The two
+# copies are pinned equal by tests/test_members_invites_db.py, which compares a
+# team this code creates against the team 005 seeded.
+#
+# The names are defaults a team may rename freely; nothing may look a state up
+# by name. `category` is the part that does not move -- see WorkflowStateCategory.
+DEFAULT_WORKFLOW_STATES: Final[
+    tuple[tuple[str, WorkflowStateCategory, int, str], ...]
+] = (
+    ("Backlog", WorkflowStateCategory.BACKLOG, 0, "#bec2c8"),
+    ("Todo", WorkflowStateCategory.UNSTARTED, 1, "#e2e2e2"),
+    ("In Progress", WorkflowStateCategory.STARTED, 2, "#f2c94c"),
+    ("Done", WorkflowStateCategory.COMPLETED, 3, "#5e6ad2"),
+    ("Canceled", WorkflowStateCategory.CANCELED, 4, "#95a2b3"),
+)

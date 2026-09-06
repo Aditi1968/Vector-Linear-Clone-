@@ -4,7 +4,8 @@ from uuid import UUID
 
 import strawberry
 
-from app.domain.memberships import WorkspaceMembershipEntity
+from app.domain.memberships import WorkspaceMemberEntity, WorkspaceMembershipEntity
+from app.graphql.types.errors import ValidationErrorType
 
 
 @strawberry.enum(name="WorkspaceRole")
@@ -48,6 +49,21 @@ class WorkspaceType:
     slug: str
     name: str
 
+    @classmethod
+    def from_membership(cls, entity: WorkspaceMembershipEntity) -> "WorkspaceType":
+        """The workspace half of a membership row.
+
+        A membership is where every workspace in this schema is read from --
+        there is no unscoped workspace lookup, deliberately -- so this is the
+        one way to build one, and it takes the entity that proves the caller
+        may see it.
+        """
+        return cls(
+            id=entity.workspace_id,
+            slug=entity.workspace_slug,
+            name=entity.workspace_name,
+        )
+
 
 @strawberry.type(name="WorkspaceMembership")
 class WorkspaceMembershipType:
@@ -81,11 +97,83 @@ class WorkspaceMembershipType:
         stop agreeing.
         """
         return cls(
-            workspace=WorkspaceType(
-                id=entity.workspace_id,
-                slug=entity.workspace_slug,
-                name=entity.workspace_name,
-            ),
+            workspace=WorkspaceType.from_membership(entity),
             role=WorkspaceRoleType(entity.role),
             created_at=entity.created_at,
         )
+
+
+@strawberry.type(
+    name="WorkspaceMember",
+    description="One person in a workspace, and the role they hold there.",
+)
+class WorkspaceMemberType:
+    """A member as an assignee picker and a members settings page read one.
+
+    Flat, and not a `User` with a role beside it. `User` is the type `me`
+    returns, and its own docstring records the condition this would have
+    broken: exposing an address there is safe only while the only address any
+    caller can read is their own. A member list is exactly the moment that
+    stops being true, so the fields a member may see about a colleague are
+    listed here rather than borrowed from a type that will grow fields --
+    a session count, a last-seen -- nobody meant to publish workspace-wide.
+
+    Reachable only through `workspaceMembers`, which resolves an
+    AuthorizedWorkspaceScope first. There is no path to one of these from an
+    issue or a project, so an address cannot be read by a caller whose
+    membership was never checked.
+    """
+
+    user_id: UUID
+    email: str
+    name: str | None
+    role: WorkspaceRoleType
+    created_at: datetime
+
+    @classmethod
+    def from_entity(cls, entity: WorkspaceMemberEntity) -> "WorkspaceMemberType":
+        """Build the transport type, raising on a role this schema cannot say.
+
+        Same contract as `WorkspaceMembershipType.from_entity`; see the note
+        there on why an unknown role fails loudly rather than falling back.
+        """
+        return cls(
+            user_id=entity.user_id,
+            email=entity.email,
+            name=entity.name,
+            role=WorkspaceRoleType(entity.role),
+            created_at=entity.created_at,
+        )
+
+
+@strawberry.type
+class WorkspacePayload:
+    """The result of creating a workspace.
+
+    Carries the workspace rather than the membership that came with it. The
+    membership is what was written -- see
+    `MembershipService.create_workspace` -- but what the client does next is
+    navigate to the workspace it just made, and it already knows its own role
+    is owner because it is the account that created it.
+    """
+
+    workspace: WorkspaceType | None
+    errors: list[ValidationErrorType]
+
+
+@strawberry.type
+class WorkspaceMemberPayload:
+    member: WorkspaceMemberType | None
+    errors: list[ValidationErrorType]
+
+
+@strawberry.type
+class MemberRemovePayload:
+    """The result of revoking a membership.
+
+    The id rather than the member: the row is gone, so there is nothing left
+    to describe, and a client's cache needs only the key to evict.
+    """
+
+    removed_user_id: UUID | None
+    errors: list[ValidationErrorType]

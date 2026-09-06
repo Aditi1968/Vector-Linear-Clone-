@@ -3,7 +3,9 @@ from graphql import GraphQLError
 from strawberry.types import Info
 
 from app.domain.errors import WorkspaceAccessDeniedError
-from app.graphql.types.membership import WorkspaceMembershipType
+from app.domain.tenancy import AuthorizedWorkspaceScope
+from app.graphql.types.invitation import WorkspaceInvitationType
+from app.graphql.types.membership import WorkspaceMembershipType, WorkspaceMemberType
 from app.graphql.viewer import viewer_user_id
 
 
@@ -17,6 +19,28 @@ from app.graphql.viewer import viewer_user_id
 # WorkspaceAccessDeniedError -- so this is the only answer it could give
 # truthfully anyway.
 WORKSPACE_NOT_FOUND_MESSAGE = "Workspace not found"
+
+
+def workspace_not_found() -> GraphQLError:
+    """The one refusal every workspace-scoped field answers with.
+
+    Raised for a slug that matches nothing, for a workspace the viewer is not
+    a member of, and for one they are a member of but may not administer. The
+    first two are indistinguishable to the server -- see
+    WorkspaceAccessDeniedError -- and the third is folded in on purpose, so
+    that "list this workspace's invitations" does not tell an ordinary member
+    the difference between a workspace they cannot administer and one they
+    cannot see.
+
+    Raise it `from None`. The domain exception it describes carries nothing a
+    client may read, and chaining it would attach an `original_error`, which
+    is exactly what `app.graphql.schema.is_public_error` reads to decide an
+    error was an accident and must be masked.
+    """
+    return GraphQLError(
+        WORKSPACE_NOT_FOUND_MESSAGE,
+        extensions={"code": "NOT_FOUND"},
+    )
 
 
 @strawberry.type
@@ -82,10 +106,84 @@ class MembershipQuery:
             # Only this one expected refusal is translated. Anything else --
             # an asyncpg failure, a bug -- propagates and is masked, rather
             # than being reported to the client as a missing workspace.
-            # `from None` keeps the domain exception out of the response.
-            raise GraphQLError(
-                WORKSPACE_NOT_FOUND_MESSAGE,
-                extensions={"code": "NOT_FOUND"},
-            ) from None
+            raise workspace_not_found() from None
 
         return WorkspaceMembershipType.from_entity(membership)
+
+    @strawberry.field(
+        description=("Everyone in a workspace, with the role each holds. Members only.")
+    )
+    async def workspace_members(
+        self, info: Info, workspace_slug: str
+    ) -> list[WorkspaceMemberType]:
+        """The workspace's people, for an assignee picker or a settings page.
+
+        Errors rather than answering an empty list for a workspace the viewer
+        cannot see, which is the opposite of what `teams` does today and is
+        the right shape here: an empty member list is a real answer for
+        nothing (every workspace has at least its owner), so returning one
+        would be inventing a state the product does not have.
+
+        Bounded server-side by `app.services.memberships.MEMBERSHIP_LIST_LIMIT`
+        and declaring no page-size argument, so `app.graphql.limits` charges it
+        once. Adding a `first` here means revisiting PAGE_SIZE_ARGUMENTS.
+        """
+        scope = await self._scope(info, workspace_slug)
+
+        members = await info.context.membership_service.list_members(scope=scope)
+
+        return [WorkspaceMemberType.from_entity(entity) for entity in members]
+
+    @strawberry.field(
+        description=(
+            "Invitations to this workspace that have not been accepted or "
+            "expired. Admins and owners only."
+        )
+    )
+    async def invitations(
+        self, info: Info, workspace_slug: str
+    ) -> list[WorkspaceInvitationType]:
+        """Outstanding invitations, for the settings page that manages them.
+
+        Narrower than `workspaceMembers`: a pending invitation discloses an
+        address belonging to someone who has not joined, so the service
+        refuses an ordinary member -- with the same refusal a stranger gets,
+        which is why both arrive here as one exception.
+        """
+        scope = await self._scope(info, workspace_slug)
+
+        invitations = await info.context.membership_service.list_invitations(
+            scope=scope
+        )
+
+        return [WorkspaceInvitationType.from_entity(entity) for entity in invitations]
+
+    @staticmethod
+    async def _scope(info: Info, workspace_slug: str) -> AuthorizedWorkspaceScope:
+        """Identify the viewer, then resolve the slug against their memberships.
+
+        The identity check runs first and unconditionally, so an
+        unauthenticated request performs no workspace lookup at all -- see
+        `viewer_user_id`. The slug reaches the service exactly as the client
+        wrote it, for the reason `my_workspace` gives.
+
+        A stand-in until `app/graphql/scope.py` lands, at which point this
+        becomes a call to the one helper every workspace-scoped field shares.
+        """
+        user_id = await viewer_user_id(info)
+
+        try:
+            # Annotated rather than returned inline: `info.context` is untyped
+            # here, so returning the call directly would satisfy any return
+            # type -- including a bare WorkspaceScope, which carries no
+            # evidence that anything was checked.
+            scope: AuthorizedWorkspaceScope = (
+                await info.context.membership_service.authorized_scope_for_slug(
+                    slug=workspace_slug,
+                    user_id=user_id,
+                )
+            )
+        except WorkspaceAccessDeniedError:
+            raise workspace_not_found() from None
+
+        return scope
