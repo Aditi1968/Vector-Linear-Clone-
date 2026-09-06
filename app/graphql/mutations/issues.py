@@ -12,6 +12,7 @@ from app.graphql.types.issue import (
     IssueType,
     IssueUpdatePayload,
 )
+from app.graphql.viewer import actor_user_id
 
 
 # The one answer every operation on an issue that is not there must give.
@@ -106,12 +107,14 @@ class Mutation:
         this one and matches no row.
         """
         scope = await info.context.tenant.scope()
+        actor_id = await actor_user_id(info)
 
         try:
             entity = await info.context.issue_service.update(
                 scope=scope,
                 issue_id=id,
                 patch=input.to_patch(),
+                actor_id=actor_id,
             )
         except ValidationError as exc:
             return IssueUpdatePayload(issue=None, errors=_errors(exc))
@@ -147,8 +150,13 @@ class Mutation:
         row back.
         """
         scope = await info.context.tenant.scope()
+        actor_id = await actor_user_id(info)
 
-        entity = await info.context.issue_service.archive(scope=scope, issue_id=id)
+        entity = await info.context.issue_service.archive(
+            scope=scope,
+            issue_id=id,
+            actor_id=actor_id,
+        )
 
         if entity is None:
             return IssueArchivePayload(

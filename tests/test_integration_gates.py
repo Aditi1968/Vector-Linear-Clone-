@@ -288,6 +288,8 @@ def _domain_module(entity_name: str) -> str:
     """
     known = {
         "IssueEntity": "issues",
+        "ActivityEntity": "activity",
+        "NotificationEntity": "notifications",
         "CommentEntity": "comments",
         "LabelEntity": "labels",
         "CycleEntity": "cycles",

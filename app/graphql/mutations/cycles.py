@@ -17,6 +17,7 @@ from app.graphql.types.cycle import (
 )
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import IssueType
+from app.graphql.viewer import actor_user_id
 
 
 def _errors(exc: ValidationError) -> list[ValidationErrorType]:
@@ -122,12 +123,14 @@ class CycleMutation:
         map another team's cycles by trying ids against its own issue.
         """
         scope = await info.context.tenant.scope()
+        actor_id = await actor_user_id(info)
 
         try:
             entity = await info.context.issue_service.set_cycle(
                 scope=scope,
                 issue_id=input.issue_id,
                 cycle_id=input.cycle_id,
+                actor_id=actor_id,
             )
         except ValidationError as exc:
             return IssueSetCyclePayload(issue=None, errors=_errors(exc))

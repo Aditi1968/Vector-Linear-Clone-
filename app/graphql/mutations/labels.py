@@ -12,6 +12,7 @@ from app.graphql.inputs.label import (
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import IssueLabelPayload, IssueType
 from app.graphql.types.label import LabelDeletePayload, LabelPayload, LabelType
+from app.graphql.viewer import actor_user_id
 
 
 def _errors(exc: ValidationError) -> list[ValidationErrorType]:
@@ -111,12 +112,14 @@ class LabelMutation:
         it hoped the server did.
         """
         scope = await info.context.tenant.scope()
+        actor_id = await actor_user_id(info)
 
         try:
             await info.context.label_service.attach(
                 scope=scope,
                 issue_id=input.issue_id,
                 label_id=input.label_id,
+                actor_id=actor_id,
             )
         except ValidationError as exc:
             return IssueLabelPayload(issue=None, errors=_errors(exc))
@@ -128,12 +131,14 @@ class LabelMutation:
         self, info: Info, input: IssueLabelInput
     ) -> IssueLabelPayload:
         scope = await info.context.tenant.scope()
+        actor_id = await actor_user_id(info)
 
         try:
             await info.context.label_service.detach(
                 scope=scope,
                 issue_id=input.issue_id,
                 label_id=input.label_id,
+                actor_id=actor_id,
             )
         except ValidationError as exc:
             return IssueLabelPayload(issue=None, errors=_errors(exc))

@@ -75,6 +75,7 @@ EXPECTED_MIGRATIONS = [
     "009_projects.sql",
     "010_issue_relations.sql",
     "011_search.sql",
+    "012_activity_notifications.sql",
     "013_github_integration.sql",
     "014_slack_integration.sql",
 ]

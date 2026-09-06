@@ -16,6 +16,7 @@ from app.graphql.loaders.projects import (
 )
 from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
+from app.repositories.activity import ActivityRepository
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
 from app.repositories.github import GithubRepository
@@ -24,6 +25,7 @@ from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.labels import LabelRepository
 from app.repositories.memberships import MembershipRepository
+from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.relations import RelationRepository
 from app.repositories.sessions import SessionRepository
@@ -31,6 +33,7 @@ from app.repositories.slack import SlackRepository
 from app.repositories.teams import TeamRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
+from app.services.activity import ActivityService
 from app.services.auth import AuthService
 from app.services.comments import CommentService
 from app.services.cycles import CycleService
@@ -65,6 +68,7 @@ class VectorContext(BaseContext):
         search_service: SearchService,
         github_service: GithubService,
         slack_service: SlackService,
+        activity_service: ActivityService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -92,6 +96,15 @@ class VectorContext(BaseContext):
         # app/rest/slack.py, which builds its own instance of this service
         # over the same pool.
         self.slack_service = slack_service
+
+        # The READ half of activity and notifications only. Nothing writes
+        # through this object: an activity row and an inbox item are written
+        # by the service that causes them, on that service's own connection
+        # and inside its transaction, through the module-level functions in
+        # app/services/activity.py. A writable service here would be a way to
+        # record history for a change that had not happened yet -- or that
+        # was about to be rolled back.
+        self.activity_service = activity_service
 
         # Built here rather than in `get_context` so that a context assembled
         # by hand -- a test, a worker -- gets working loaders from the service
@@ -304,6 +317,17 @@ async def get_context() -> VectorContext:
             # request cannot answer one field as configured and another as
             # not. `settings` is already resolved above for `environment`.
             configured=settings.slack_configured,
+        ),
+        # One service over both tables, because a history row and an inbox
+        # item are two records of one moment: the event that happened, and
+        # who has to look at it. They stay two TABLES and two entities --
+        # that distinction is the point of migration 012 -- but a reader
+        # asking "what happened here, and does it concern me" is asking one
+        # question.
+        activity_service=ActivityService(
+            pool=pool,
+            repository=ActivityRepository(),
+            notifications=NotificationRepository(),
         ),
         # Built here rather than resolved here: nothing in this function
         # touches the database. Constructing a context is on the path of

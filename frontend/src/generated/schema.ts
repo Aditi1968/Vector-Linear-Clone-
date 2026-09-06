@@ -162,6 +162,7 @@ export type InvitationRevokePayload = {
 
 export type Issue = {
   __typename?: 'Issue';
+  activity: IssueActivityConnection;
   /** When the issue was taken off the board. Always null here, because archived issues are absent from every query -- only the archive mutation's own result carries a value. */
   archivedAt?: Maybe<Scalars['DateTime']['output']>;
   assigneeId?: Maybe<Scalars['UUID']['output']>;
@@ -196,6 +197,12 @@ export type Issue = {
 };
 
 
+export type IssueActivityArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
+
 export type IssueChildrenArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
@@ -212,6 +219,37 @@ export type IssueRelationsArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
 };
+
+export type IssueActivity = {
+  __typename?: 'IssueActivity';
+  actorId?: Maybe<Scalars['UUID']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  fromValue?: Maybe<Scalars['String']['output']>;
+  id: Scalars['UUID']['output'];
+  issueId: Scalars['UUID']['output'];
+  kind: IssueActivityKind;
+  toValue?: Maybe<Scalars['String']['output']>;
+};
+
+export type IssueActivityConnection = {
+  __typename?: 'IssueActivityConnection';
+  nodes: Array<IssueActivity>;
+  pageInfo: PageInfo;
+};
+
+export type IssueActivityKind =
+  | 'ARCHIVED'
+  | 'ASSIGNEE_CHANGED'
+  | 'COMMENTED'
+  | 'CREATED'
+  | 'CYCLE_CHANGED'
+  | 'LABEL_ATTACHED'
+  | 'LABEL_DETACHED'
+  | 'PRIORITY_CHANGED'
+  | 'PROJECT_CHANGED'
+  | 'RELATION_ADDED'
+  | 'STATE_CHANGED'
+  | 'TITLE_CHANGED';
 
 export type IssueArchivePayload = {
   __typename?: 'IssueArchivePayload';
@@ -474,6 +512,8 @@ export type Mutation = {
   memberRemove: MemberRemovePayload;
   /** Change a member's role. Requires the admin or owner role. */
   memberRoleUpdate: WorkspaceMemberPayload;
+  notificationMarkAllRead: NotificationMarkAllReadPayload;
+  notificationMarkRead: NotificationMarkReadPayload;
   projectCreate: ProjectPayload;
   projectDelete: ProjectDeletePayload;
   projectMilestoneCreate: ProjectMilestonePayload;
@@ -622,6 +662,16 @@ export type MutationMemberRoleUpdateArgs = {
 };
 
 
+export type MutationNotificationMarkAllReadArgs = {
+  input: NotificationMarkAllReadInput;
+};
+
+
+export type MutationNotificationMarkReadArgs = {
+  input: NotificationMarkReadInput;
+};
+
+
 export type MutationProjectCreateArgs = {
   input: ProjectCreateInput;
 };
@@ -679,6 +729,48 @@ export type MutationTeamCreateArgs = {
 
 export type MutationWorkspaceCreateArgs = {
   input: WorkspaceCreateInput;
+};
+
+export type Notification = {
+  __typename?: 'Notification';
+  actorId?: Maybe<Scalars['UUID']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  issueId: Scalars['UUID']['output'];
+  kind: NotificationKind;
+  readAt?: Maybe<Scalars['DateTime']['output']>;
+};
+
+export type NotificationConnection = {
+  __typename?: 'NotificationConnection';
+  nodes: Array<Notification>;
+  pageInfo: PageInfo;
+};
+
+export type NotificationKind =
+  | 'ASSIGNED'
+  | 'BLOCKED'
+  | 'COMMENTED';
+
+export type NotificationMarkAllReadInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type NotificationMarkAllReadPayload = {
+  __typename?: 'NotificationMarkAllReadPayload';
+  errors: Array<ValidationErrorType>;
+  markedCount: Scalars['Int']['output'];
+};
+
+export type NotificationMarkReadInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type NotificationMarkReadPayload = {
+  __typename?: 'NotificationMarkReadPayload';
+  errors: Array<ValidationErrorType>;
+  notification?: Maybe<Notification>;
 };
 
 export type PageInfo = {
@@ -806,6 +898,8 @@ export type Query = {
   me?: Maybe<User>;
   myWorkspace: WorkspaceMembership;
   myWorkspaces: Array<WorkspaceMembership>;
+  notificationUnreadCount: Scalars['Int']['output'];
+  notifications: NotificationConnection;
   project?: Maybe<Project>;
   projects: ProjectConnection;
   search: SearchResults;
@@ -861,6 +955,19 @@ export type QueryLabelsArgs = {
 
 export type QueryMyWorkspaceArgs = {
   slug: Scalars['String']['input'];
+};
+
+
+export type QueryNotificationUnreadCountArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryNotificationsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+  unreadOnly?: Scalars['Boolean']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
