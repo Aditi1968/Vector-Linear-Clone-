@@ -154,6 +154,65 @@ class ProjectRepository:
 
         return [self._to_project(row) for row in rows]
 
+    async def search(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        query: str,
+        limit: int,
+    ) -> list[ProjectEntity]:
+        """The workspace's projects matching a free-text query, best first.
+
+        The same statement shape as `IssueRepository.search`, and that
+        docstring carries the argument for every part of it: why
+        `websearch_to_tsquery` rather than `to_tsquery`, why the tsquery
+        expression is written twice rather than joined in, why the
+        configuration is named, and why `id DESC` follows the rank.
+
+        No `archived_at` predicate, because `projects` has no such column.
+        Nothing here filters on `state` either: a completed project is still
+        one a workspace searches for, and deciding otherwise is a product
+        choice for the caller rather than a fact about this table.
+        """
+        rows = await connection.fetch(
+            """
+            SELECT
+                id,
+                name,
+                description,
+                state,
+                target_date,
+                lead_id,
+                created_at,
+                updated_at,
+                (
+                    SELECT COALESCE(
+                        array_agg(pt.team_id ORDER BY pt.team_id),
+                        ARRAY[]::UUID[]
+                    )
+                    FROM project_teams pt
+                    WHERE pt.workspace_id = projects.workspace_id
+                        AND pt.project_id = projects.id
+                ) AS team_ids
+            FROM projects
+            WHERE workspace_id = $1
+                AND search_vector @@ websearch_to_tsquery('english', $2)
+            ORDER BY
+                ts_rank(
+                    search_vector,
+                    websearch_to_tsquery('english', $2)
+                ) DESC,
+                id DESC
+            LIMIT $3
+            """,
+            scope.workspace_id,
+            query,
+            limit,
+        )
+
+        return [self._to_project(row) for row in rows]
+
     async def list(
         self,
         connection: asyncpg.Connection,

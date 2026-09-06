@@ -21,6 +21,7 @@ from app.graphql.queries.issues import Query as IssueQuery
 from app.graphql.queries.labels import LabelQuery
 from app.graphql.queries.memberships import MembershipQuery
 from app.graphql.queries.projects import ProjectQuery
+from app.graphql.queries.search import SearchQuery
 from app.graphql.queries.teams import TeamQuery
 
 
@@ -57,6 +58,7 @@ QUERY_TYPES = (
     LabelQuery,
     CycleQuery,
     ProjectQuery,
+    SearchQuery,
 )
 
 Query = merge_types("Query", QUERY_TYPES)
