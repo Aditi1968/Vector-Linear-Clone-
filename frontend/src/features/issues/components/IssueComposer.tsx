@@ -1,7 +1,7 @@
 import { useCallback, useId, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 
-import { Button, cx } from '../../../components'
+import { Button, cx, Input, Kbd, Select, Textarea } from '../../../components'
 import { useCreateIssue } from '../api'
 import type { IssueDetailFields, IssueValidationError } from '../api'
 import styles from '../issues.module.css'
@@ -168,16 +168,15 @@ export function IssueComposer({ onCancel, onCreated }: IssueComposerProps) {
         <label className={styles.fieldLabel} htmlFor={titleId}>
           Title
         </label>
-        <input
+        <Input
           aria-describedby={`${titleCountId}${hasTitleError ? ` ${titleErrorId}` : ''}`}
-          aria-invalid={hasTitleError}
           autoFocus
           id={titleId}
+          invalid={hasTitleError}
           onChange={(event) => {
             setTitle(event.target.value)
           }}
           ref={titleRef}
-          type="text"
           value={title}
         />
         <span
@@ -197,7 +196,7 @@ export function IssueComposer({ onCancel, onCreated }: IssueComposerProps) {
         <label className={styles.fieldLabel} htmlFor={descriptionId}>
           Description <span className={styles.fieldHint}>(optional)</span>
         </label>
-        <textarea
+        <Textarea
           id={descriptionId}
           onChange={(event) => {
             setDescription(event.target.value)
@@ -210,10 +209,10 @@ export function IssueComposer({ onCancel, onCreated }: IssueComposerProps) {
         <label className={styles.fieldLabel} htmlFor={priorityId}>
           Priority
         </label>
-        <select
+        <Select
           aria-describedby={`${priorityHintId}${hasPriorityError ? ` ${priorityErrorId}` : ''}`}
-          aria-invalid={hasPriorityError}
           id={priorityId}
+          invalid={hasPriorityError}
           onChange={(event) => {
             setPriority(Number(event.target.value))
           }}
@@ -229,7 +228,7 @@ export function IssueComposer({ onCancel, onCreated }: IssueComposerProps) {
               </option>
             )
           })}
-        </select>
+        </Select>
         <span className={styles.fieldHint} id={priorityHintId}>
           The API stores priority as an integer 0-4 and attaches no names to
           it. The names above are this app&apos;s convention.
@@ -249,7 +248,7 @@ export function IssueComposer({ onCancel, onCreated }: IssueComposerProps) {
           Cancel
         </Button>
         <span className={styles.fieldHint}>
-          Press <kbd className={styles.shortcutHint}>Esc</kbd> to close
+          Press <Kbd>Esc</Kbd> to close
         </span>
       </div>
     </form>
