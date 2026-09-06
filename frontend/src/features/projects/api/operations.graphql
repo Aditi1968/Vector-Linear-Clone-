@@ -129,14 +129,17 @@ query ProjectMembers($workspaceSlug: String!) {
 # `milestoneId` is selected because milestone progress is derived from it --
 # `ProjectMilestone` exposes no counts of its own.
 #
-# Cost: 25 x (7 + 2) = 225 of 1000.
+# `priority` is deliberately not selected: the integer-to-name convention
+# lives in the issues feature and is that feature's to own, and this panel
+# shows what a project's work *is*, not how it is ranked.
+#
+# Cost: 25 x (6 + 2) = 200 of 1000.
 query ProjectIssues($workspaceSlug: String!, $after: String) {
   issues(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
     nodes {
       id
       identifier
       title
-      priority
       completedAt
       projectId
       milestoneId

@@ -69,14 +69,16 @@ query CycleTeams($workspaceSlug: String!) {
 # happened to be on would be worse than not scoping -- it would silently show
 # nothing for a cycle reached by a direct link.
 #
-# Cost: 25 x (6 + 2) = 200 of 1000.
+# `priority` is not selected: the integer-to-name convention lives in the
+# issues feature and is that feature's to own.
+#
+# Cost: 25 x (5 + 2) = 175 of 1000.
 query CycleIssues($workspaceSlug: String!, $after: String) {
   issues(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
     nodes {
       id
       identifier
       title
-      priority
       completedAt
       cycle {
         id
