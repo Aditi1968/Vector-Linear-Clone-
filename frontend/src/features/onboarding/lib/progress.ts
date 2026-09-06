@@ -6,7 +6,7 @@
  * are only two facts and one function, and all three are below.
  */
 
-import { createAppPaths } from '../../../app/routes'
+import { paths } from '../../../app/routes'
 import type { OnboardingWorkspacesQuery } from '../../../generated/operations'
 
 /** One membership as `OnboardingWorkspaces` selects it. */
@@ -218,5 +218,5 @@ export function stepFromPathname(pathname: string): OnboardingStep | null {
  * out of.
  */
 export function workspaceHome(slug: string): string {
-  return createAppPaths(`/${slug}`).issues()
+  return paths.issues(slug)
 }

@@ -4,9 +4,14 @@
  * Every URL in the product is built from here. A component that writes a
  * route as a string literal has hardcoded the workspace layout of the
  * application; see ./paths.ts.
+ *
+ * The route *table* is deliberately not re-exported. It imports every
+ * feature's route array, and several of those features import this module for
+ * their path helpers -- so a barrel that pulled ./routes in would make every
+ * one of them a circular import, and the one that lost the race would spread
+ * an undefined array at module scope. `App.tsx` and the test harness import
+ * `./routes/routes` directly, and they are the only two things that need it.
  */
-
-export { routes } from './routes'
 
 export { useAppPaths, useWorkspaceSlug } from './useAppPaths'
 

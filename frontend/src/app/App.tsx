@@ -1,7 +1,7 @@
 import { RouterProvider, createBrowserRouter } from 'react-router-dom'
 
 import { AppProviders } from './providers/AppProviders'
-import { routes } from './routes'
+import { routes } from './routes/routes'
 
 /**
  * The router instance.

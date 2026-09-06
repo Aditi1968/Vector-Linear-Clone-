@@ -6,7 +6,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { AppProviders } from '../providers/AppProviders'
 import { createTestClient } from '../../test/client'
 import { ControlledLink } from '../../test/controlledLink'
-import { routes } from './index'
+import { shellSidebarData, workspaceShellData } from '../../test/factories'
+import { WORKSPACE_SLUG_PARAM } from './paths'
+import { routes } from './routes'
 
 /**
  * The route error boundary.
@@ -61,17 +63,16 @@ function Exploding(): never {
 
 /** The real table, plus one route that fails inside the workspace shell. */
 function routesWith(extra: RouteObject): RouteObject[] {
-  // The workspace route, not `routes[0]`. The table's first entry is the
-  // index route that resolves `/` to a workspace, and it has no children to
-  // hang a failing route off -- the shell is the one under `/:workspaceSlug`.
-  // `RouteObject` is a union and an index route may not have children, so
-  // the predicate is what makes the spread below type-check as well as what
-  // picks the right route: TypeScript infers it and narrows `shell` to the
-  // non-index member.
-  const shell = routes.find((route) => route.index !== true)
+  // Selected by path rather than by position. The table is composed from the
+  // auth, onboarding and workspace route sets, so an index into it is a claim
+  // about which feature is listed first -- and the shell is the one under
+  // `/:workspaceSlug`, whichever order they end up in.
+  const shell = routes.find(
+    (route) => route.index !== true && route.path === `/:${WORKSPACE_SLUG_PARAM}`,
+  )
 
-  if (shell === undefined) {
-    throw new Error('The route table has no non-index shell route')
+  if (shell === undefined || shell.index === true) {
+    throw new Error('The route table has no workspace shell route')
   }
 
   return [
@@ -84,7 +85,15 @@ function routesWith(extra: RouteObject): RouteObject[] {
 }
 
 function renderAt(table: RouteObject[], path: string): void {
-  const client = createTestClient(new ControlledLink())
+  const link = new ControlledLink()
+
+  // The shell will not render a child until it knows the viewer belongs to
+  // the workspace in the URL, so the throwing route below would never mount
+  // without these. See `ControlledLink.answerAlways`.
+  link.answerAlways('WorkspaceShell', { data: workspaceShellData() })
+  link.answerAlways('ShellSidebar', { data: shellSidebarData() })
+
+  const client = createTestClient(link)
   const router = createMemoryRouter(table, { initialEntries: [path] })
 
   render(

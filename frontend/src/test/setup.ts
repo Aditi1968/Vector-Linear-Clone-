@@ -27,4 +27,25 @@ import '@testing-library/jest-dom/vitest'
  */
 afterEach(() => {
   cleanup()
+
+  /*
+    The shell remembers two things across a reload -- the theme and whether
+    the rail is collapsed -- and `localStorage` and `<html>` are the two
+    pieces of state in this environment that `cleanup()` does not touch. One
+    test collapsing the rail would otherwise leave every test that ran after
+    it mounting a collapsed rail, which fails in the confusing direction: a
+    control found by name in one file and not in the next, depending on
+    ordering.
+
+    Cleared rather than stubbed, so the persistence itself is still the real
+    thing under test -- `shell.test.tsx` mounts twice in one test to prove a
+    choice survives, and that only means something against real storage.
+  */
+  try {
+    localStorage.clear()
+  } catch {
+    // A browser that refuses storage has nothing to clear.
+  }
+
+  document.documentElement.removeAttribute('data-theme')
 })

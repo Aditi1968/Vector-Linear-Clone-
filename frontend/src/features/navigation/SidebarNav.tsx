@@ -65,8 +65,17 @@ export function SidebarNav({ id, collapsed }: SidebarNavProps) {
               badge={
                 item.id === 'inbox' && unread > 0 ? (
                   <span className={styles.badge}>
-                    {unread}
-                    <VisuallyHidden> unread</VisuallyHidden>
+                    {/*
+                      The digits are hidden from assistive technology and the
+                      whole phrase is supplied beside them, punctuation
+                      included. Accessible names are computed by concatenating
+                      each node's *trimmed* text, so a hidden " unread" next to
+                      a visible "3" is announced as "Inbox3unread" -- the
+                      spaces are thrown away before the join. Putting the
+                      separator inside one node is the only way to keep it.
+                    */}
+                    <span aria-hidden="true">{unread}</span>
+                    <VisuallyHidden>{`, ${String(unread)} unread`}</VisuallyHidden>
                   </span>
                 ) : undefined
               }
