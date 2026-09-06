@@ -22,11 +22,9 @@ import pytest
 
 from app.domain.errors import WorkspaceAccessDeniedError
 from app.domain.memberships import WorkspaceMembershipEntity
-from app.graphql.queries.memberships import (
-    UNAUTHENTICATED_MESSAGE,
-    WORKSPACE_NOT_FOUND_MESSAGE,
-)
+from app.graphql.queries.memberships import WORKSPACE_NOT_FOUND_MESSAGE
 from app.graphql.schema import MASKED_ERROR_MESSAGE, build_schema
+from app.graphql.viewer import UNAUTHENTICATED_MESSAGE
 
 
 # Built directly rather than imported, so these tests need no DATABASE_URL.

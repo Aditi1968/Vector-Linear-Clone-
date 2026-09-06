@@ -1,3 +1,37 @@
+type Comment {
+  id: UUID!
+  issueId: UUID!
+  authorId: UUID!
+  body: String!
+  editedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type CommentConnection {
+  nodes: [Comment!]!
+  pageInfo: PageInfo!
+}
+
+input CommentCreateInput {
+  issueId: UUID!
+  body: String!
+}
+
+type CommentCreatePayload {
+  comment: Comment
+  errors: [ValidationErrorType!]!
+}
+
+input CommentDeleteInput {
+  id: UUID!
+}
+
+type CommentDeletePayload {
+  deletedCommentId: UUID
+  errors: [ValidationErrorType!]!
+}
+
 """Date with time (isoformat)"""
 scalar DateTime
 
@@ -9,6 +43,8 @@ type Issue {
   completedAt: DateTime
   createdAt: DateTime!
   updatedAt: DateTime!
+  labels: [Label!]!
+  comments(first: Int! = 20, after: String = null): CommentConnection!
 }
 
 type IssueConnection {
@@ -25,6 +61,54 @@ input IssueCreateInput {
 type IssueCreatePayload {
   issue: Issue
   errors: [ValidationErrorType!]!
+}
+
+input IssueLabelInput {
+  issueId: UUID!
+  labelId: UUID!
+}
+
+type IssueLabelPayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
+}
+
+type Label {
+  id: UUID!
+  name: String!
+  color: String!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type LabelConnection {
+  nodes: [Label!]!
+  pageInfo: PageInfo!
+}
+
+input LabelCreateInput {
+  name: String!
+  color: String = null
+}
+
+input LabelDeleteInput {
+  id: UUID!
+}
+
+type LabelDeletePayload {
+  deletedLabelId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type LabelPayload {
+  label: Label
+  errors: [ValidationErrorType!]!
+}
+
+input LabelUpdateInput {
+  id: UUID!
+  name: String!
+  color: String!
 }
 
 input LoginInput {
@@ -47,6 +131,13 @@ type Mutation {
   register(input: RegisterInput!): RegisterPayload!
   login(input: LoginInput!): LoginPayload!
   logout: LogoutPayload!
+  labelCreate(input: LabelCreateInput!): LabelPayload!
+  labelUpdate(input: LabelUpdateInput!): LabelPayload!
+  labelDelete(input: LabelDeleteInput!): LabelDeletePayload!
+  issueLabelAttach(input: IssueLabelInput!): IssueLabelPayload!
+  issueLabelDetach(input: IssueLabelInput!): IssueLabelPayload!
+  commentCreate(input: CommentCreateInput!): CommentCreatePayload!
+  commentDelete(input: CommentDeleteInput!): CommentDeletePayload!
 }
 
 type PageInfo {
@@ -65,6 +156,8 @@ type Query {
   teams(workspaceSlug: String!): [Team!]!
   myWorkspaces: [WorkspaceMembership!]!
   myWorkspace(slug: String!): WorkspaceMembership!
+  label(id: UUID!): Label
+  labels(first: Int! = 50, after: String = null): LabelConnection!
 }
 
 input RegisterInput {

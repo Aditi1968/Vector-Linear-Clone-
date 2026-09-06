@@ -23,15 +23,61 @@ export type Scalars = {
   UUID: { input: string; output: string; }
 };
 
+export type Comment = {
+  __typename?: 'Comment';
+  authorId: Scalars['UUID']['output'];
+  body: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  editedAt?: Maybe<Scalars['DateTime']['output']>;
+  id: Scalars['UUID']['output'];
+  issueId: Scalars['UUID']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type CommentConnection = {
+  __typename?: 'CommentConnection';
+  nodes: Array<Comment>;
+  pageInfo: PageInfo;
+};
+
+export type CommentCreateInput = {
+  body: Scalars['String']['input'];
+  issueId: Scalars['UUID']['input'];
+};
+
+export type CommentCreatePayload = {
+  __typename?: 'CommentCreatePayload';
+  comment?: Maybe<Comment>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type CommentDeleteInput = {
+  id: Scalars['UUID']['input'];
+};
+
+export type CommentDeletePayload = {
+  __typename?: 'CommentDeletePayload';
+  deletedCommentId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
 export type Issue = {
   __typename?: 'Issue';
+  comments: CommentConnection;
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   createdAt: Scalars['DateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
+  labels: Array<Label>;
   priority: Scalars['Int']['output'];
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
+};
+
+
+export type IssueCommentsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
 };
 
 export type IssueConnection = {
@@ -50,6 +96,59 @@ export type IssueCreatePayload = {
   __typename?: 'IssueCreatePayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
+};
+
+export type IssueLabelInput = {
+  issueId: Scalars['UUID']['input'];
+  labelId: Scalars['UUID']['input'];
+};
+
+export type IssueLabelPayload = {
+  __typename?: 'IssueLabelPayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
+};
+
+export type Label = {
+  __typename?: 'Label';
+  color: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type LabelConnection = {
+  __typename?: 'LabelConnection';
+  nodes: Array<Label>;
+  pageInfo: PageInfo;
+};
+
+export type LabelCreateInput = {
+  color?: InputMaybe<Scalars['String']['input']>;
+  name: Scalars['String']['input'];
+};
+
+export type LabelDeleteInput = {
+  id: Scalars['UUID']['input'];
+};
+
+export type LabelDeletePayload = {
+  __typename?: 'LabelDeletePayload';
+  deletedLabelId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type LabelPayload = {
+  __typename?: 'LabelPayload';
+  errors: Array<ValidationErrorType>;
+  label?: Maybe<Label>;
+};
+
+export type LabelUpdateInput = {
+  color: Scalars['String']['input'];
+  id: Scalars['UUID']['input'];
+  name: Scalars['String']['input'];
 };
 
 export type LoginInput = {
@@ -71,15 +170,57 @@ export type LogoutPayload = {
 
 export type Mutation = {
   __typename?: 'Mutation';
+  commentCreate: CommentCreatePayload;
+  commentDelete: CommentDeletePayload;
   issueCreate: IssueCreatePayload;
+  issueLabelAttach: IssueLabelPayload;
+  issueLabelDetach: IssueLabelPayload;
+  labelCreate: LabelPayload;
+  labelDelete: LabelDeletePayload;
+  labelUpdate: LabelPayload;
   login: LoginPayload;
   logout: LogoutPayload;
   register: RegisterPayload;
 };
 
 
+export type MutationCommentCreateArgs = {
+  input: CommentCreateInput;
+};
+
+
+export type MutationCommentDeleteArgs = {
+  input: CommentDeleteInput;
+};
+
+
 export type MutationIssueCreateArgs = {
   input: IssueCreateInput;
+};
+
+
+export type MutationIssueLabelAttachArgs = {
+  input: IssueLabelInput;
+};
+
+
+export type MutationIssueLabelDetachArgs = {
+  input: IssueLabelInput;
+};
+
+
+export type MutationLabelCreateArgs = {
+  input: LabelCreateInput;
+};
+
+
+export type MutationLabelDeleteArgs = {
+  input: LabelDeleteInput;
+};
+
+
+export type MutationLabelUpdateArgs = {
+  input: LabelUpdateInput;
 };
 
 
@@ -102,6 +243,8 @@ export type Query = {
   __typename?: 'Query';
   issue?: Maybe<Issue>;
   issues: IssueConnection;
+  label?: Maybe<Label>;
+  labels: LabelConnection;
   me?: Maybe<User>;
   myWorkspace: WorkspaceMembership;
   myWorkspaces: Array<WorkspaceMembership>;
@@ -116,6 +259,17 @@ export type QueryIssueArgs = {
 
 
 export type QueryIssuesArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
+
+export type QueryLabelArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
+export type QueryLabelsArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
 };

@@ -1,20 +1,29 @@
 import asyncio
+import functools
 
+from strawberry.dataloader import DataLoader
 from strawberry.fastapi import BaseContext
 
 from app.config import Environment, get_settings
 from app.db import get_pool
 from app.domain.auth import UserEntity
+from app.domain.labels import LabelEntity
+from app.graphql.loaders.labels import IssueLabelKey, issue_label_loader
 from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
+from app.repositories.comments import CommentRepository
+from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
+from app.repositories.labels import LabelRepository
 from app.repositories.memberships import MembershipRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.teams import TeamRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.auth import AuthService
+from app.services.comments import CommentService
 from app.services.issues import IssueService
+from app.services.labels import LabelService
 from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
 from app.services.teams import TeamService
@@ -31,6 +40,8 @@ class VectorContext(BaseContext):
         team_service: TeamService,
         workspace_service: WorkspaceService,
         membership_service: MembershipService,
+        label_service: LabelService,
+        comment_service: CommentService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -39,6 +50,8 @@ class VectorContext(BaseContext):
         self.issue_service = issue_service
         self.auth_service = auth_service
         self.membership_service = membership_service
+        self.label_service = label_service
+        self.comment_service = comment_service
 
         # The same two service objects `tenant` resolves through, exposed
         # directly for the resolvers that ask about teams and workspaces as
@@ -61,6 +74,24 @@ class VectorContext(BaseContext):
         self.environment = environment
 
         self._viewer: asyncio.Future[UserEntity | None] | None = None
+
+    @functools.cached_property
+    def issue_labels(self) -> DataLoader[IssueLabelKey, list[LabelEntity]]:
+        """Batches `Issue.labels` across whatever page of issues asked for it.
+
+        Per request and never wider, which is what makes a cache keyed by
+        (workspace, issue) safe to hold at all: a loader living longer than one
+        request would go on answering with labels that have since changed, and
+        one shared between requests would answer one caller with another's
+        batch.
+
+        Built on first use rather than in `__init__`. `DataLoader` binds itself
+        to the running event loop, and a context is constructed in places where
+        there need not be one -- `tests/conftest.py::graphql_context` is called
+        from synchronous test bodies. Deferring it also means a document that
+        never selects `labels` never builds one.
+        """
+        return issue_label_loader(self.label_service)
 
     def session_token(self) -> str | None:
         """The raw token this request presented, if it presented one.
@@ -138,6 +169,15 @@ async def get_context() -> VectorContext:
             sessions=SessionRepository(),
             hasher=Argon2PasswordHasher(),
         ),
+        label_service=LabelService(
+            pool=pool,
+            repository=LabelRepository(),
+            # One service owns both tables, because applying a label is one
+            # operation over two of them: the join row is meaningless without
+            # the label, and the per-issue cap is a rule about the pair.
+            issue_label_repository=IssueLabelRepository(),
+        ),
+        comment_service=CommentService(pool=pool, repository=CommentRepository()),
         team_service=team_service,
         workspace_service=workspace_service,
         # Built here rather than resolved here: nothing in this function
