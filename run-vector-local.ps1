@@ -37,29 +37,54 @@
        afterwards, it refuses to run rather than repairing anything -- see
        `Assert-SchemaMatchesRepository`.
 
+    4. **It leaves the browser looking at a product, not an empty list.** A
+       demo workspace is seeded through the application's own GraphQL API --
+       `register`, `issueCreate`, `issueUpdate` -- by
+       `python -m scripts.seed_local_demo`, which prints the demo sign-in. A
+       seed that wrote rows straight into PostgreSQL would bypass every rule
+       the services own and would stop proving the write path works.
+
 .PARAMETER Stop
     Stop the processes and container this launcher started, then remove its
-    state file.
+    state file. Also what to run after closing the launcher's own window
+    instead of interrupting it.
 
-.PARAMETER ResetDb
+.PARAMETER Fresh
     Destroy and recreate the dedicated `vector-ui-dev` container (and only
-    that container) before starting. Use this when the launcher reports that
-    the local database and the repository's migrations disagree.
+    that container) before starting, so 001..N are applied to an empty
+    database and can be seen to apply cleanly. Also the way out of the
+    launcher's report that the local database and the repository's migrations
+    disagree. `-ResetDb` is the same switch under its older name.
+
+.PARAMETER Preview
+    Serve the production bundle -- `npm run build` then `npm run preview` --
+    instead of the dev server, on the same port. Use it to look at what
+    actually ships: the dev server transforms modules on demand and applies
+    neither minification, tree-shaking nor `import.meta.env.PROD`, so a bug
+    that only the real bundle has is invisible under `npm run dev`.
 
 .PARAMETER NoBrowser
     Start everything but do not open a browser window.
 
 .EXAMPLE
     .\run-vector-local.ps1
-    .\run-vector-local.ps1 -Stop
-    .\run-vector-local.ps1 -ResetDb
+    .\run-vector-local.ps1 -Fresh
+    .\run-vector-local.ps1 -Preview
     .\run-vector-local.ps1 -NoBrowser
+    .\run-vector-local.ps1 -Stop
 #>
 
 [CmdletBinding()]
 param(
     [switch]$Stop,
-    [switch]$ResetDb,
+
+    # `-ResetDb` was this switch's original name and still works, because it
+    # is in the owner's fingers and in three of this script's own error
+    # messages. One switch with two spellings, never two switches.
+    [Alias('ResetDb')]
+    [switch]$Fresh,
+
+    [switch]$Preview,
     [switch]$NoBrowser
 )
 
@@ -98,15 +123,49 @@ $DatabaseUrl = 'postgresql://' + $DbUser + ':' + $DbPassword +
 $DatabaseUrlForDisplay = 'postgresql://' + $DbUser +
     '@127.0.0.1:' + $DbHostPort + '/' + $DbName
 
-$VenvPython    = Join-Path (Join-Path $RepoRoot '.venv') 'Scripts\python.exe'
+$VenvDir       = Join-Path $RepoRoot '.venv'
+$VenvPython    = Join-Path $VenvDir 'Scripts\python.exe'
 $FrontendDir   = Join-Path $RepoRoot 'frontend'
 $MigrationsDir = Join-Path $RepoRoot 'migrations'
+
+# The compiled lock, not requirements.in. It is hash-pinned, so a cold install
+# resolves to exactly the versions CI and the other machines have.
+$RequirementsFile = Join-Path $RepoRoot 'requirements.txt'
+
+# requirements.txt is compiled `--python-version 3.12`, and uuidv7() in
+# migration 001 needs PostgreSQL 18; the Python floor is the one this script
+# can check before it installs anything.
+$MinimumPythonMinor = 12
+
+# What to tell someone who does not have a prerequisite. A URL and a name,
+# because "install docker" is advice they had already worked out for
+# themselves by the time they read it.
+$Prerequisites = @(
+    @{
+        Tool    = 'docker'
+        Install = 'Docker Desktop -- https://docs.docker.com/desktop/setup/install/windows-install/'
+    },
+    @{
+        Tool    = 'node'
+        Install = 'Node.js 20.19 or newer -- https://nodejs.org/en/download'
+    },
+    @{
+        Tool    = 'npm'
+        Install = 'npm, which ships with Node.js -- https://nodejs.org/en/download'
+    }
+)
 
 # Deliberately outside the repository: a state file inside it would show up
 # as an untracked change on every run.
 $StateFile = Join-Path $env:TEMP 'vector-local-dev-state.json'
 
 $BackendHealthUrl  = 'http://127.0.0.1:' + $BackendPort + '/healthz'
+
+# Reached directly rather than through the Vite proxy, by both the seeder and
+# the banner. The seeder runs before the frontend is started, so the proxy does
+# not exist yet; the loopback literal is also what `scripts.seed_local_demo`
+# will accept, and it refuses anything else.
+$BackendGraphqlUrl = 'http://127.0.0.1:' + $BackendPort + '/graphql'
 
 # `localhost`, not `127.0.0.1`, and this is load-bearing. Vite 8 binds IPv6
 # only by default, so `http://127.0.0.1:5173/` connects to nothing while
@@ -833,9 +892,23 @@ Write-Host '**************************************************' -ForegroundColor
     installs no CORS middleware, so a page on Vite's origin that called
     http://127.0.0.1:8000/graphql directly would have every response
     discarded by the browser while curl against the same URL kept working.
-    The path goes through Vite's proxy and stays same-origin.
+    The path goes through Vite's proxy and stays same-origin. `vite preview`
+    proxies it too -- see the shared table in frontend/vite.config.ts.
+
+    Under -Preview the window runs `npm run preview` and nothing else: the
+    build has already been run and gated by Build-FrontendBundle, so a
+    TypeScript error is a refusal with the compiler's output attached rather
+    than a window that never answers and a poll that times out 60 seconds
+    later naming nothing.
+
+    `--strictPort` matters for the same reason. Vite's preview server moves to
+    the next free port when the one it asked for is taken; without the flag a
+    port taken between Assert-PortsAvailable and this line puts the app on
+    5174 while the launcher polls 5173, which reads as a dead frontend.
 #>
 function New-FrontendWindowScript {
+    param([switch]$UseBuild)
+
     $template = @'
 $Host.UI.RawUI.WindowTitle = __TITLE__
 Set-Location -LiteralPath __FRONTEND__
@@ -846,12 +919,12 @@ $env:VITE_GRAPHQL_URL = '/graphql'
 
 Write-Host ''
 Write-Host '==================================================' -ForegroundColor Cyan
-Write-Host '  Vector Frontend' -ForegroundColor Cyan
+Write-Host '  Vector Frontend (__MODE__)' -ForegroundColor Cyan
 Write-Host '  /graphql is proxied to 127.0.0.1:__BACKEND_PORT__' -ForegroundColor Cyan
 Write-Host '==================================================' -ForegroundColor Cyan
 Write-Host ''
 
-npm run dev
+__COMMAND__
 
 Write-Host ''
 Write-Host '**************************************************' -ForegroundColor Red
@@ -860,10 +933,20 @@ Write-Host '  why. This window stays open on purpose.' -ForegroundColor Red
 Write-Host '**************************************************' -ForegroundColor Red
 '@
 
+    if ($UseBuild) {
+        $mode = 'production build'
+        $command = 'npm run preview -- --port ' + $FrontendPort + ' --strictPort'
+    } else {
+        $mode = 'dev server'
+        $command = 'npm run dev'
+    }
+
     $body = $template
     $body = $body.Replace('__TITLE__', (ConvertTo-PowerShellLiteral $FrontendWindowTitle))
     $body = $body.Replace('__FRONTEND__', (ConvertTo-PowerShellLiteral $FrontendDir))
     $body = $body.Replace('__BACKEND_PORT__', [string]$BackendPort)
+    $body = $body.Replace('__MODE__', $mode)
+    $body = $body.Replace('__COMMAND__', $command)
 
     return $body
 }
@@ -877,8 +960,9 @@ function Assert-Prerequisites {
     Write-Step 'Preflight'
 
     $required = @(
-        @{ Path = $VenvPython;   What = 'the backend virtualenv interpreter' },
-        @{ Path = $MigrationsDir; What = 'the migrations directory' },
+        @{ Path = $MigrationsDir;    What = 'the migrations directory' },
+        @{ Path = $RequirementsFile; What = 'the Python lockfile' },
+        @{ Path = (Join-Path $RepoRoot 'scripts\seed_local_demo.py'); What = 'the demo seeder' },
         @{ Path = (Join-Path $FrontendDir 'package.json');      What = 'the frontend manifest' },
         @{ Path = (Join-Path $FrontendDir 'package-lock.json'); What = 'the frontend lockfile' },
         @{ Path = (Join-Path $FrontendDir 'vite.config.ts');    What = 'the Vite config' }
@@ -888,31 +972,182 @@ function Assert-Prerequisites {
         if (-not (Test-Path -LiteralPath $entry.Path)) {
             Stop-Launcher -Reason ('Cannot find ' + $entry.What + '.') -Details @(
                 ('Expected: ' + $entry.Path),
-                'Run this script from a complete checkout with the virtualenv created.'
+                'This does not look like a complete Vector checkout. Clone it again.'
             )
         }
     }
 
     Write-Good 'Repository layout looks complete.'
 
-    foreach ($tool in @('docker', 'node', 'npm')) {
-        if ($null -eq (Get-Command -Name $tool -ErrorAction SilentlyContinue)) {
-            Stop-Launcher -Reason ($tool + ' is not on PATH.') -Details @(
-                'Install it, or open a shell where it is available, and try again.'
-            )
+    # Every missing tool is collected before any of them is reported. Someone
+    # setting up a new machine typically has none of the three, and a launcher
+    # that names one, is fixed, then names the next has made them run three
+    # installs and four launches to learn what one message could have said.
+    $missing = @()
+
+    foreach ($entry in $Prerequisites) {
+        if ($null -eq (Get-Command -Name $entry.Tool -ErrorAction SilentlyContinue)) {
+            $missing += ('  ' + $entry.Tool + ' -- install ' + $entry.Install)
         }
+    }
+
+    if ($missing.Count -gt 0) {
+        Stop-Launcher -Reason 'Missing prerequisites.' -Details (
+            @('Not on PATH:') + $missing + @(
+                '',
+                'Install them, open a new shell so PATH is picked up, and run this again.'
+            )
+        )
     }
 
     $dockerInfo = Invoke-Native -FilePath 'docker' -Arguments @('info', '--format', '{{.ServerVersion}}')
 
     if ($dockerInfo.ExitCode -ne 0) {
         Stop-Launcher -Reason 'The Docker daemon is not responding.' -Details @(
-            'Start Docker Desktop and wait for it to report "running", then try again.',
+            'Docker is installed but not running. Start Docker Desktop and wait',
+            'for it to report "running", then try again.',
             $dockerInfo.Output
         )
     }
 
     Write-Good ('Docker daemon reachable (server ' + $dockerInfo.Output + ').')
+}
+
+<#
+    The first interpreter on this machine new enough to build the virtualenv,
+    or $null.
+
+    `py` is tried before `python` deliberately. A bare `python` on a Windows
+    machine that has never installed one resolves to the App Execution Alias:
+    a zero-byte stub that opens the Microsoft Store and exits without running
+    anything. `Get-Command python` finds it, so presence is not evidence, and
+    the version probe below is what actually separates the two.
+#>
+function Find-BasePython {
+    $candidates = @(
+        @{ File = 'py';      Arguments = @('-3.12') },
+        @{ File = 'py';      Arguments = @('-3') },
+        @{ File = 'python';  Arguments = @() },
+        @{ File = 'python3'; Arguments = @() }
+    )
+
+    foreach ($candidate in $candidates) {
+        if ($null -eq (Get-Command -Name $candidate.File -ErrorAction SilentlyContinue)) {
+            continue
+        }
+
+        # The probe contains no quote character, and that is a requirement
+        # rather than a style. Windows PowerShell 5.1 re-parses the arguments
+        # it hands a native command and eats embedded double quotes, so the
+        # obvious `print("%d.%d" % sys.version_info[:2])` reaches Python as
+        # `print(%d.%d % sys.version_info[:2])` and dies of a SyntaxError --
+        # which this function would read as "not a usable interpreter" and
+        # skip, on a machine with a perfectly good Python on it.
+        $probe = Invoke-Native -FilePath $candidate.File -Arguments (
+            $candidate.Arguments + @('-c', 'import sys; print(sys.version_info[0], sys.version_info[1])')
+        )
+
+        if ($probe.ExitCode -ne 0) {
+            continue
+        }
+
+        $parts = @($probe.Output.Trim() -split '\s+')
+
+        if ($parts.Count -lt 2) {
+            continue
+        }
+
+        $major = 0
+        $minor = 0
+
+        # TryParse rather than a cast: a stub or a wrapper can answer with
+        # anything at all on stdout, and a cast to [int] of that would throw
+        # out of a function whose whole job is to keep looking.
+        if (-not [int]::TryParse($parts[0], [ref]$major)) { continue }
+        if (-not [int]::TryParse($parts[1], [ref]$minor)) { continue }
+
+        if ($major -ne 3 -or $minor -lt $MinimumPythonMinor) {
+            continue
+        }
+
+        return [pscustomobject]@{
+            File      = $candidate.File
+            Arguments = $candidate.Arguments
+            Version   = ('3.' + $minor)
+        }
+    }
+
+    return $null
+}
+
+<#
+    Make sure `.venv` exists, building it from the lockfile if it does not.
+
+    The symmetric counterpart of Install-FrontendDependencies, and there for
+    the same reason: a clone has neither `node_modules` nor `.venv`, and a
+    launcher that installs one but instructs the owner to install the other by
+    hand is a launcher that does not actually start from a clone.
+
+    Only ever creates. An existing `.venv` is reused untouched -- no upgrade,
+    no sync, no `pip install` over the top of it. The owner may be holding a
+    deliberately patched dependency in there, and a launcher that quietly
+    reverted it while starting the app would be very hard to suspect.
+#>
+function Install-BackendVirtualenv {
+    Write-Step 'Backend virtualenv'
+
+    if (Test-Path -LiteralPath $VenvPython) {
+        Write-Good '.venv present; reusing it.'
+        return
+    }
+
+    $base = Find-BasePython
+
+    if ($null -eq $base) {
+        Stop-Launcher -Reason ('No Python 3.' + $MinimumPythonMinor + ' or newer was found.') -Details @(
+            ('Install Python 3.' + $MinimumPythonMinor + ' or newer -- ' +
+                'https://www.python.org/downloads/windows/'),
+            'Tick "Add python.exe to PATH" in the installer, then open a new',
+            'shell and run this again.',
+            '',
+            ('Tried: py -3.' + $MinimumPythonMinor + ', py -3, python, python3.')
+        )
+    }
+
+    Write-Detail ('Creating .venv with ' + $base.File + ' (Python ' + $base.Version + ')...')
+
+    $code = Invoke-NativeStreaming -FilePath $base.File -Arguments (
+        $base.Arguments + @('-m', 'venv', $VenvDir)
+    )
+
+    if ($code -ne 0) {
+        Stop-Launcher -Reason ('Could not create ' + $VenvDir + ' (exit ' + $code + ').') -Details @(
+            'The output above is Python''s.'
+        )
+    }
+
+    Write-Detail 'Installing backend dependencies from requirements.txt (a few minutes)...'
+
+    # requirements.txt, never requirements.in: the compiled lock is hash-pinned,
+    # so this resolves to the same versions CI has rather than to whatever is
+    # newest today.
+    $code = Invoke-NativeStreaming -FilePath $VenvPython -Arguments @(
+        '-m', 'pip', 'install', '--disable-pip-version-check',
+        '--requirement', $RequirementsFile
+    )
+
+    if ($code -ne 0) {
+        # Removed rather than left behind. A half-populated .venv passes the
+        # Test-Path above on the next run, so keeping it would turn one clear
+        # failure into an import error somewhere downstream on every run after.
+        Remove-Item -LiteralPath $VenvDir -Recurse -Force -ErrorAction SilentlyContinue
+
+        Stop-Launcher -Reason ('Installing backend dependencies failed (exit ' + $code + ').') -Details @(
+            'The output above is pip''s. The incomplete .venv has been removed.'
+        )
+    }
+
+    Write-Good 'Virtualenv created and dependencies installed.'
 }
 
 <#
@@ -1033,7 +1268,7 @@ function Start-DedicatedContainer {
         if ($result.ExitCode -ne 0) {
             Stop-Launcher -Reason ('Could not start ' + $ContainerName + '.') -Details @(
                 $result.Output,
-                'If it is damaged, recreate it with:  .\run-vector-local.ps1 -ResetDb'
+                'If it is damaged, recreate it with:  .\run-vector-local.ps1 -Fresh'
             )
         }
 
@@ -1051,7 +1286,7 @@ function Start-DedicatedContainer {
         Stop-Launcher -Reason ($ContainerName + ' does not publish PostgreSQL where this launcher expects it.') -Details @(
             ('Expected: ' + $expected),
             ('Actual:   ' + $published),
-            'Recreate it with:  .\run-vector-local.ps1 -ResetDb'
+            'Recreate it with:  .\run-vector-local.ps1 -Fresh'
         )
     }
 }
@@ -1094,7 +1329,7 @@ function Wait-ForDatabase {
 
     Stop-Launcher -Reason 'PostgreSQL did not become ready in time.' -Details @(
         ('Inspect it with:  docker logs ' + $ContainerName),
-        'Or start over with:  .\run-vector-local.ps1 -ResetDb'
+        'Or start over with:  .\run-vector-local.ps1 -Fresh'
     )
 }
 
@@ -1156,8 +1391,7 @@ function Initialize-Schema {
                     $result.Output,
                     '',
                     'Nothing else has been started. Start from a clean database with:',
-                    '  .
-un-vector-local.ps1 -ResetDb'
+                    '  .\run-vector-local.ps1 -Fresh'
                 )
             }
 
@@ -1220,8 +1454,7 @@ function Assert-SchemaMatchesRepository {
             'An applied migration''s text has changed, or a migration could not',
             'be read. This launcher will not repair a ledger. If the local',
             'database is disposable, start over with:',
-            '  .
-un-vector-local.ps1 -ResetDb'
+            '  .\run-vector-local.ps1 -Fresh'
         )
     }
 
@@ -1238,8 +1471,7 @@ un-vector-local.ps1 -ResetDb'
             '',
             'The runner reported success, so the two are looking at different',
             'databases. Start over with:',
-            '  .
-un-vector-local.ps1 -ResetDb'
+            '  .\run-vector-local.ps1 -Fresh'
         )
     }
 
@@ -1340,6 +1572,89 @@ function Assert-GraphqlContractCurrent {
     Write-Good 'schema.graphql and src/generated/ are current.'
 }
 
+<#
+    Under -Preview, build the production bundle before anything is started.
+
+    Here rather than in the frontend window, and that placement is the point.
+    `npm run build` is `tsc -b && vite build`, so it fails on any type error in
+    the repository -- and a build that failed inside the child window would
+    leave the launcher polling a port nothing will ever listen on, reporting a
+    60-second timeout whose actual cause scrolled past in another window. Run
+    here, a type error is a refusal with the compiler's own output above it.
+
+    A no-op without -Preview: the dev server compiles on demand and needs no
+    dist/ at all, and building one anyway would add a minute to every ordinary
+    run for an artefact nothing then reads.
+#>
+function Build-FrontendBundle {
+    if (-not $Preview) {
+        return
+    }
+
+    Write-Step 'Frontend production build'
+    Write-Detail 'npm run build (tsc -b && vite build)...'
+
+    Push-Location -LiteralPath $FrontendDir
+
+    try {
+        $code = Invoke-NativeStreaming -FilePath 'npm' -Arguments @('run', 'build')
+    } finally {
+        Pop-Location
+    }
+
+    if ($code -ne 0) {
+        Stop-Launcher -Reason ('npm run build failed (exit ' + $code + ').') -Details @(
+            'The output above is the compiler''s. Nothing has been started.',
+            '',
+            'The dev server does not type-check, so this can fail on a tree',
+            'that `npm run dev` serves quite happily.'
+        )
+    }
+
+    Write-Good 'dist/ built.'
+}
+
+<#
+    Put a demo workspace in the local database, through the product's own API.
+
+    Delegated to `python -m scripts.seed_local_demo` rather than done here in
+    psql, and the reason is the same one that sends migrations through the
+    repository's runner: a seed written in SQL bypasses every rule the services
+    own -- the priority range, the workflow-state derivation of completed_at,
+    the issue-number allocation -- and so stops being evidence that the write
+    path works. The seeder speaks GraphQL over loopback and holds no database
+    credentials at all.
+
+    Run after the backend is healthy and before the frontend starts, so that
+    the first page the browser renders already has issues on it.
+
+    Its output is passed straight through, including the demo sign-in it
+    prints. That is the one credential this launcher deliberately shows: a
+    throwaway account, with a password committed in plain sight, in a database
+    `-Fresh` destroys. Every other credential here stays out of the terminal.
+
+    A failure warns rather than stops. The stack is up and usable at this
+    point, and an empty issue list is a worse outcome than no launch only if
+    you wanted the demo data; refusing to open a working application over it
+    would be the launcher substituting its priorities for the owner's.
+#>
+function Initialize-DemoData {
+    Write-Step 'Demo data'
+
+    $result = Invoke-Native -FilePath $VenvPython -Arguments @(
+        '-m', 'scripts.seed_local_demo', '--api-url', $BackendGraphqlUrl
+    ) -WorkingDirectory $RepoRoot
+
+    Write-Host $result.Output -ForegroundColor Gray
+
+    if ($result.ExitCode -ne 0) {
+        Write-Note 'Seeding failed. The stack is still starting; the issue list may be empty.'
+        return
+    }
+
+    Write-Good 'Local demo workspace ready.'
+}
+
 
 # ---------------------------------------------------------------------------
 # Modes
@@ -1409,8 +1724,9 @@ function Invoke-StartMode {
     Write-Detail ('Database:   ' + $DatabaseUrlForDisplay + '  (local container only)')
 
     Assert-Prerequisites
+    Install-BackendVirtualenv
 
-    if ($ResetDb) {
+    if ($Fresh) {
         Invoke-DatabaseReset
     } else {
         Assert-NoRunningStack
@@ -1424,6 +1740,7 @@ function Invoke-StartMode {
 
     Install-FrontendDependencies
     Assert-GraphqlContractCurrent
+    Build-FrontendBundle
 
     # --- backend -----------------------------------------------------------
 
@@ -1460,11 +1777,14 @@ function Invoke-StartMode {
 
     Write-Good ('Backend healthy at ' + $BackendHealthUrl)
 
+    Initialize-DemoData
+
     # --- frontend ----------------------------------------------------------
 
     Write-Step ('Frontend (' + $FrontendWindowTitle + ')')
 
-    $frontend = Start-ChildWindow -ScriptBody (New-FrontendWindowScript) -WorkingDirectory $FrontendDir
+    $frontend = Start-ChildWindow -ScriptBody (New-FrontendWindowScript -UseBuild:$Preview) `
+        -WorkingDirectory $FrontendDir
 
     Save-LauncherState -Processes @(
         (New-ProcessRecord -Role 'backend' -Process $backend),
@@ -1477,10 +1797,11 @@ function Invoke-StartMode {
         -TimeoutSeconds $FrontendReadyTimeoutSeconds -Process $frontend
 
     if ($frontendStatus -ne 'ok') {
-        $reason = 'The dev server did not answer within ' + $FrontendReadyTimeoutSeconds + ' seconds.'
+        $server = if ($Preview) { 'preview server' } else { 'dev server' }
+        $reason = 'The ' + $server + ' did not answer within ' + $FrontendReadyTimeoutSeconds + ' seconds.'
 
         if ($frontendStatus -eq 'process-exited') {
-            $reason = 'The frontend window exited before the dev server answered.'
+            $reason = 'The frontend window exited before the ' + $server + ' answered.'
         }
 
         Stop-Launcher -Reason $reason -Details @(
@@ -1506,16 +1827,47 @@ function Invoke-StartMode {
         Write-Good $AppUrl
     }
 
+    $servedBy = if ($Preview) { 'production build (npm run preview)' } else { 'dev server (npm run dev)' }
+
     Write-Host ''
     Write-Host '---------------------------------------------------------------' -ForegroundColor Green
     Write-Host '  Vector is running.' -ForegroundColor Green
     Write-Host ('    app       ' + $AppUrl) -ForegroundColor Green
-    Write-Host ('    api       http://127.0.0.1:' + $BackendPort + '/graphql') -ForegroundColor Green
+    Write-Host ('    api       ' + $BackendGraphqlUrl) -ForegroundColor Green
     Write-Host ('    database  ' + $DatabaseUrlForDisplay) -ForegroundColor Green
+    Write-Host ('    frontend  ' + $servedBy) -ForegroundColor Green
     Write-Host '' -ForegroundColor Green
-    Write-Host '  Stop it with:  .\run-vector-local.ps1 -Stop' -ForegroundColor Green
+    Write-Host '  Press Ctrl+C here to stop everything this launcher started.' -ForegroundColor Green
+    Write-Host '  Or close this window and stop it later with:' -ForegroundColor Green
+    Write-Host '    .\run-vector-local.ps1 -Stop' -ForegroundColor Green
     Write-Host '---------------------------------------------------------------' -ForegroundColor Green
     Write-Host ''
+
+    Wait-UntilInterrupted
+}
+
+<#
+    Hold the launcher in the foreground until Ctrl+C.
+
+    This is what makes Ctrl+C mean anything. The servers run in their own
+    windows, so without something to interrupt there is no process for the key
+    to reach and the only shutdown is `-Stop` at some later point -- easy to
+    forget, and a forgotten backend is what holds port 8000 against the next
+    run.
+
+    Sleeping in short slices rather than one long one: PowerShell delivers the
+    interrupt at a statement boundary, so a single `Start-Sleep -Seconds 3600`
+    would swallow Ctrl+C for as long as it felt like.
+
+    The caller's `finally` does the stopping. Nothing is torn down here,
+    because this function is also what a normal `exit` unwinds through.
+#>
+function Wait-UntilInterrupted {
+    $script:AttachedAndRunning = $true
+
+    while ($true) {
+        Start-Sleep -Milliseconds 500
+    }
 }
 
 <#
@@ -1551,14 +1903,45 @@ function Test-GraphqlThroughProxy {
 # Entry point
 # ---------------------------------------------------------------------------
 
-if ($Stop -and $ResetDb) {
-    Stop-Launcher -Reason '-Stop and -ResetDb do not go together.' -Details @(
-        '-Stop shuts the stack down. -ResetDb recreates the database and starts it.'
+if ($Stop -and $Fresh) {
+    Stop-Launcher -Reason '-Stop and -Fresh do not go together.' -Details @(
+        '-Stop shuts the stack down. -Fresh recreates the database and starts it.'
+    )
+}
+
+if ($Stop -and $Preview) {
+    Stop-Launcher -Reason '-Stop and -Preview do not go together.' -Details @(
+        '-Preview chooses how the frontend is served, which -Stop does not start.'
     )
 }
 
 if ($Stop) {
     Invoke-StopMode
-} else {
+    return
+}
+
+# Set inside Wait-UntilInterrupted, and read only by the finally below. It is
+# the difference between "the owner interrupted a running stack" and every
+# other way out of Invoke-StartMode.
+$script:AttachedAndRunning = $false
+
+try {
     Invoke-StartMode
+} finally {
+    # Ctrl+C, and only Ctrl+C.
+    #
+    # `finally` also runs for the `exit` inside Stop-Launcher, which is why
+    # this is gated rather than unconditional. Almost every one of those
+    # refusals ends by telling the owner to go and read the backend or
+    # frontend window, and a teardown here would close the window they were
+    # sent to read -- turning a diagnosis into a blank screen. Those paths
+    # leave the state file behind on purpose, and `-Stop` clears them.
+    if ($script:AttachedAndRunning) {
+        $script:AttachedAndRunning = $false
+
+        Write-Host ''
+        Write-Host 'Interrupted. Stopping what this launcher started...' -ForegroundColor Cyan
+
+        Invoke-StopMode
+    }
 }
