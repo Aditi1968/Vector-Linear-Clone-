@@ -318,6 +318,7 @@ def graphql_context(**services) -> VectorContext:
         "relation_service",
         "search_service",
         "github_service",
+        "slack_service",
     }
     environment = services.pop("environment", "test")
     tenant = services.pop("tenant", None) or FakeTenant()

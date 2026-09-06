@@ -483,6 +483,7 @@ export type Mutation = {
   projectTeamRemove: ProjectPayload;
   projectUpdate: ProjectPayload;
   register: RegisterPayload;
+  slackDisconnect: SlackDisconnectPayload;
   /** Create a team, seeded with the default workflow states. Requires the admin or owner role. */
   teamCreate: TeamPayload;
   /** Create a workspace. The authenticated caller becomes its owner. */
@@ -666,6 +667,11 @@ export type MutationRegisterArgs = {
 };
 
 
+export type MutationSlackDisconnectArgs = {
+  input: SlackDisconnectInput;
+};
+
+
 export type MutationTeamCreateArgs = {
   input: TeamCreateInput;
 };
@@ -803,6 +809,7 @@ export type Query = {
   project?: Maybe<Project>;
   projects: ProjectConnection;
   search: SearchResults;
+  slackIntegration: SlackIntegration;
   /** The teams in a workspace, each with the workflow states its issues can occupy. */
   teams: Array<Team>;
   /** Everyone in a workspace, with the role each holds. Members only. */
@@ -875,6 +882,11 @@ export type QuerySearchArgs = {
 };
 
 
+export type QuerySlackIntegrationArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
 export type QueryTeamsArgs = {
   workspaceSlug: Scalars['String']['input'];
 };
@@ -901,6 +913,27 @@ export type SearchResults = {
   issues: Array<Issue>;
   projects: Array<Project>;
 };
+
+export type SlackDisconnectInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type SlackDisconnectPayload = {
+  __typename?: 'SlackDisconnectPayload';
+  integration: SlackIntegration;
+};
+
+export type SlackIntegration = {
+  __typename?: 'SlackIntegration';
+  scopes: Array<Scalars['String']['output']>;
+  status: SlackIntegrationStatus;
+  teamName?: Maybe<Scalars['String']['output']>;
+};
+
+export type SlackIntegrationStatus =
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'UNCONFIGURED';
 
 export type Team = {
   __typename?: 'Team';

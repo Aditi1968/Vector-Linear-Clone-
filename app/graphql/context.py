@@ -27,6 +27,7 @@ from app.repositories.memberships import MembershipRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.relations import RelationRepository
 from app.repositories.sessions import SessionRepository
+from app.repositories.slack import SlackRepository
 from app.repositories.teams import TeamRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
@@ -41,6 +42,7 @@ from app.services.passwords import Argon2PasswordHasher
 from app.services.projects import ProjectService
 from app.services.relations import RelationService
 from app.services.search import SearchService
+from app.services.slack import DatabaseTokenStore, SlackService
 from app.services.teams import TeamService
 from app.services.workspaces import WorkspaceService
 
@@ -62,6 +64,7 @@ class VectorContext(BaseContext):
         relation_service: RelationService,
         search_service: SearchService,
         github_service: GithubService,
+        slack_service: SlackService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -82,6 +85,13 @@ class VectorContext(BaseContext):
         # `GithubAppConfig`, so there is no field a client can select a
         # credential through.
         self.github_service = github_service
+
+        # Reads a status and removes an installation, and does neither without
+        # an AuthorizedWorkspaceScope. The connect half of the integration is
+        # not reachable from here at all: an OAuth grant arrives through
+        # app/rest/slack.py, which builds its own instance of this service
+        # over the same pool.
+        self.slack_service = slack_service
 
         # Built here rather than in `get_context` so that a context assembled
         # by hand -- a test, a worker -- gets working loaders from the service
@@ -284,6 +294,16 @@ async def get_context() -> VectorContext:
             # the GraphQL layer and app/rest/github.py cannot disagree about
             # whether this deployment has a GitHub App.
             config=GithubAppConfig.from_settings(settings),
+        ),
+        slack_service=SlackService(
+            pool=pool,
+            repository=SlackRepository(),
+            token_store=DatabaseTokenStore(),
+            # Whether this deployment has a Slack app at all, resolved from
+            # settings here rather than read inside the service, so that one
+            # request cannot answer one field as configured and another as
+            # not. `settings` is already resolved above for `environment`.
+            configured=settings.slack_configured,
         ),
         # Built here rather than resolved here: nothing in this function
         # touches the database. Constructing a context is on the path of

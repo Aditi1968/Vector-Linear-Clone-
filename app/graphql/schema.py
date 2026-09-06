@@ -17,6 +17,7 @@ from app.graphql.mutations.labels import LabelMutation
 from app.graphql.mutations.memberships import MembershipMutation
 from app.graphql.mutations.projects import ProjectMutation
 from app.graphql.mutations.relations import RelationMutation
+from app.graphql.mutations.slack import SlackMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.cycles import CycleQuery
 from app.graphql.queries.github import GithubQuery
@@ -25,6 +26,7 @@ from app.graphql.queries.labels import LabelQuery
 from app.graphql.queries.memberships import MembershipQuery
 from app.graphql.queries.projects import ProjectQuery
 from app.graphql.queries.search import SearchQuery
+from app.graphql.queries.slack import SlackQuery
 from app.graphql.queries.teams import TeamQuery
 
 
@@ -63,6 +65,7 @@ QUERY_TYPES = (
     ProjectQuery,
     SearchQuery,
     GithubQuery,
+    SlackQuery,
 )
 
 Query = merge_types("Query", QUERY_TYPES)
@@ -76,6 +79,7 @@ MUTATION_TYPES = (
     ProjectMutation,
     RelationMutation,
     GithubMutation,
+    SlackMutation,
 )
 
 Mutation = merge_types("Mutation", MUTATION_TYPES)

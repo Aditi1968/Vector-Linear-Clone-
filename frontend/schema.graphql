@@ -446,6 +446,7 @@ type Mutation {
   issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
   issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
   githubDisconnect(input: GithubDisconnectInput!): GithubIntegration!
+  slackDisconnect(input: SlackDisconnectInput!): SlackDisconnectPayload!
 }
 
 type PageInfo {
@@ -579,6 +580,7 @@ type Query {
   projects(first: Int! = 50, after: String = null): ProjectConnection!
   search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
   githubIntegration(workspaceSlug: String!): GithubIntegration!
+  slackIntegration(workspaceSlug: String!): SlackIntegration!
 }
 
 input RegisterInput {
@@ -595,6 +597,26 @@ type RegisterPayload {
 type SearchResults {
   issues: [Issue!]!
   projects: [Project!]!
+}
+
+input SlackDisconnectInput {
+  workspaceSlug: String!
+}
+
+type SlackDisconnectPayload {
+  integration: SlackIntegration!
+}
+
+type SlackIntegration {
+  status: SlackIntegrationStatus!
+  teamName: String
+  scopes: [String!]!
+}
+
+enum SlackIntegrationStatus {
+  UNCONFIGURED
+  DISCONNECTED
+  CONNECTED
 }
 
 type Team {
