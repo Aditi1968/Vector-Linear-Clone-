@@ -12,6 +12,7 @@ from app.graphql.mutations.auth import AuthMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.issues import Query as IssueQuery
+from app.graphql.queries.memberships import MembershipQuery
 from app.graphql.queries.teams import TeamQuery
 
 
@@ -29,7 +30,7 @@ from app.graphql.queries.teams import TeamQuery
 #
 # Tuple order is SDL field order, so it stays stable across exports and
 # `frontend/schema.graphql` does not churn.
-Query = merge_types("Query", (IssueQuery, AuthQuery, TeamQuery))
+Query = merge_types("Query", (IssueQuery, AuthQuery, TeamQuery, MembershipQuery))
 Mutation = merge_types("Mutation", (IssueMutation, AuthMutation))
 
 
@@ -40,7 +41,17 @@ Mutation = merge_types("Mutation", (IssueMutation, AuthMutation))
 # Adding a code here publishes every message that will ever be raised under
 # it, so a new entry is a decision about what clients may be told -- not a
 # convenience for surfacing a message that happens to be useful in a log.
-PUBLIC_ERROR_CODES = frozenset({"BAD_USER_INPUT"})
+#
+# UNAUTHENTICATED and NOT_FOUND are published because a client cannot act on
+# a masked error: "Internal server error" gives a browser no reason to send
+# the user to a login screen, and no reason to stop retrying. Both are safe
+# to publish because the messages raised under them are fixed strings that
+# describe the request rather than the server -- see
+# app.graphql.queries.memberships, which is the only module that raises
+# either, and note in particular that its NOT_FOUND message is deliberately
+# the same for a workspace that does not exist and one the viewer may not
+# see.
+PUBLIC_ERROR_CODES = frozenset({"BAD_USER_INPUT", "UNAUTHENTICATED", "NOT_FOUND"})
 
 # What a masked error says. Deliberately uninformative: an attacker must
 # not be able to tell a constraint violation from a connection failure from

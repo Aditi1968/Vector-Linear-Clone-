@@ -103,6 +103,8 @@ export type Query = {
   issue?: Maybe<Issue>;
   issues: IssueConnection;
   me?: Maybe<User>;
+  myWorkspace: WorkspaceMembership;
+  myWorkspaces: Array<WorkspaceMembership>;
   /** The teams in a workspace, each with the workflow states its issues can occupy. */
   teams: Array<Team>;
 };
@@ -116,6 +118,11 @@ export type QueryIssueArgs = {
 export type QueryIssuesArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
+};
+
+
+export type QueryMyWorkspaceArgs = {
+  slug: Scalars['String']['input'];
 };
 
 
@@ -179,3 +186,22 @@ export type WorkflowStateCategory =
   | 'COMPLETED'
   | 'STARTED'
   | 'UNSTARTED';
+
+export type Workspace = {
+  __typename?: 'Workspace';
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  slug: Scalars['String']['output'];
+};
+
+export type WorkspaceMembership = {
+  __typename?: 'WorkspaceMembership';
+  createdAt: Scalars['DateTime']['output'];
+  role: WorkspaceRole;
+  workspace: Workspace;
+};
+
+export type WorkspaceRole =
+  | 'ADMIN'
+  | 'MEMBER'
+  | 'OWNER';

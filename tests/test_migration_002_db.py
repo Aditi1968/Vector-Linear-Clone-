@@ -1699,13 +1699,14 @@ async def test_migration_status_reports_both_versions_applied_and_the_rest_pendi
     `migration_status` writes -- the ledger prologue creates the table and can
     adopt 001 -- so it needs a transaction as much as applying does.
 
-    The pending set is derived from the directory rather than written out,
-    and that is the whole point of the assertion. This fixture applies 001 and
-    002 and stops, so every later migration in the repository is pending by
-    construction; what is being checked is that the ledger and the directory
-    agree about which those are, not how many files the directory happens to
-    hold. Spelled as `== ()`, this test asserted that 002 was the last
-    migration anyone would ever write, and failed the day one arrived.
+    Pending was asserted as empty while 002 was the last migration in the
+    repository, and 004 made that false. It is derived from the directory
+    now: this fixture applies exactly 001 and 002, so every other file on
+    disk must come back pending. Naming the others by hand would make this
+    test fail on each branch that adds a migration rather than on one that
+    breaks the runner -- and it is the runner's bookkeeping that is under
+    test here, not the contents of `migrations/`, which
+    `test_phase1a2_gates.py` pins by hand on purpose.
     """
     async with connection.transaction():
         report = await migration_status(connection, migrations_dir=MIGRATIONS_DIR)
@@ -1716,11 +1717,13 @@ async def test_migration_status_reports_both_versions_applied_and_the_rest_pendi
     assert [item.state for item in report.applied] == [CHECKSUM_OK, CHECKSUM_OK]
     assert report.has_mismatch is False
 
-    assert [path.name for path in report.pending] == sorted(
+    expected_pending = sorted(
         path.name
         for path in MIGRATIONS_DIR.glob("*.sql")
-        if not path.name.startswith(tuple(applied_versions))
+        if path.name not in {MIGRATION_001.name, MIGRATION_002.name}
     )
+
+    assert [path.name for path in report.pending] == expected_pending
 
 
 async def test_re_applying_002_executes_nothing_and_changes_nothing(applied):

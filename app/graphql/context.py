@@ -8,12 +8,14 @@ from app.domain.auth import UserEntity
 from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
 from app.repositories.issues import IssueRepository
+from app.repositories.memberships import MembershipRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.teams import TeamRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.auth import AuthService
 from app.services.issues import IssueService
+from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
 from app.services.teams import TeamService
 from app.services.workspaces import WorkspaceService
@@ -28,6 +30,7 @@ class VectorContext(BaseContext):
         auth_service: AuthService,
         team_service: TeamService,
         workspace_service: WorkspaceService,
+        membership_service: MembershipService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -35,6 +38,7 @@ class VectorContext(BaseContext):
 
         self.issue_service = issue_service
         self.auth_service = auth_service
+        self.membership_service = membership_service
 
         # The same two service objects `tenant` resolves through, exposed
         # directly for the resolvers that ask about teams and workspaces as
@@ -118,6 +122,10 @@ async def get_context() -> VectorContext:
         issue_service=IssueService(
             pool=pool,
             repository=IssueRepository(),
+        ),
+        membership_service=MembershipService(
+            pool=pool,
+            repository=MembershipRepository(),
         ),
         auth_service=AuthService(
             pool=pool,

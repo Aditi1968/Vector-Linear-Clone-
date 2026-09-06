@@ -262,6 +262,7 @@ async def wired(postgres_dsn):
                     # tenancy path only; no resolver it reaches resolves a
                     # viewer.
                     auth_service=None,
+                    membership_service=None,
                     team_service=team_service,
                     workspace_service=workspace_service,
                     environment="test",

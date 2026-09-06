@@ -103,6 +103,24 @@ const SHARED = {
    * that never existed outside the type system.
    */
   useTypeImports: true,
+
+  /*
+   * A string-literal union per GraphQL enum, because `erasableSyntaxOnly`
+   * is on in tsconfig.app.json.
+   *
+   * The default emits a TypeScript `enum`, which is one of the constructs
+   * that setting forbids: an `enum` is not type-only syntax, it compiles to
+   * a runtime object, and `tsc -b` refuses it with TS1294. The first enum
+   * the backend declared (`WorkspaceRole`) is what surfaced this, and it
+   * failed generation-then-typecheck rather than at generation time, so the
+   * setting is recorded here next to the reason.
+   *
+   * `enumsAsConst` would satisfy the same rule and is not chosen: it emits
+   * a value the bundler has to keep, to describe a set that only ever
+   * arrives as a string on the wire. A union costs nothing at runtime and
+   * narrows in a `switch` exactly as an enum does.
+   */
+  enumsAsTypes: true,
 }
 
 const config: CodegenConfig = {

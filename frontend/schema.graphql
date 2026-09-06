@@ -63,6 +63,8 @@ type Query {
   The teams in a workspace, each with the workflow states its issues can occupy.
   """
   teams(workspaceSlug: String!): [Team!]!
+  myWorkspaces: [WorkspaceMembership!]!
+  myWorkspace(slug: String!): WorkspaceMembership!
 }
 
 input RegisterInput {
@@ -124,4 +126,22 @@ enum WorkflowStateCategory {
   STARTED
   COMPLETED
   CANCELED
+}
+
+type Workspace {
+  id: UUID!
+  slug: String!
+  name: String!
+}
+
+type WorkspaceMembership {
+  workspace: Workspace!
+  role: WorkspaceRole!
+  createdAt: DateTime!
+}
+
+enum WorkspaceRole {
+  MEMBER
+  ADMIN
+  OWNER
 }

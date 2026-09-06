@@ -58,15 +58,16 @@ TEAM_WORKFLOWS_MIGRATION = MIGRATIONS_DIR / "005_team_workflows.sql"
 # Every migration in the repository, in ledger order. Asserted as an exact
 # list rather than a subset; see `test_no_second_migration_appeared`.
 #
-# The numbering has a hole in it: 004 is reserved for work in progress on
-# another branch, and 005 claimed its number ahead of time so that two
-# branches could not both land as the same version. A gap is a scheduling
-# fact, not a defect -- the runner keys the ledger on the filename prefix and
-# never assumes the versions are contiguous.
+# Stated by hand, deliberately. This is the one place the set of migrations
+# is written out rather than globbed, so adding a migration means editing
+# this line, which means the diff of any branch that adds one says so where a
+# reviewer reads it. Deriving it from the directory would make the assertion
+# in `test_no_second_migration_appeared` compare a glob against itself.
 EXPECTED_MIGRATIONS = [
     "001_issues.sql",
     "002_tenancy.sql",
     "003_auth.sql",
+    "004_membership.sql",
     "005_team_workflows.sql",
 ]
 
