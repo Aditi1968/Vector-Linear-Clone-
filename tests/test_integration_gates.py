@@ -31,6 +31,7 @@ No database, no Docker, no fixtures.
 
 import ast
 import importlib
+import inspect
 import pkgutil
 from dataclasses import fields, is_dataclass
 from pathlib import Path
@@ -310,3 +311,59 @@ def _domain_module(entity_name: str) -> str:
     )
 
     return known[entity_name]
+
+
+# --------------------------------------------------------------------------
+# 4. The real context factory actually builds
+# --------------------------------------------------------------------------
+
+
+async def test_get_context_constructs_every_service_it_declares(monkeypatch):
+    """`get_context` runs, and the object it returns is fully wired.
+
+    The gap this closes is narrow and was reached three times in one
+    afternoon. `tests/test_graphql_router.py` asserts that `get_context()`
+    RAISES without a pool -- which it does, at `get_pool()`, on the first
+    line, before a single service is constructed. So the ~50 lines below
+    that line, where every service in the application is assembled, were
+    executed by nothing in the suite. A missing constructor argument, a
+    keyword typo, or a call left unbalanced by a merge would all pass every
+    gate here and fail on the first real request as "Internal server error",
+    because the schema masks whatever `get_context` raises.
+
+    No database is needed. `get_context` never touches the pool it is given
+    -- it hands the object to the services and returns -- so a sentinel
+    reaches every construction. `get_pool()` is the only thing standing
+    between this test and the code it covers, so the module global it reads
+    is what gets substituted.
+
+    The assertion is over the DECLARED parameters rather than a hand-written
+    list of service names. A list here would be a second inventory to keep
+    in step with `VectorContext.__init__`, and the one that drifts is the
+    one nobody re-read -- which is the failure this file exists to catch,
+    not to reproduce.
+    """
+    import app.db
+    from app.graphql.context import VectorContext, get_context
+
+    # monkeypatch rather than assignment and a `finally`: it restores the
+    # global however this test leaves, and it stores a sentinel in a slot
+    # annotated `asyncpg.Pool | None` without needing a type suppression --
+    # which `test_phase1a2_gates.py` refuses to see a new one of.
+    monkeypatch.setattr(app.db, "_pool", object())
+
+    context = await get_context()
+
+    assert isinstance(context, VectorContext)
+
+    declared = [
+        name
+        for name in inspect.signature(VectorContext.__init__).parameters
+        if name != "self"
+    ]
+    missing = [name for name in declared if getattr(context, name, None) is None]
+
+    assert not missing, (
+        f"get_context built a VectorContext with nothing in {missing}. "
+        "Every declared collaborator must be constructed there."
+    )
