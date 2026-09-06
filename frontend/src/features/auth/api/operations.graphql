@@ -1,0 +1,117 @@
+# Every GraphQL document the auth feature sends.
+#
+# The source; `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`. Edit here, never there.
+#
+# None of these carry a token. The session is an opaque HttpOnly cookie the
+# backend sets in a `Set-Cookie` header (`app/graphql/mutations/auth.py`), so
+# there is nothing for a document to select and nothing for JavaScript to
+# store -- which is the property that makes an XSS on this origin unable to
+# steal a session.
+#
+# Cost against the backend's 1000-point complexity budget is negligible for
+# all five: `me` and the payloads return one object, and `myWorkspaces`
+# declares no `first`/`last` argument so `app/graphql/limits.py` charges it a
+# cardinality of one rather than the assumed page size.
+
+# The viewer, as every screen that shows "who am I" needs them.
+#
+# A fragment so the three documents that return a `User` -- `Me`, `Register`,
+# `Login` -- select identically. That they do is load-bearing: `register` and
+# `login` write their user into the same normalised `User` entity that `Me`
+# reads, so a field selected by one and not the others would leave the cache
+# holding an incomplete entity and the next read of `Me` returning null for it.
+#
+# `createdAt`/`updatedAt` are deliberately absent. Nothing signed-out or
+# signing-in displays them, and a field nobody renders is a field that still
+# has to keep being correct.
+fragment ViewerFields on User {
+  id
+  email
+  name
+}
+
+# Who is signed in, or nobody.
+#
+# `me` is nullable and null is the ordinary anonymous answer, not an error --
+# the resolver says so at length. That is what lets one query serve both the
+# public pages and the guards without either special-casing a failure.
+query Me {
+  me {
+    ...ViewerFields
+  }
+}
+
+# Which workspaces the viewer belongs to.
+#
+# Asked only to route after sign-in: no membership means onboarding, any
+# membership means a workspace. `slug` is what a workspace-scoped URL is
+# built from; `name` is what the destination is called if we ever have to
+# name it. Requires a session -- see ../useSignedInDestination for why it is
+# skipped while the viewer is unknown.
+query MyWorkspaces {
+  myWorkspaces {
+    role
+    workspace {
+      id
+      slug
+      name
+    }
+  }
+}
+
+# Create an account and start a session.
+#
+# Both failure channels are selected because the server uses both and they
+# mean different things: `errors` inside the payload is expected input being
+# rejected (`field`/`code`/`message`, one entry per violation), while a
+# top-level GraphQL error is an outage or a bug and arrives as a rejected
+# promise. A client reading only one either drops the validation feedback or
+# reports a database failure as a bad email.
+mutation Register($input: RegisterInput!) {
+  register(input: $input) {
+    user {
+      ...ViewerFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Exchange credentials for a session.
+#
+# The only `errors` entry this can produce is `credentials/INVALID_CREDENTIALS`
+# -- the backend refuses to say which half was wrong, because a client that
+# could tell would be an account-enumeration oracle. The form therefore has no
+# field to attach it to and shows it above the inputs.
+mutation Login($input: LoginInput!) {
+  login(input: $input) {
+    user {
+      ...ViewerFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# End the session.
+#
+# `signedOut` is true whether or not there was a session to end, so there is
+# no failure case to branch on -- which is why ../useLogout clears the cache
+# in a `finally` rather than on success.
+mutation Logout {
+  logout {
+    signedOut
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
