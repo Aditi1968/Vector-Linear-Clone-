@@ -138,15 +138,14 @@ WHERE schemaname = 'public'
 
 # Extensions the migrations installed, dropped the same way and for the same
 # reason. A table is not the only thing a migration creates: 008 installs
-# btree_gist, and `CREATE EXTENSION` is not idempotent -- the linter forbids
-# the IF NOT EXISTS spelling outright, because "already installed" is not
-# "installed at the version this migration was written against".
+# btree_gist for `cycles_no_overlap`.
 #
-# So an extension surviving a reset makes the SECOND db file in a session fail
-# inside 008 with `extension "btree_gist" already exists`, which reads as a
-# broken migration and is really a dirty database. Dropping tables but not
-# extensions left the reset half-done in a way nothing noticed until a
-# migration first needed one.
+# 008 spells that `CREATE EXTENSION IF NOT EXISTS`, so an extension surviving
+# a reset would no longer break the next db file -- but dropping it is what
+# makes each file exercise the real install rather than the skip. Left
+# behind, only the FIRST db file in a session ever creates the extension and
+# every file after it takes the NOTICE path, so a migration that could not
+# install btree_gist at all would still look green in all but one file.
 #
 # `plpgsql` is excluded because it is not a migration's doing: it ships in
 # template1, so every database has it before any migration runs, and dropping

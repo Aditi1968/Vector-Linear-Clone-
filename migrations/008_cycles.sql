@@ -47,17 +47,35 @@
 -- would forbid two DIFFERENT teams from running cycles in the same
 -- fortnight, which is the normal state of a workspace rather than an error.
 --
--- Bare, not IF NOT EXISTS: tests/test_migration_lint.py rejects the guarded
--- spelling for every statement including this one, on the grounds that
--- "already installed" is not "installed at the version and schema this
--- migration was written against". The ledger owns idempotency.
+-- Guarded, and this is the only statement in the repository allowed to be.
+-- Rule 2 of tests/test_migration_lint.py bans defensive DDL because a guard
+-- reports success without establishing that the existing object matches the
+-- one the migration describes -- but an extension has no shape for the guard
+-- to hide. It is present or absent, and neither spelling pins a version, so
+-- there is no mismatch for IF NOT EXISTS to mask. `find_if_not_exists`
+-- carries the full argument; the exemption is anchored to CREATE EXTENSION
+-- alone, and DROP EXTENSION IF EXISTS is still refused.
 --
--- btree_gist is a trusted extension on PostgreSQL 13+, so this wants the
+-- Bare would be actively wrong here rather than merely stricter. It fails
+-- outright, and permanently, against any database where btree_gist is
+-- already installed -- by a platform default, another tool, or an operator
+-- installing it out of band -- because the ledger never records a migration
+-- that errored. Verified against postgres:18 with the extension present and
+-- a role holding no CREATE privilege on the database:
+--
+--     CREATE EXTENSION btree_gist         -> ERROR: already exists
+--     CREATE EXTENSION IF NOT EXISTS ...  -> NOTICE, skipping
+--
+-- The guarded form short-circuits before the privilege check, which is what
+-- lets this run under the unprivileged application role a managed Postgres
+-- hands out, on a database where the platform pre-installed the extension.
+--
+-- btree_gist is trusted on PostgreSQL 13+, so installing it fresh wants the
 -- database owner rather than a superuser. It is also transactional -- unlike
 -- a value added by `ALTER TYPE`, an extension can be created and USED in the
 -- same transaction, which is what lets the constraint below be declared in
 -- this same file without splitting it in two.
-CREATE EXTENSION btree_gist;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 
 CREATE TABLE cycles (

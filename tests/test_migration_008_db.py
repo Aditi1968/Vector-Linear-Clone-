@@ -85,6 +85,33 @@ async def connection(postgres_dsn):
         await connection.close()
 
 
+async def test_008_applies_to_a_database_that_already_has_btree_gist(postgres_dsn):
+    """The reason `CREATE EXTENSION` here is guarded.
+
+    A managed Postgres may ship btree_gist pre-installed, and an operator
+    evaluating it installs it by hand. Bare `CREATE EXTENSION` fails on such
+    a database with `extension "btree_gist" already exists`, and because the
+    runner never records a migration that errored, it fails there *every*
+    time -- 008 could never be applied at all.
+
+    So the extension is installed here before the chain runs, which is the
+    one starting state the rest of this file's fixture deliberately clears.
+    """
+    connection = await asyncpg.connect(postgres_dsn)
+
+    try:
+        await reset_schema(connection)
+        await connection.execute("CREATE EXTENSION btree_gist")
+
+        # The assertion is that this does not raise.
+        applied = await apply_all_migrations(connection)
+
+        assert "008_cycles.sql" in applied
+        assert await connection.fetchval("SELECT to_regclass('public.cycles')")
+    finally:
+        await connection.close()
+
+
 @pytest.fixture
 async def sibling_team(connection) -> asyncpg.Connection:
     """A second team in the bootstrap workspace, with a board of its own.
