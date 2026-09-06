@@ -74,7 +74,10 @@ describe('opening an issue beside the list', () => {
     expect(issueRows()).toHaveLength(2)
 
     const panel = inspector()
-    expect(within(panel).getByRole('heading', { level: 2 })).toHaveTextContent('ENG-1')
+    // By name, not "the level-2 heading": each collaboration panel titles its
+    // own section with one too, so the inspector holds several and the
+    // identifier is the one this test is about.
+    expect(within(panel).getByRole('heading', { name: 'ENG-1' })).toBeInTheDocument()
     expect(within(panel).getByRole('textbox', { name: 'Title' })).toHaveValue('Alpha')
     expect(within(panel).getByRole('textbox', { name: 'Description' })).toHaveValue(
       'The redirect loops.',

@@ -1,0 +1,377 @@
+# Every GraphQL document the collaboration panels send.
+#
+# This file is the source. `npm run graphql:codegen` compiles it against
+# `schema.graphql` into `src/generated/operations.ts`. Edit here, never there.
+#
+# ================================================================
+# Page sizes are literals, deliberately
+# ================================================================
+#
+# `app/graphql/limits.py` refuses a document over `MAX_COMPLEXITY = 1000`
+# during *validation*, before a resolver runs. A list field costs
+# `page size x fields selected below it`, and the page size is read out of
+# the document -- where a GraphQL variable has no value yet, so `first: $n`
+# is charged at `ASSUMED_PAGE_SIZE = 100` however small a number would have
+# been sent. `src/features/issues/api/operations.graphql` documents the
+# measurements; the rule inherited here is: `after` is a variable, `first`
+# never is.
+#
+# Each document below states its own cost. They are all comfortably inside
+# the budget, which is what leaves room for A6's issue detail view to run
+# several of these panels on one screen -- separate documents, so separate
+# budgets, which is the other reason each panel queries for itself rather
+# than sharing one large document.
+#
+# ================================================================
+# Why every panel re-queries `issue(workspaceSlug:, id:)`
+# ================================================================
+#
+# The panels are mounted by a view that has already loaded the issue, so this
+# looks like four redundant round trips. It is not, and the alternative is
+# worse: a panel that took its data as props could only ever be as fresh as
+# whoever rendered it, and could not update its own cache after a mutation
+# without reaching into a document it does not own. Selecting `id` on the
+# issue in every one of these means Apollo normalises them all onto the same
+# `Issue:<uuid>` entry, so a label attached here appears on the detail
+# header without either component knowing the other exists.
+
+fragment CommentFields on Comment {
+  id
+  authorId
+  body
+  createdAt
+}
+
+fragment LabelFields on Label {
+  id
+  name
+  color
+}
+
+# The parent/child/relation target selection.
+#
+# `IssueSummary` is not `Issue`: it has no `identifier`, so these rows are
+# named by title. `completedAt` is here because a completed blocker reads
+# very differently from an open one, and that is the whole point of showing
+# a blocking relation at all.
+#
+# `createdAt` is not rendered anywhere. It is selected because it is the key
+# the server sorts `children` by (`ORDER BY child.created_at DESC` in
+# `app/repositories/relations.py`), and ../api/cache.ts needs it to insert a
+# newly adopted sub-issue where the server would have put it rather than at
+# whichever end is convenient.
+fragment IssueSummaryFields on IssueSummary {
+  id
+  title
+  completedAt
+  createdAt
+}
+
+# One page of an issue's comments, oldest first as the server returns them.
+#
+# Cost: 1 x (1 + 20 x (4 + 2)) = 121 of 1000.
+query IssueComments($workspaceSlug: String!, $issueId: UUID!, $after: String) {
+  issue(workspaceSlug: $workspaceSlug, id: $issueId) {
+    id
+    comments(first: 20, after: $after) {
+      nodes {
+        ...CommentFields
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+
+# Who wrote what, and who is reading.
+#
+# A separate document from `IssueComments` on purpose. It is the answer to a
+# question about the *workspace*, not about this issue, so it is fetched once
+# and shared by every thread the session opens -- and, more practically, a
+# `fetchMore` of the comment thread would otherwise re-send the whole member
+# list with every page.
+#
+# `Comment` carries an `authorId` and no author object, so names are resolved
+# through `workspaceMembers` here rather than by the server. A comment whose
+# author is not in the list -- someone since removed from the workspace --
+# renders as an unnamed author rather than as an error; see CommentsPanel.
+#
+# `me` is nullable, and that nullability is load-bearing: it is what decides
+# whether a comment gets a delete control. There is no comment *edit*
+# mutation in this schema, so there is no edit affordance anywhere in this
+# feature. Cost: 1 x 4 = 4.
+query CommentAuthors($workspaceSlug: String!) {
+  me {
+    id
+  }
+  workspaceMembers(workspaceSlug: $workspaceSlug) {
+    userId
+    name
+    email
+  }
+}
+
+# Post a comment.
+#
+# Both failure channels are selected because the server uses both: `errors`
+# inside the payload is expected user input being rejected (an empty body),
+# and arrives inside `data` over an HTTP 200; anything else is a top-level
+# GraphQL error and arrives as a rejected promise.
+mutation CommentCreate($input: CommentCreateInput!) {
+  commentCreate(input: $input) {
+    comment {
+      ...CommentFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Withdraw a comment.
+#
+# The payload carries the id and not the comment, which is the correct shape
+# for a delete and is what ../api/cache.ts removes from the thread.
+mutation CommentDelete($input: CommentDeleteInput!) {
+  commentDelete(input: $input) {
+    deletedCommentId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# The labels currently on an issue. Cost: 1 x (1 + 3) = 4.
+query IssueLabels($workspaceSlug: String!, $issueId: UUID!) {
+  issue(workspaceSlug: $workspaceSlug, id: $issueId) {
+    id
+    labels {
+      ...LabelFields
+    }
+  }
+}
+
+# Every label in the workspace, for the picker. Cost: 50 x (3 + 2) = 250.
+query WorkspaceLabels($workspaceSlug: String!, $after: String) {
+  labels(workspaceSlug: $workspaceSlug, first: 50, after: $after) {
+    nodes {
+      ...LabelFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# Attach and detach both return the whole issue, and both select `labels` on
+# it. That is what makes the cache update automatic: Apollo writes the
+# returned `labels` onto the same normalised `Issue:<uuid>` the panel is
+# watching, and every component reading that issue's labels re-renders. There
+# is no hand-written cache update for either, and adding one would be a
+# second, competing source of truth.
+mutation IssueLabelAttach($input: IssueLabelInput!) {
+  issueLabelAttach(input: $input) {
+    issue {
+      id
+      labels {
+        ...LabelFields
+      }
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation IssueLabelDetach($input: IssueLabelInput!) {
+  issueLabelDetach(input: $input) {
+    issue {
+      id
+      labels {
+        ...LabelFields
+      }
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Create a label the workspace does not have yet.
+#
+# Returns only the label, so the picker's cached list is updated by hand in
+# ../api/cache.ts. The panel then attaches it in a second mutation -- there
+# is no create-and-attach operation, and inventing a client-side one that
+# pretended to be atomic would be a lie about what the server did.
+mutation LabelCreate($input: LabelCreateInput!) {
+  labelCreate(input: $input) {
+    label {
+      ...LabelFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# One page of an issue's relations. Cost: 1 x (1 + 10 x (2 + 3 + 2)) = 71.
+query IssueRelations($workspaceSlug: String!, $issueId: UUID!, $after: String) {
+  issue(workspaceSlug: $workspaceSlug, id: $issueId) {
+    id
+    relations(first: 10, after: $after) {
+      nodes {
+        id
+        type
+        issue {
+          ...IssueSummaryFields
+        }
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+
+# Link two issues.
+#
+# The payload carries the relation and not the issue, so the new row is
+# written into the watched connection by hand -- see ../api/cache.ts.
+mutation IssueRelationCreate($input: IssueRelationCreateInput!) {
+  issueRelationCreate(input: $input) {
+    relation {
+      id
+      type
+      issue {
+        ...IssueSummaryFields
+      }
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation IssueRelationDelete($input: IssueRelationDeleteInput!) {
+  issueRelationDelete(input: $input) {
+    deletedRelationId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# An issue's place in the hierarchy: the one above, and the page below.
+#
+# Cost: 1 x (1 + 3 + 10 x (3 + 2)) = 54.
+query IssueSubIssues($workspaceSlug: String!, $issueId: UUID!, $after: String) {
+  issue(workspaceSlug: $workspaceSlug, id: $issueId) {
+    id
+    parent {
+      ...IssueSummaryFields
+    }
+    children(first: 10, after: $after) {
+      nodes {
+        ...IssueSummaryFields
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+    }
+  }
+}
+
+# Set or clear a parent.
+#
+# Read the direction carefully, because one mutation serves two controls that
+# look nothing alike. `issueId` is always the *child* -- the issue whose
+# parent is changing -- so:
+#
+#   "choose this issue's parent"  ->  issueId = the issue on screen
+#   "add a sub-issue"             ->  issueId = the issue being adopted
+#
+# The payload returns the issue that changed, which is the child in both
+# cases. In the first, that is the issue the panel is watching and the
+# normalised write is enough. In the second it is somebody else, and the
+# panel's own `children` connection has to be updated by hand -- which is
+# exactly what ../api/cache.ts does, and why the payload selects `parent`
+# here: without it the returned child would be written back with no parent
+# and the cache would disagree with the server it just heard from.
+#
+# `title`, `completedAt` and `createdAt` are selected on the returned issue
+# for one reason: they are exactly `IssueSummaryFields` minus the typename,
+# and ../api/cache.ts builds the `IssueSummary` row it inserts into
+# `children` out of them. The two selections have to stay in step -- an
+# `IssueSummary` written with a field missing reads back as null and blanks
+# the row -- so if you add a field to that fragment, add it here too.
+mutation IssueSetParent($input: IssueSetParentInput!) {
+  issueSetParent(input: $input) {
+    issue {
+      id
+      title
+      completedAt
+      createdAt
+      parent {
+        ...IssueSummaryFields
+      }
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation IssueClearParent($input: IssueClearParentInput!) {
+  issueClearParent(input: $input) {
+    issue {
+      id
+      title
+      completedAt
+      createdAt
+      parent {
+        ...IssueSummaryFields
+      }
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Find an issue to relate or adopt.
+#
+# `search` and not `issues`: picking a relation target means naming one issue
+# out of a workspace's worth, and paging a list to find it is not a picker.
+# Cost: 20 x 3 = 60.
+query IssueSearch($workspaceSlug: String!, $query: String!) {
+  search(workspaceSlug: $workspaceSlug, query: $query, first: 20) {
+    issues {
+      id
+      identifier
+      title
+    }
+  }
+}

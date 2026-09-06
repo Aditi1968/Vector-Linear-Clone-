@@ -1,0 +1,376 @@
+/*
+ * Styles for the collaboration panels.
+ *
+ * Scoped as a CSS module and colocated with the feature. Every colour, space,
+ * radius and size comes from `src/styles/tokens.css` -- there is not one
+ * literal hex value below, which is what makes a theme change a change to the
+ * token file rather than a sweep through features.
+ *
+ * Deliberately absent, because `src/styles/base.css` already owns them:
+ * `box-sizing`, heading and list resets, form-control font inheritance, the
+ * `:focus-visible` ring, and the reduced-motion override. There is no
+ * `outline: none` anywhere here; the ring is global and overriding it locally
+ * is how a codebase ends up with a keyboard-invisible control.
+ *
+ * Also absent: buttons, tags, avatars, dialogs, empty and error states. Those
+ * are `src/components`.
+ */
+
+/* ----------------------------------------------------------------- panel */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-6) 0;
+}
+
+.panel + .panel {
+  border-top: var(--border-width) solid var(--color-border-subtle);
+}
+
+.panelHeader {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panelTitle {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+}
+
+.count {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-regular);
+}
+
+/*
+ * The live region.
+ *
+ * Not `VisuallyHidden`, which would be the obvious reach: the messages here
+ * are useful to everyone -- "Comment posted", "Blocked by 2 unfinished
+ * issues" -- so they are shown as well as announced. The region collapses to
+ * nothing when empty rather than reserving a line, because three of the four
+ * panels are silent most of the time.
+ */
+.announcement:empty {
+  display: none;
+}
+
+.announcement {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.loading {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ------------------------------------------------------------ shared bits */
+
+.formError {
+  margin: 0;
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+}
+
+.fieldLabel {
+  display: block;
+  margin-bottom: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.hint {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.field + .field {
+  margin-top: var(--space-5);
+}
+
+.muted {
+  flex: 1 1 auto;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+}
+
+.loadMore {
+  align-self: flex-start;
+}
+
+/* A completed issue on the far end of an edge. A word, not a colour: the
+ * distinction between a live blocker and a finished one is the whole reason
+ * the row is on screen. */
+.done {
+  flex: 0 0 auto;
+  padding: var(--space-1) var(--space-3);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-success-subtle);
+  color: var(--color-text-success);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+}
+
+/* ----------------------------------------------------------- issue rows */
+
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-2);
+  border-radius: var(--radius-md);
+}
+
+.row:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.rowLink {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowLink:hover {
+  text-decoration: underline;
+}
+
+.group + .group {
+  margin-top: var(--space-5);
+}
+
+.groupTitle {
+  margin: 0 0 var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+/*
+ * The blocked banner.
+ *
+ * Warning-toned, but the sentence says "Blocked by 2 unfinished issues" in
+ * words -- the tint reinforces the meaning and is never the only place it
+ * lives.
+ */
+.blocked {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-warning-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-warning-subtle);
+  color: var(--color-warning-text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.parentRow {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  padding: var(--space-3) var(--space-3) var(--space-3) var(--space-2);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+}
+
+/* --------------------------------------------------------------- labels */
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inlineForm {
+  padding-top: var(--space-4);
+  border-top: var(--border-width) solid var(--color-border-subtle);
+}
+
+.inlineFormRow {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.inlineFormRow > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------- comments */
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.comment {
+  display: flex;
+  gap: var(--space-5);
+  align-items: flex-start;
+}
+
+.commentBody {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.commentMeta {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.commentAuthor {
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.commentTime {
+  flex: 1 1 auto;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+/*
+ * The delete control is always in the DOM for a comment the reader owns, and
+ * only fades in on hover or focus. `opacity` and not `display`, because a
+ * control that is not rendered cannot be reached by Tab, and `:focus-within`
+ * is what brings it back for a keyboard user who has tabbed to it.
+ */
+.commentDelete {
+  flex: 0 0 auto;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.comment:hover .commentDelete,
+.comment:focus-within .commentDelete {
+  opacity: 1;
+}
+
+/* The body as typed. `pre-wrap` keeps the author's line breaks without this
+ * having to render markup from user input. */
+.commentText {
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+}
+
+.composer {
+  padding-top: var(--space-5);
+  border-top: var(--border-width) solid var(--color-border-subtle);
+}
+
+.composerActions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--space-4);
+}
+
+.confirmBody {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-subtle);
+  overflow-wrap: anywhere;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+}
+
+/* --------------------------------------------------------------- picker */
+
+.pickerControls {
+  margin-bottom: var(--space-5);
+}
+
+.pickerBusy {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6);
+}
+
+.pickerResults {
+  max-height: 18rem;
+  overflow-y: auto;
+}
+
+.pickerResult {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  width: 100%;
+  padding: var(--space-4) var(--space-5);
+  border: 0;
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.pickerResult:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.identifier {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.pickerResultTitle {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

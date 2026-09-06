@@ -1,69 +1,60 @@
 /**
- * PLACEHOLDER -- owned by the collaboration agent, not by this branch.
+ * Collaboration on an issue: comments, labels, relations and sub-issues.
  *
- * ================================================================
- * DELETE THIS FILE when the real `features/collaboration` lands.
- * ================================================================
+ * Four self-contained panels, meant to be mounted inside an issue detail view
+ * that passes two ids and nothing else:
  *
- * The issue inspector (`features/issues/components/IssueInspector.tsx`)
- * mounts four panels it does not own: labels, sub-issues, relations and
- * comments. Those are being built in parallel and do not exist on this
- * branch yet, so this module stands in for them and renders nothing at all.
+ *     import {
+ *       CommentsPanel,
+ *       LabelsPanel,
+ *       RelationsPanel,
+ *       SubIssuesPanel,
+ *     } from '../../features/collaboration'
  *
- * It exists so that this branch compiles and its gates run. It is not a
- * design and it is not an interface to negotiate over -- the collaboration
- * branch's own `index.ts` replaces this file wholesale, and the add/add
- * conflict at merge time is the intended signal: take theirs.
+ *     <LabelsPanel workspaceSlug={slug} issueId={id} />
+ *     <SubIssuesPanel workspaceSlug={slug} issueId={id} />
+ *     <RelationsPanel workspaceSlug={slug} issueId={id} />
+ *     <CommentsPanel workspaceSlug={slug} issueId={id} />
  *
- * The call the inspector makes, which is the whole of what this branch has
- * committed to:
+ * Every one of them takes exactly `{ workspaceSlug, issueId }`, both required
+ * strings, and owns everything else: its own queries, its own loading,
+ * empty, and error states, its own mutations and its own cache updates. There
+ * is no context to provide, no data to thread down, and no callback to wire
+ * up -- a panel that needed the host to refetch something would not be
+ * self-contained, it would be a component with a manual attached.
  *
- *     <LabelsPanel    issueId={issue.id} workspaceSlug={workspaceSlug} />
- *     <SubIssuesPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
- *     <RelationsPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
- *     <CommentsPanel  issueId={issue.id} workspaceSlug={workspaceSlug} />
+ * ## What the host has to provide
  *
- * One convention comes with the slot: each panel renders its own heading, at
- * level 3. The page's `<h1>` is "Issues" and the inspector's `<h2>` is the
- * issue title, so a panel heading at any other level breaks the outline.
+ * A router (the panels build issue links through `useAppPaths()`) and an
+ * Apollo client built with `createCache()` from `src/lib/graphql` -- the
+ * connection field policies live there, and without them "load more" writes
+ * pages into a cache field nothing is watching. `src/app/providers` and
+ * `src/test/render.tsx` both already do this.
  *
- * If the real panels need a different signature, change the four call sites
- * in IssueInspector.tsx; nothing else in the issues feature imports this.
+ * No `ToastProvider` is required. Each panel announces its own results
+ * through a `role="status"` region it renders itself, so mounting one does
+ * not oblige the host to have set up a toast region first.
+ *
+ * ## Heading level
+ *
+ * Each panel is a `<section>` titled by an `<h2>`. They are top-level
+ * sections of a view whose issue title is the `<h1>`.
+ *
+ * ## Comments cannot be edited
+ *
+ * The schema has `commentCreate` and `commentDelete` and no update. There is
+ * no edit affordance here and no "edited" marker, because nothing on the
+ * server sets `Comment.editedAt`. Do not add one to the host view either.
  */
 
-export interface CollaborationPanelProps {
-  /** The issue the panel is about. A UUID, as `Issue.id`. */
-  issueId: string
-  /**
-   * The workspace from the route.
-   *
-   * Passed even though every hook in this application can read it from the
-   * route itself, because the collaboration branch asked for it explicitly.
-   * The inspector reads it through `useWorkspaceSlug()` and hands the same
-   * value down, so the two cannot disagree about which tenant is on screen.
-   */
-  workspaceSlug: string
-}
+export { CommentsPanel } from './components/CommentsPanel'
+export type { CommentsPanelProps } from './components/CommentsPanel'
 
-/**
- * A panel, typed by what it accepts rather than by what these stubs use.
- *
- * The stubs take no argument at all -- a parameter they ignore is an
- * unused-variable error, and naming it `_props` only moves the argument to
- * the lint config -- but the *type* still declares the two props, so a call
- * site that passes the wrong thing fails here rather than when the real
- * panels land.
- */
-type CollaborationPanel = (props: CollaborationPanelProps) => null
+export { LabelsPanel } from './components/LabelsPanel'
+export type { LabelsPanelProps } from './components/LabelsPanel'
 
-/** Labels attached to this issue, and the control to attach more. */
-export const LabelsPanel: CollaborationPanel = () => null
+export { RelationsPanel } from './components/RelationsPanel'
+export type { RelationsPanelProps } from './components/RelationsPanel'
 
-/** This issue's children, and the control to add one. */
-export const SubIssuesPanel: CollaborationPanel = () => null
-
-/** Blocks / blocked by / related / duplicate. */
-export const RelationsPanel: CollaborationPanel = () => null
-
-/** The comment thread. */
-export const CommentsPanel: CollaborationPanel = () => null
+export { SubIssuesPanel } from './components/SubIssuesPanel'
+export type { SubIssuesPanelProps } from './components/SubIssuesPanel'
