@@ -25,7 +25,7 @@ from app.domain.pagination import IssuePage
 from app.graphql import limits
 from app.graphql.schema import MASKED_ERROR_MESSAGE, build_schema
 
-from tests.conftest import make_entity
+from tests.conftest import FakeTenant, make_entity
 
 
 ALL_ENVIRONMENTS: list[Environment] = ["development", "test", "production"]
@@ -72,15 +72,16 @@ mutation CreateIssue($input: IssueCreateInput!) {
 class Context:
     def __init__(self, issue_service):
         self.issue_service = issue_service
+        self.tenant = FakeTenant()
 
 
 class ExplodingIssueService:
     """Fails the way a driver or a bug does: an exception nobody expected."""
 
-    async def list(self, *, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None):
         raise RuntimeError(INTERNAL_MARKER)
 
-    async def create(self, *, title, description, priority):
+    async def create(self, *, scope, team_id, title, description, priority):
         raise RuntimeError(INTERNAL_MARKER)
 
 
@@ -92,7 +93,7 @@ class LeakyIssueService:
     decision to publish, so this must be masked exactly like a RuntimeError.
     """
 
-    async def list(self, *, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None):
         raise GraphQLError(
             INTERNAL_MARKER,
             extensions={"code": "DB_CONNECTION_FAILED", "statement": INTERNAL_MARKER},
@@ -105,10 +106,10 @@ class RejectingIssueService:
     def __init__(self, issues: list[ValidationIssue]):
         self._issues = issues
 
-    async def list(self, *, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None):
         raise ValidationError(self._issues)
 
-    async def create(self, *, title, description, priority):
+    async def create(self, *, scope, team_id, title, description, priority):
         raise ValidationError(self._issues)
 
 
@@ -116,7 +117,7 @@ class FakeIssueService:
     def __init__(self, page: IssuePage):
         self._page = page
 
-    async def list(self, *, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None):
         return self._page
 
 

@@ -12,11 +12,22 @@ import asyncpg
 import pytest
 
 from app.domain.issues import IssueEntity
+from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
 from app.services.issues import IssueService
 
 
 BASE_TIME = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+# The tenant for tests that need a scope but are not themselves about
+# tenancy. Deliberately NOT the bootstrap ids from migrations/002_tenancy.sql:
+# a test that passed only because the value happened to be the one the
+# migration seeds would be testing the constant, not the plumbing. Nothing
+# here reaches a database, so these ids need to exist nowhere.
+TEST_WORKSPACE_ID = UUID("00000000-0000-7000-8000-0000000000fa")
+TEST_TEAM_ID = UUID("00000000-0000-7000-8000-0000000000fb")
+
+TEST_SCOPE = WorkspaceScope(workspace_id=TEST_WORKSPACE_ID)
 
 # uuidv7() in migrations/001_issues.sql is native to PostgreSQL 18; 16 and 17
 # reject the migration outright, so the tag is pinned rather than floating.
@@ -121,9 +132,10 @@ class FakeIssueRepository:
         self.rows = rows if rows is not None else []
         self.list_calls: list[dict] = []
 
-    async def list(self, connection, *, limit, after_created_at, after_id):
+    async def list(self, connection, *, scope, limit, after_created_at, after_id):
         self.list_calls.append(
             {
+                "scope": scope,
                 "limit": limit,
                 "after_created_at": after_created_at,
                 "after_id": after_id,
@@ -131,6 +143,26 @@ class FakeIssueRepository:
         )
 
         return list(self.rows)
+
+
+class FakeTenant:
+    """The tenant seam the GraphQL layer reads, without a database.
+
+    Mirrors app/graphql/tenancy.RequestTenant. Kept in step with it by hand,
+    which is the cost of every fake -- the compensating test is
+    tests/test_issue_tenancy.py, which asserts the real resolvers pass what
+    they get from here straight through to the service.
+    """
+
+    def __init__(self, scope=TEST_SCOPE, team_id=TEST_TEAM_ID):
+        self._scope = scope
+        self._team_id = team_id
+
+    async def scope(self):
+        return self._scope
+
+    async def team_id(self, scope):
+        return self._team_id
 
 
 def as_record(entity: IssueEntity) -> dict:

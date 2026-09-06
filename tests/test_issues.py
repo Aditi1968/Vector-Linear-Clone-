@@ -5,7 +5,7 @@ import pytest
 from app.domain.errors import ValidationError
 from app.services.issues import IssueService
 
-from tests.conftest import ExplodingPool
+from tests.conftest import TEST_SCOPE, TEST_TEAM_ID, ExplodingPool
 
 
 async def test_empty_title_is_required(
@@ -13,7 +13,13 @@ async def test_empty_title_is_required(
     exploding_pool: ExplodingPool,
 ):
     with pytest.raises(ValidationError) as exc_info:
-        await issue_service.create(title="", description=None, priority=2)
+        await issue_service.create(
+            scope=TEST_SCOPE,
+            team_id=TEST_TEAM_ID,
+            title="",
+            description=None,
+            priority=2,
+        )
 
     issues = exc_info.value.issues
 
@@ -32,6 +38,8 @@ async def test_priority_out_of_range(
 ):
     with pytest.raises(ValidationError) as exc_info:
         await issue_service.create(
+            scope=TEST_SCOPE,
+            team_id=TEST_TEAM_ID,
             title="Valid title",
             description=None,
             priority=99,
@@ -50,6 +58,8 @@ async def test_priority_out_of_range(
 async def test_negative_priority_out_of_range(issue_service: IssueService):
     with pytest.raises(ValidationError) as exc_info:
         await issue_service.create(
+            scope=TEST_SCOPE,
+            team_id=TEST_TEAM_ID,
             title="Valid title",
             description=None,
             priority=-1,
@@ -67,7 +77,13 @@ async def test_multiple_failures_are_collected_in_order(
     exploding_pool: ExplodingPool,
 ):
     with pytest.raises(ValidationError) as exc_info:
-        await issue_service.create(title="", description=None, priority=99)
+        await issue_service.create(
+            scope=TEST_SCOPE,
+            team_id=TEST_TEAM_ID,
+            title="",
+            description=None,
+            priority=99,
+        )
 
     issues = exc_info.value.issues
 
@@ -85,6 +101,8 @@ async def test_multiple_failures_are_collected_in_order(
 async def test_title_too_long(issue_service: IssueService):
     with pytest.raises(ValidationError) as exc_info:
         await issue_service.create(
+            scope=TEST_SCOPE,
+            team_id=TEST_TEAM_ID,
             title="x" * 501,
             description=None,
             priority=2,
@@ -105,6 +123,8 @@ async def test_title_at_max_length_is_valid(issue_service: IssueService):
         # connection -- which the exploding pool refuses. Reaching the
         # acquire is exactly the proof that validation accepted the input.
         await issue_service.create(
+            scope=TEST_SCOPE,
+            team_id=TEST_TEAM_ID,
             title="x" * 500,
             description=None,
             priority=4,

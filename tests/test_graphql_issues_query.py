@@ -4,7 +4,7 @@ from app.domain.errors import ValidationError, ValidationIssue
 from app.domain.pagination import IssuePage, encode_issue_cursor
 from app.graphql.schema import build_schema
 
-from tests.conftest import make_entity
+from tests.conftest import TEST_SCOPE, FakeTenant, make_entity
 
 
 # Built directly rather than imported, so these tests need no DATABASE_URL.
@@ -47,6 +47,7 @@ query {
 class Context:
     def __init__(self, issue_service):
         self.issue_service = issue_service
+        self.tenant = FakeTenant()
 
 
 class FakeIssueService:
@@ -54,8 +55,8 @@ class FakeIssueService:
         self._page = page
         self.calls: list[dict] = []
 
-    async def list(self, *, first: int, after: str | None):
-        self.calls.append({"first": first, "after": after})
+    async def list(self, *, scope, first: int, after: str | None):
+        self.calls.append({"scope": scope, "first": first, "after": after})
 
         return self._page
 
@@ -64,12 +65,12 @@ class InvalidArgumentsService:
     def __init__(self, issues: list[ValidationIssue]):
         self._issues = issues
 
-    async def list(self, *, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None):
         raise ValidationError(self._issues)
 
 
 class BrokenIssueService:
-    async def list(self, *, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None):
         raise RuntimeError("connection reset by peer")
 
 
@@ -86,7 +87,7 @@ async def test_default_arguments_are_first_50_and_no_cursor():
     )
 
     assert result.errors is None
-    assert service.calls == [{"first": 50, "after": None}]
+    assert service.calls == [{"scope": TEST_SCOPE, "first": 50, "after": None}]
 
 
 async def test_explicit_first_is_forwarded():
@@ -99,7 +100,7 @@ async def test_explicit_first_is_forwarded():
     )
 
     assert result.errors is None
-    assert service.calls == [{"first": 2, "after": None}]
+    assert service.calls == [{"scope": TEST_SCOPE, "first": 2, "after": None}]
 
 
 async def test_cursor_is_forwarded_unchanged():
@@ -114,7 +115,7 @@ async def test_cursor_is_forwarded_unchanged():
     )
 
     assert result.errors is None
-    assert service.calls == [{"first": 10, "after": cursor}]
+    assert service.calls == [{"scope": TEST_SCOPE, "first": 10, "after": cursor}]
 
 
 async def test_domain_page_maps_onto_connection():

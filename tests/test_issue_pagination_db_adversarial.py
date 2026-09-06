@@ -6,9 +6,9 @@ that walk unbroken, each demonstrated by a mutant that file accepts:
 
 1. `ORDER BY created_at DESC` with the `id` tie-break deleted. On a freshly
    seeded ten-row table PostgreSQL has no statistics, estimates its way into
-   an Index Only Scan on `issues_created_at_id_idx` -- which is
-   `(created_at DESC, id DESC)` -- and hands back id-descending order that the
-   query never asked for. Run `ANALYZE` first, or take index scans away, and
+   an Index Only Scan on `issues_workspace_created_at_id_idx` -- which ends
+   in `(created_at DESC, id DESC)` -- and hands back id-descending order that
+   the query never asked for. Run `ANALYZE` first, or take index scans away, and
    the same mutant loses two rows out of ten. So the tie-break is proven by
    the plan, not by the test, and the test's own fixture is what keeps the
    plan favourable. This file therefore asserts the walk is identical under
@@ -44,17 +44,31 @@ import asyncpg
 import pytest
 
 from app.domain.pagination import IssuePage
+from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
 from app.services.issues import IssueService
 
 
 pytestmark = pytest.mark.db
 
-MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "001_issues.sql"
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+MIGRATION_001 = MIGRATIONS_DIR / "001_issues.sql"
+MIGRATION_002 = MIGRATIONS_DIR / "002_tenancy.sql"
+
+# The tenant 002 seeds, named in that file as literals precisely so a test can
+# assert against a constant. Every seed row here belongs to it: this file is
+# about which plan the server picks for one workspace's page, and a second
+# tenant would add rows without adding a question.
+BOOTSTRAP_WORKSPACE_ID = UUID("00000000-0000-7000-8000-000000000001")
+BOOTSTRAP_TEAM_ID = UUID("00000000-0000-7000-8000-000000000002")
+
+SCOPE = WorkspaceScope(workspace_id=BOOTSTRAP_WORKSPACE_ID)
 
 INSERT = """
     INSERT INTO issues (
         id,
+        workspace_id,
+        team_id,
         title,
         description,
         priority,
@@ -62,7 +76,7 @@ INSERT = """
         created_at,
         updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 """
 
 # Three splits the ten rows 3/3/3/1, which is what the ordering assertions
@@ -199,14 +213,27 @@ async def _seed(dsn: str, *, analyze: bool) -> None:
     connection = await asyncpg.connect(dsn)
 
     try:
+        # Dropped in dependency order: issues references teams references
+        # workspaces, and RESTRICT means a drop out of order fails rather
+        # than cascading.
         await connection.execute("DROP TABLE IF EXISTS issues")
+        await connection.execute("DROP TABLE IF EXISTS teams")
+        await connection.execute("DROP TABLE IF EXISTS workspaces")
         await connection.execute("DROP TABLE IF EXISTS schema_migrations")
-        await connection.execute(MIGRATION.read_text(encoding="utf-8"))
+        await connection.execute(MIGRATION_001.read_text(encoding="utf-8"))
+
+        # 002 as well as 001: the repository's SELECT leads with
+        # `workspace_id = $1`, and both the column and the bootstrap tenant
+        # the rows below are filed against arrive with it.
+        await connection.execute(MIGRATION_002.read_text(encoding="utf-8"))
+
         await connection.executemany(
             INSERT,
             [
                 (
                     row.id,
+                    BOOTSTRAP_WORKSPACE_ID,
+                    BOOTSTRAP_TEAM_ID,
                     row.title,
                     row.description,
                     row.priority,
@@ -250,7 +277,7 @@ async def _walk(service: IssueService, *, first: int) -> list[IssuePage]:
     after: str | None = None
 
     for _ in range(len(SEED) + 1):
-        page = await service.list(first=first, after=after)
+        page = await service.list(scope=SCOPE, first=first, after=after)
         pages.append(page)
 
         if not page.has_next_page:
@@ -312,8 +339,8 @@ async def test_the_paged_walk_is_identical_under_every_query_plan(postgres_dsn, 
     """Assertion: the ordering is the query's, not the plan's.
 
     An index whose declared order matches the sort can deliver that order
-    even when the SQL stopped asking for it -- and `issues_created_at_id_idx`
-    is exactly `(created_at DESC, id DESC)`. Walking the same rows with index
+    even when the SQL stopped asking for it -- and
+    `issues_workspace_created_at_id_idx` ends in `(created_at DESC, id DESC)`. Walking the same rows with index
     scans disabled forces the server to sort by what the query actually says,
     which is the only way this suite can tell the two apart.
     """
@@ -361,7 +388,9 @@ async def test_a_page_that_is_exactly_full_does_not_announce_another_page(
         # rows ran out on a later fetch: asking again returns nothing.
         assert [node.id for page in pages for node in page.nodes] == EXPECTED_IDS
 
-        beyond = await service.list(first=EXACT_PAGE_SIZE, after=final.end_cursor)
+        beyond = await service.list(
+            scope=SCOPE, first=EXACT_PAGE_SIZE, after=final.end_cursor
+        )
 
     assert beyond.nodes == []
     assert beyond.has_next_page is False

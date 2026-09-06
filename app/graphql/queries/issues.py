@@ -15,7 +15,14 @@ DEFAULT_FIRST = 50
 class Query:
     @strawberry.field
     async def issue(self, info: Info, id: UUID) -> IssueType | None:
-        entity = await info.context.issue_service.get_by_id(id)
+        # The workspace comes from the request, never from the document.
+        # app/graphql/tenancy.py holds where it comes from today and what
+        # replaces that. An issue in another workspace resolves to null --
+        # the same answer as an id that exists nowhere -- so the resolver
+        # cannot be used to ask whether someone else's issue exists.
+        scope = await info.context.tenant.scope()
+
+        entity = await info.context.issue_service.get_by_id(scope=scope, issue_id=id)
 
         if entity is None:
             return None
@@ -29,8 +36,14 @@ class Query:
         first: int = DEFAULT_FIRST,
         after: str | None = None,
     ) -> IssueConnection:
+        scope = await info.context.tenant.scope()
+
         try:
-            page = await info.context.issue_service.list(first=first, after=after)
+            page = await info.context.issue_service.list(
+                scope=scope,
+                first=first,
+                after=after,
+            )
         except ValidationError as exc:
             # Only expected pagination input errors are translated. Anything
             # else (asyncpg failures, bugs) propagates as a real execution

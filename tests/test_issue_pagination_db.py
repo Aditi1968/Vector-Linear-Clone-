@@ -38,17 +38,33 @@ import asyncpg
 import pytest
 
 from app.domain.pagination import IssuePage, decode_issue_cursor, encode_issue_cursor
+from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
 from app.services.issues import IssueService
 
 
 pytestmark = pytest.mark.db
 
-MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "001_issues.sql"
+MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
+MIGRATION_001 = MIGRATIONS_DIR / "001_issues.sql"
+MIGRATION_002 = MIGRATIONS_DIR / "002_tenancy.sql"
+
+# The tenant 002 seeds, written as literals rather than read back out of the
+# database: 002 names both rows in the file precisely so that a test can
+# assert against a constant instead of querying for the value it is about to
+# check. Every row in this file belongs to it, because this file is about
+# ordering within one workspace; cross-workspace behaviour is
+# tests/test_issue_tenancy_db.py.
+BOOTSTRAP_WORKSPACE_ID = UUID("00000000-0000-7000-8000-000000000001")
+BOOTSTRAP_TEAM_ID = UUID("00000000-0000-7000-8000-000000000002")
+
+SCOPE = WorkspaceScope(workspace_id=BOOTSTRAP_WORKSPACE_ID)
 
 INSERT = """
     INSERT INTO issues (
         id,
+        workspace_id,
+        team_id,
         title,
         description,
         priority,
@@ -56,7 +72,7 @@ INSERT = """
         created_at,
         updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 """
 
 # Small on purpose. At three rows a wrong page is readable at a glance, and
@@ -279,7 +295,7 @@ async def _walk(service: IssueService, *, first: int) -> list[IssuePage]:
     after: str | None = None
 
     for _ in range(len(SEED) + 1):
-        page = await service.list(first=first, after=after)
+        page = await service.list(scope=SCOPE, first=first, after=after)
         pages.append(page)
 
         if not page.has_next_page:
@@ -311,14 +327,29 @@ async def seeded(postgres_dsn):
     connection = await asyncpg.connect(postgres_dsn)
 
     try:
+        # Dropped in dependency order: issues references teams references
+        # workspaces, and RESTRICT means a drop out of order fails rather
+        # than cascading.
         await connection.execute("DROP TABLE IF EXISTS issues")
+        await connection.execute("DROP TABLE IF EXISTS teams")
+        await connection.execute("DROP TABLE IF EXISTS workspaces")
         await connection.execute("DROP TABLE IF EXISTS schema_migrations")
-        await connection.execute(MIGRATION.read_text(encoding="utf-8"))
+        await connection.execute(MIGRATION_001.read_text(encoding="utf-8"))
+
+        # 002 as well as 001, because the repository's SELECT now leads with
+        # `workspace_id = $1` and the column does not exist until this runs.
+        # It also seeds the bootstrap workspace and team the seed rows below
+        # are filed against, and replaces 001's keyset index with the
+        # workspace-prefixed one.
+        await connection.execute(MIGRATION_002.read_text(encoding="utf-8"))
+
         await connection.executemany(
             INSERT,
             [
                 (
                     row.id,
+                    BOOTSTRAP_WORKSPACE_ID,
+                    BOOTSTRAP_TEAM_ID,
                     row.title,
                     row.description,
                     row.priority,
@@ -334,10 +365,10 @@ async def seeded(postgres_dsn):
         #
         # A freshly created table has no statistics, and the planner's
         # default guess makes an Index Only Scan over
-        # issues_created_at_id_idx look cheapest. That index *is*
-        # (created_at DESC, id DESC), so it hands rows back already in the
-        # id tie-break order -- even for a query that has stopped asking for
-        # one. Deleting `, id DESC` from the repository's ORDER BY therefore
+        # issues_workspace_created_at_id_idx look cheapest. That index ends
+        # in (created_at DESC, id DESC), so within the one workspace it
+        # holds it hands rows back already in the id tie-break order -- even
+        # for a query that has stopped asking for one. Deleting `, id DESC` from the repository's ORDER BY therefore
         # changed nothing observable, and every assertion here passed against
         # an implementation with no tie-break at all. ANALYZE gives the
         # planner the real cardinality, it picks Seq Scan + Sort, and the
@@ -566,6 +597,7 @@ async def test_a_cursor_inside_a_timestamp_tie_resumes_at_the_next_tied_row(serv
     expected = EXPECTED[boundary : boundary + PAGE_SIZE]
 
     page = await service.list(
+        scope=SCOPE,
         first=PAGE_SIZE,
         after=encode_issue_cursor(resume_from.created_at, resume_from.id),
     )
@@ -648,7 +680,7 @@ async def test_paging_past_the_last_row_returns_an_empty_page(pages, service):
     it with the None. Pinned as the current behaviour, not adjusted to make a
     tidier assertion.
     """
-    page = await service.list(first=PAGE_SIZE, after=pages[-1].end_cursor)
+    page = await service.list(scope=SCOPE, first=PAGE_SIZE, after=pages[-1].end_cursor)
 
     assert page.nodes == []
     assert page.has_next_page is False

@@ -51,7 +51,7 @@ from app.http_limits import MAX_REQUEST_BODY_BYTES
 from app.main import create_app
 from app.rest.health import READINESS_TIMEOUT_SECONDS, router
 
-from tests.conftest import make_entity
+from tests.conftest import FakeTenant, make_entity
 from tests.test_settings import PLACEHOLDER_DSN, use_environment
 
 
@@ -106,7 +106,7 @@ class RecordingIssueService:
     def __init__(self):
         self.firsts: list[int] = []
 
-    async def list(self, *, first: int, after: str | None) -> IssuePage:
+    async def list(self, *, scope, first: int, after: str | None) -> IssuePage:
         self.firsts.append(first)
 
         return IssuePage(nodes=[make_entity(1)], has_next_page=False, end_cursor=None)
@@ -115,6 +115,7 @@ class RecordingIssueService:
 class Context:
     def __init__(self, issue_service):
         self.issue_service = issue_service
+        self.tenant = FakeTenant()
 
 
 def git_blob_sha1(path: Path) -> str:
@@ -204,7 +205,7 @@ async def test_batched_documents_are_refused_rather_than_amplified(
     service = RecordingIssueService()
     application = create_app()
     application.dependency_overrides[get_context] = lambda: VectorContext(
-        issue_service=service
+        issue_service=service, tenant=FakeTenant()
     )
 
     batch = [
@@ -234,7 +235,7 @@ async def test_an_internal_failure_is_masked_over_the_real_http_stack(
     marker = "asyncpg_dsn_leak_marker_4a91c7"
 
     class Exploding:
-        async def list(self, *, first, after):
+        async def list(self, *, scope, first, after):
             raise RuntimeError(marker)
 
     use_environment(
@@ -243,7 +244,7 @@ async def test_an_internal_failure_is_masked_over_the_real_http_stack(
 
     application = create_app()
     application.dependency_overrides[get_context] = lambda: VectorContext(
-        issue_service=Exploding()
+        issue_service=Exploding(), tenant=FakeTenant()
     )
 
     async with httpx.AsyncClient(

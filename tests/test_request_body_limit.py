@@ -22,7 +22,7 @@ from app.graphql.context import VectorContext, get_context
 from app.http_limits import MAX_REQUEST_BODY_BYTES
 from app.main import create_app
 
-from tests.conftest import make_entity
+from tests.conftest import FakeTenant, make_entity
 from tests.test_settings import PLACEHOLDER_DSN, use_environment
 
 
@@ -58,7 +58,7 @@ class RecordingIssueService:
     def __init__(self):
         self.calls = 0
 
-    async def list(self, *, first: int, after: str | None) -> IssuePage:
+    async def list(self, *, scope, first: int, after: str | None) -> IssuePage:
         self.calls += 1
 
         return IssuePage(
@@ -129,7 +129,7 @@ async def client(monkeypatch, tmp_path, recording_service):
 
     application = create_app()
     application.dependency_overrides[get_context] = lambda: VectorContext(
-        issue_service=recording_service
+        issue_service=recording_service, tenant=FakeTenant()
     )
 
     async with httpx.AsyncClient(

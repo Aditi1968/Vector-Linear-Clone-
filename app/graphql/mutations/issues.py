@@ -15,8 +15,18 @@ class Mutation:
         info: Info,
         input: IssueCreateInput,
     ) -> IssueCreatePayload:
+        # Resolved before the try, and outside it. Neither call raises
+        # ValidationError -- a missing workspace or an unprovisioned tenant
+        # is not something the client's input can be corrected to fix -- so
+        # catching them here would report a server-side gap as a field
+        # error on the input the client sent.
+        scope = await info.context.tenant.scope()
+        team_id = await info.context.tenant.team_id(scope)
+
         try:
             entity = await info.context.issue_service.create(
+                scope=scope,
+                team_id=team_id,
                 title=input.title,
                 description=input.description,
                 priority=input.priority,

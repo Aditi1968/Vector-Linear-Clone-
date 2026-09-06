@@ -1,12 +1,16 @@
 """Service-level pagination tests. No database involved."""
 
+from uuid import UUID
+
 import pytest
 
 from app.domain.errors import ValidationError
 from app.domain.pagination import decode_issue_cursor, encode_issue_cursor
+from app.domain.tenancy import WorkspaceScope
 from app.services.issues import IssueService
 
 from tests.conftest import (
+    TEST_SCOPE,
     ExplodingPool,
     FakeIssueRepository,
     FakePool,
@@ -28,7 +32,7 @@ async def test_invalid_first_fails_before_pool_acquire(first):
     service = IssueService(pool=pool, repository=repository)
 
     with pytest.raises(ValidationError) as exc_info:
-        await service.list(first=first, after=None)
+        await service.list(scope=TEST_SCOPE, first=first, after=None)
 
     issues = exc_info.value.issues
 
@@ -45,7 +49,7 @@ async def test_invalid_first_fails_before_pool_acquire(first):
 async def test_first_boundaries_are_accepted(first):
     service, pool, repository = build_service(rows=[])
 
-    page = await service.list(first=first, after=None)
+    page = await service.list(scope=TEST_SCOPE, first=first, after=None)
 
     assert page.nodes == []
     assert pool.acquire_count == 1
@@ -56,12 +60,13 @@ async def test_first_page_without_extra_row():
     rows = [make_entity(2), make_entity(1)]
     service, _, repository = build_service(rows)
 
-    page = await service.list(first=2, after=None)
+    page = await service.list(scope=TEST_SCOPE, first=2, after=None)
 
     assert len(page.nodes) == 2
     assert page.has_next_page is False
 
     assert repository.list_calls[0] == {
+        "scope": TEST_SCOPE,
         "limit": 3,
         "after_created_at": None,
         "after_id": None,
@@ -77,7 +82,7 @@ async def test_extra_row_sets_has_next_page_and_is_trimmed():
     rows = [make_entity(3), make_entity(2), make_entity(1)]
     service, _, repository = build_service(rows)
 
-    page = await service.list(first=2, after=None)
+    page = await service.list(scope=TEST_SCOPE, first=2, after=None)
 
     assert len(page.nodes) == 2
     assert page.has_next_page is True
@@ -98,7 +103,7 @@ async def test_extra_row_sets_has_next_page_and_is_trimmed():
 async def test_empty_result():
     service, _, _ = build_service(rows=[])
 
-    page = await service.list(first=10, after=None)
+    page = await service.list(scope=TEST_SCOPE, first=10, after=None)
 
     assert page.nodes == []
     assert page.has_next_page is False
@@ -111,9 +116,10 @@ async def test_after_cursor_is_decoded_and_passed_to_repository():
 
     service, _, repository = build_service(rows=[make_entity(1)])
 
-    await service.list(first=10, after=cursor)
+    await service.list(scope=TEST_SCOPE, first=10, after=cursor)
 
     assert repository.list_calls[0] == {
+        "scope": TEST_SCOPE,
         "limit": 11,
         "after_created_at": entity.created_at,
         "after_id": entity.id,
@@ -126,7 +132,7 @@ async def test_invalid_cursor_fails_before_repository_is_called():
     service = IssueService(pool=pool, repository=repository)
 
     with pytest.raises(ValidationError) as exc_info:
-        await service.list(first=10, after="not-a-valid-cursor")
+        await service.list(scope=TEST_SCOPE, first=10, after="not-a-valid-cursor")
 
     issues = exc_info.value.issues
 
@@ -139,12 +145,31 @@ async def test_invalid_cursor_fails_before_repository_is_called():
     assert repository.list_calls == []
 
 
+async def test_each_call_carries_its_own_workspace_to_the_repository():
+    """The service holds no workspace between calls and substitutes none.
+
+    One service instance, two workspaces, in sequence -- which is what a
+    worker looping over tenants does, and what a pooled or cached service
+    would do under two concurrent requests. An implementation that stored
+    the first scope, or fell back to a default, passes every other test in
+    this file: they all use one workspace.
+    """
+    other = WorkspaceScope(workspace_id=UUID("00000000-0000-7000-8000-0000000000fc"))
+
+    service, _, repository = build_service(rows=[])
+
+    await service.list(scope=TEST_SCOPE, first=1, after=None)
+    await service.list(scope=other, first=1, after=None)
+
+    assert [call["scope"] for call in repository.list_calls] == [TEST_SCOPE, other]
+
+
 async def test_first_and_cursor_errors_are_collected_together():
     pool = ExplodingPool()
     service = IssueService(pool=pool, repository=FakeIssueRepository())
 
     with pytest.raises(ValidationError) as exc_info:
-        await service.list(first=0, after="bad")
+        await service.list(scope=TEST_SCOPE, first=0, after="bad")
 
     fields = [issue.field for issue in exc_info.value.issues]
 

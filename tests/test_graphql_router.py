@@ -19,7 +19,7 @@ from app.graphql.context import get_context
 from app.graphql.router import build_graphql_router
 from app.graphql.schema import build_schema
 
-from tests.conftest import make_entity
+from tests.conftest import FakeTenant, make_entity
 
 
 ALL_ENVIRONMENTS: list[Environment] = ["development", "test", "production"]
@@ -51,6 +51,7 @@ query ListIssues {
 class Context:
     def __init__(self, issue_service):
         self.issue_service = issue_service
+        self.tenant = FakeTenant()
 
 
 class FakeIssueService:
@@ -59,7 +60,7 @@ class FakeIssueService:
     def __init__(self, page: IssuePage):
         self._page = page
 
-    async def list(self, *, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None):
         return self._page
 
 

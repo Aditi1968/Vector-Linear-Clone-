@@ -12,7 +12,7 @@ from app.graphql.schema import build_schema
 from app.repositories.issues import IssueRepository
 from app.services.issues import IssueService
 
-from tests.conftest import ExplodingPool
+from tests.conftest import TEST_SCOPE, TEST_TEAM_ID, ExplodingPool, FakeTenant
 
 
 # Built directly rather than imported, so these tests need no DATABASE_URL.
@@ -41,6 +41,7 @@ mutation CreateIssue($input: IssueCreateInput!) {
 class Context:
     def __init__(self, issue_service):
         self.issue_service = issue_service
+        self.tenant = FakeTenant()
 
 
 class FakeIssueService:
@@ -50,9 +51,17 @@ class FakeIssueService:
         self._entity = entity
         self.calls: list[dict] = []
 
-    async def create(self, *, title: str, description: str | None, priority: int):
+    async def create(
+        self, *, scope, team_id, title: str, description: str | None, priority: int
+    ):
         self.calls.append(
-            {"title": title, "description": description, "priority": priority}
+            {
+                "scope": scope,
+                "team_id": team_id,
+                "title": title,
+                "description": description,
+                "priority": priority,
+            }
         )
 
         return self._entity
@@ -61,7 +70,9 @@ class FakeIssueService:
 class BrokenIssueService:
     """Raises an unexpected failure, standing in for an asyncpg outage."""
 
-    async def create(self, *, title: str, description: str | None, priority: int):
+    async def create(
+        self, *, scope, team_id, title: str, description: str | None, priority: int
+    ):
         raise RuntimeError("connection reset by peer")
 
 
@@ -134,8 +145,16 @@ async def test_valid_input_returns_issue_and_empty_errors():
         }
     }
 
+    # The tenant reaches the service, and is the request's rather than the
+    # document's: nothing in the mutation above names a workspace or a team.
     assert service.calls == [
-        {"title": "A valid title", "description": "described", "priority": 2}
+        {
+            "scope": TEST_SCOPE,
+            "team_id": TEST_TEAM_ID,
+            "title": "A valid title",
+            "description": "described",
+            "priority": 2,
+        }
     ]
 
 

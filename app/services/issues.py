@@ -11,6 +11,7 @@ from app.domain.pagination import (
     decode_issue_cursor,
     encode_issue_cursor,
 )
+from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
 
 
@@ -30,6 +31,18 @@ class IssueService:
     Validation lives here rather than in the GraphQL layer so that REST,
     workers and internal jobs all go through the same rules. The service
     also owns connection acquisition and transaction boundaries.
+
+    The workspace is threaded through as an argument on every method rather
+    than held on the instance. A service constructed per request could hold
+    one and still be correct today, but the moment anything caches, shares
+    or reuses a service -- a worker looping over tenants, a batch job, a
+    module-level singleton -- an instance attribute becomes an ambient
+    current workspace that the next operation inherits without asking. See
+    WorkspaceScope on why tenant identity has to travel with the operation.
+
+    Holding a scope is not permission to act in it. Nothing in this class
+    checks that the caller belongs to the workspace it named; that check
+    does not exist yet, and when it does it will not live here.
     """
 
     def __init__(
@@ -42,18 +55,40 @@ class IssueService:
 
     async def get_by_id(
         self,
+        *,
+        scope: WorkspaceScope,
         issue_id: UUID,
     ) -> IssueEntity | None:
+        """One issue from this workspace, or nothing.
+
+        "Not in this workspace" and "does not exist" are the same answer on
+        purpose; the repository explains why the distinction must not be
+        observable.
+        """
         async with self._pool.acquire() as connection:
-            return await self._repository.get_by_id(connection, issue_id)
+            return await self._repository.get_by_id(
+                connection,
+                scope=scope,
+                issue_id=issue_id,
+            )
 
     async def create(
         self,
         *,
+        scope: WorkspaceScope,
+        team_id: UUID,
         title: str,
         description: str | None,
         priority: int,
     ) -> IssueEntity:
+        """File one issue in this workspace, against this team.
+
+        The team is a required argument rather than something resolved in
+        here. A service that picked a default team would be choosing where
+        another tenant's work lands, using a rule invisible at the call
+        site; the caller that knows which team it means is the one that has
+        to say so.
+        """
         self._validate_create(title=title, priority=priority)
 
         async with self._pool.acquire() as connection:
@@ -62,6 +97,8 @@ class IssueService:
             async with connection.transaction():
                 return await self._repository.create(
                     connection,
+                    scope=scope,
+                    team_id=team_id,
                     title=title,
                     description=description,
                     priority=priority,
@@ -70,13 +107,20 @@ class IssueService:
     async def list(
         self,
         *,
+        scope: WorkspaceScope,
         first: int,
         after: str | None,
     ) -> IssuePage:
-        """Forward keyset page of issues, newest first.
+        """Forward keyset page of one workspace's issues, newest first.
 
         A single SELECT needs no explicit write transaction, so this
         acquires a connection without opening one.
+
+        The cursor is not trusted to carry a workspace and could not be if
+        it did: it is Base64 over JSON, readable and writable by anyone
+        holding it. The scope comes from this call, so a cursor minted in
+        one workspace and replayed against another selects nothing rather
+        than resuming someone else's page.
         """
         cursor = self._validate_list(first=first, after=after)
 
@@ -84,6 +128,7 @@ class IssueService:
             # One extra row tells us whether a further page exists.
             rows = await self._repository.list(
                 connection,
+                scope=scope,
                 limit=first + 1,
                 after_created_at=cursor.created_at if cursor is not None else None,
                 after_id=cursor.id if cursor is not None else None,

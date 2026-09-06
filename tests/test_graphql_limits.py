@@ -38,7 +38,7 @@ from app.graphql import limits
 from app.graphql.limits import operation_limit_extensions
 from app.graphql.schema import build_schema
 
-from tests.conftest import make_entity
+from tests.conftest import FakeTenant, make_entity
 
 
 ALL_ENVIRONMENTS: list[Environment] = ["development", "test", "production"]
@@ -76,6 +76,7 @@ FULL_PAGE_SELECTION = """
 class Context:
     def __init__(self, issue_service):
         self.issue_service = issue_service
+        self.tenant = FakeTenant()
 
 
 class RecordingIssueService:
@@ -85,7 +86,7 @@ class RecordingIssueService:
         self._page = page
         self.calls = 0
 
-    async def list(self, *, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None):
         self.calls += 1
 
         return self._page
