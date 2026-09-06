@@ -634,6 +634,32 @@ class RelationRepository:
 
         The join to `issues` is what makes this one round trip instead of a
         page of ids followed by a second query for their titles.
+
+        ------------------------------------------------------------------
+        FOR WHOEVER FIRST TRAVERSES THE BLOCKING GRAPH
+        ------------------------------------------------------------------
+
+        `blocks` is the only relation type exempt from canonical ordering --
+        its direction is its content, so it cannot be reordered -- which
+        means A-blocks-B and B-blocks-A are two genuinely distinct rows and
+        the schema accepts both. Nothing refuses that pair, deliberately:
+        mutual blocking is a workflow mistake, not an integrity violation.
+
+        Nothing traverses today, so nothing can loop on it. This method is a
+        single non-recursive UNION over ONE issue, and `Issue.relations`
+        returns `IssueSummary`, which has no edges -- so the schema is
+        acyclic by construction and a client cannot walk A -> B -> A either.
+
+        The first thing that DOES traverse -- a dependency view, a
+        topological sort, a "what is blocking this, recursively" query --
+        must carry its own cycle guard, because nothing upstream of it
+        provides one.
+
+        The sub-issue tree is NOT affected, and the distinction is the part
+        most likely to be lost: parenting IS cycle-guarded on write, by
+        `RelationService.set_parent`. "We already prevent cycles" is true of
+        parenting and false of blocking, and assuming it covers both is the
+        mistake this paragraph exists to stop.
         """
         if after_created_at is None or after_id is None:
             rows = await connection.fetch(

@@ -260,6 +260,15 @@ CREATE TABLE issue_relations (
     -- one pair -- A blocks B and B blocks A. That is a mutual deadlock and
     -- probably a mistake, but it is a product judgement about workflow, not
     -- an integrity violation, and this file does not refuse it.
+    --
+    -- So the blocking graph is the one edge in this schema that may contain
+    -- a cycle, and nothing prevents it at any layer. Nothing traverses it
+    -- today either. Whoever writes the first thing that does -- a dependency
+    -- view, a topological sort -- must bring its own cycle guard; see the
+    -- note under FOR WHOEVER FIRST TRAVERSES THE BLOCKING GRAPH in
+    -- `RelationRepository.list_relations`. Sub-issues are a separate matter
+    -- and are guarded on write; the two must not be assumed to share a
+    -- guarantee.
     CONSTRAINT issue_relations_symmetric_ordered
         CHECK (type = 'blocks' OR source_issue_id < target_issue_id),
 
