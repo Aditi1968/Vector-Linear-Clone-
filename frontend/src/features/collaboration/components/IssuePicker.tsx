@@ -130,6 +130,11 @@ export function IssuePicker({
                 type="button"
                 className={styles.pickerResult}
                 disabled={isSubmitting}
+                // Named explicitly because the two spans below are adjacent
+                // with no whitespace between them, and the computed name would
+                // otherwise run the identifier into the title -- "VEC-30Migrate
+                // the table", which is what a screen reader would say.
+                aria-label={`${hit.identifier} ${hit.title}`}
                 onClick={() => {
                   onPick(hit)
                 }}
