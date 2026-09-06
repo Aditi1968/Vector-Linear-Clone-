@@ -1,2 +1,27 @@
-export { IssuesIcon, PlusIcon, SearchIcon, VectorMark } from './icons'
+export {
+  AlertIcon,
+  BlockedIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
+  ChevronUpIcon,
+  CloseIcon,
+  CommentIcon,
+  CycleIcon,
+  InboxIcon,
+  IssueIcon,
+  IssuesIcon,
+  LabelIcon,
+  MinusIcon,
+  MoreIcon,
+  PlusIcon,
+  ProjectIcon,
+  RelationIcon,
+  SearchIcon,
+  SettingsIcon,
+  SubIssueIcon,
+  TeamIcon,
+  VectorMark,
+} from './icons'
 export type { IconProps } from './icons'

@@ -1,0 +1,52 @@
+.root {
+  position: relative;
+  display: inline-flex;
+}
+
+/**
+ * Positioned against the trigger rather than in the top layer.
+ *
+ * The trade is honest: a tooltip inside an `overflow: hidden` ancestor will be
+ * clipped. The alternatives are the popover API (whose positioning still needs
+ * CSS anchor positioning to be useful) or a portal plus a scroll/resize
+ * listener per tooltip -- and a tooltip is the one overlay small enough that
+ * being clipped is a layout bug in the caller rather than a missing feature
+ * here.
+ */
+.tooltip {
+  position: absolute;
+  z-index: var(--z-popover);
+  inset-block-end: calc(100% + var(--space-3));
+  inset-inline-start: 50%;
+  transform: translateX(-50%);
+
+  max-width: 16rem;
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+
+  background-color: var(--color-surface-raised);
+  box-shadow: var(--shadow-md);
+  color: var(--color-text-primary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-tight);
+  text-align: center;
+  white-space: normal;
+  /* The tooltip must never eat the pointer: hovering it would otherwise keep
+   * it open, and moving towards it can steal the click meant for the trigger. */
+  pointer-events: none;
+
+  animation: appear var(--duration-fast) var(--ease-out);
+}
+
+.below {
+  inset-block-end: auto;
+  inset-block-start: calc(100% + var(--space-3));
+}
+
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 2px);
+  }
+}

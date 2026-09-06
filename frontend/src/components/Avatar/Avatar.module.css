@@ -1,0 +1,41 @@
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  overflow: hidden;
+
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  /* A rounded square, not a circle. Circles are the default everywhere, and
+   * matching the rounded-square silhouette the status glyphs and the brand
+   * mark already use is most of what makes a row look like one design rather
+   * than a collection of widgets. */
+  border-radius: var(--radius-md);
+
+  background-color: hsl(var(--avatar-hue) var(--avatar-bg));
+  color: hsl(var(--avatar-hue) var(--avatar-fg));
+  font-size: calc(var(--avatar-size) * 0.42);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-none);
+  letter-spacing: var(--tracking-normal);
+  user-select: none;
+}
+
+.sm {
+  --avatar-size: 1.25rem; /* 20px -- inline in a dense row */
+}
+
+.md {
+  --avatar-size: 1.5rem; /* 24px */
+}
+
+.lg {
+  --avatar-size: 2rem; /* 32px -- a header or a detail pane */
+}
+
+.image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}

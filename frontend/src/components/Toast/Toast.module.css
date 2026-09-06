@@ -1,0 +1,87 @@
+/**
+ * The region is fixed to the bottom-right and always present in the DOM.
+ *
+ * "Always present" is load-bearing, not tidiness: a screen reader only
+ * announces changes to a live region that existed when the change happened.
+ * Mounting the region at the same moment as the first toast is the classic way
+ * to ship notifications that are silent for exactly the users who need them.
+ */
+.region {
+  position: fixed;
+  z-index: var(--z-toast);
+  inset-block-end: var(--space-6);
+  inset-inline-end: var(--space-6);
+
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: min(22rem, calc(100vw - var(--space-8)));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  /* The container spans the corner of the viewport; without this it would
+   * swallow clicks on whatever is behind it even with no toasts on screen.
+   * Each toast switches pointer events back on for itself. */
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+
+  background-color: var(--color-surface-raised);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+
+  animation: slide-in var(--duration-moderate) var(--ease-out);
+}
+
+@keyframes slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.glyph {
+  display: flex;
+  flex: none;
+  margin-block-start: 0.1em;
+  font-size: var(--text-md);
+}
+
+.success .glyph {
+  color: var(--color-success);
+}
+
+.danger .glyph {
+  color: var(--color-danger);
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.description {
+  margin-block-start: var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.dismiss {
+  flex: none;
+  margin: calc(var(--space-2) * -1) calc(var(--space-3) * -1) 0 0;
+}

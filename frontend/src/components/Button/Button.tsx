@@ -1,5 +1,6 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import type { ComponentPropsWithRef, MouseEvent, ReactNode } from 'react'
 
+import { Spinner } from '../Spinner'
 import { cx } from '../cx'
 import styles from './Button.module.css'
 
@@ -17,6 +18,14 @@ interface ButtonBaseProps {
   icon?: ReactNode
   /** Stretch to the width of the container. Used by the sidebar's controls. */
   fullWidth?: boolean
+  /**
+   * The action this button started has not finished.
+   *
+   * Swaps the leading glyph for a spinner, marks the button `aria-busy`, and
+   * swallows further clicks. See the note on the implementation for why it
+   * does *not* set `disabled`.
+   */
+  loading?: boolean
 }
 
 /** A button whose visible text is its accessible name. */
@@ -40,7 +49,7 @@ type IconOnlyButtonProps = ButtonBaseProps & {
   'aria-label': string
 }
 
-export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> &
+export type ButtonProps = Omit<ComponentPropsWithRef<'button'>, 'children'> &
   (LabelledButtonProps | IconOnlyButtonProps)
 
 /**
@@ -62,27 +71,60 @@ export function Button({
   size = 'md',
   icon,
   fullWidth = false,
+  loading = false,
   type = 'button',
   className,
   children,
+  onClick,
   ...rest
 }: ButtonProps) {
   const isIconOnly = children === undefined
 
+  /**
+   * A loading button is `aria-disabled`, not `disabled`.
+   *
+   * `disabled` drops the element out of the tab order, and the browser then
+   * moves focus to `<body>` -- so a keyboard user who pressed Enter on "Save"
+   * loses their place at the exact moment the app starts working, and has to
+   * tab back in from the top of the page to find out what happened.
+   * `aria-disabled` announces the same state and keeps focus where the user
+   * put it; the click handler below is what actually makes it inert.
+   */
+  const handleClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (loading) {
+      // preventDefault stops a `type="submit"` button submitting its form;
+      // stopPropagation stops a delegated handler further up acting on it.
+      event.preventDefault()
+      event.stopPropagation()
+      return
+    }
+    onClick?.(event)
+  }
+
+  const leading = loading ? <Spinner /> : icon
+
   return (
     <button
       type={type}
+      onClick={handleClick}
+      aria-busy={loading || undefined}
+      aria-disabled={loading || undefined}
       className={cx(
         styles.button,
         styles[variant],
         styles[size],
         isIconOnly && styles.iconOnly,
         fullWidth && styles.fullWidth,
+        loading && styles.loading,
         className,
       )}
       {...rest}
     >
-      {icon !== undefined && <span className={styles.icon}>{icon}</span>}
+      {leading !== undefined && <span className={styles.icon}>{leading}</span>}
+      {/* The label stays rendered while loading. Replacing it with the spinner
+        * would change the button's width mid-click and shift whatever is beside
+        * it -- and the word the user just read is the best confirmation of
+        * which action is in flight. */}
       {!isIconOnly && <span className={styles.label}>{children}</span>}
     </button>
   )

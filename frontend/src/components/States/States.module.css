@@ -1,0 +1,99 @@
+/**
+ * Empty and error states.
+ *
+ * One stylesheet because they are the same object -- a centred column
+ * explaining why there is nothing here and offering the one thing to do next.
+ * Only the glyph's colour and the ARIA role differ, and both belong in the
+ * components rather than in two near-identical files.
+ *
+ * No card, no border, no shadow. These sit inside a region that already has its
+ * own frame; wrapping them in another one is how a "no issues yet" message ends
+ * up looking more important than the issues.
+ */
+.state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-4);
+
+  padding-block: var(--space-9);
+  padding-inline: var(--space-6);
+  text-align: center;
+}
+
+.glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 2.5rem;
+  height: 2.5rem;
+  margin-block-end: var(--space-2);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+
+  background-color: var(--color-surface-subtle);
+  color: var(--color-text-muted);
+  font-size: var(--text-xl);
+}
+
+.error .glyph {
+  border-color: var(--color-danger-border);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-danger);
+}
+
+.title {
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.description {
+  max-width: 30rem;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  margin-block-start: var(--space-3);
+}
+
+/**
+ * The technical detail behind an error.
+ *
+ * A `<details>` element, not a state toggle: the browser already has a
+ * disclosure widget with correct keyboard behaviour, correct semantics and an
+ * animation-free open/close. Reimplementing it would be a `useState`, a button,
+ * an `aria-expanded` and a conditional render to arrive at the same place.
+ */
+.details {
+  margin-block-start: var(--space-3);
+  max-width: 34rem;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  text-align: start;
+}
+
+.summary {
+  cursor: pointer;
+  text-align: center;
+  list-style-position: inside;
+}
+
+.detailsBody {
+  margin-block-start: var(--space-3);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-subtle);
+  font-family: var(--font-mono);
+  /* Preserves the shape of a stack trace without letting it widen the page. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -1,0 +1,236 @@
+/**
+ * The form controls: input, textarea, select, checkbox.
+ *
+ * One stylesheet, because the four share a boundary treatment and must keep
+ * sharing it. A select whose border is a shade off from the input beside it is
+ * the single most common way a hand-built form starts looking hand-built, and
+ * the fix is structural: `.control` is the shared box and each element adds
+ * only what is genuinely different about it.
+ *
+ * Boundaries use `--color-border-control`, not `--color-border`. WCAG 1.4.11
+ * asks for 3:1 on the visual boundary of a control, because that outline is
+ * the only thing saying "you may type here"; the row-divider grey does not
+ * clear that bar in either theme.
+ */
+
+.control {
+  width: 100%;
+  min-width: 0;
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  transition:
+    border-color var(--duration-fast) var(--ease-standard),
+    background-color var(--duration-fast) var(--ease-standard);
+}
+
+.control::placeholder {
+  color: var(--color-text-muted);
+  /* Firefox fades placeholders to 54% by default, which takes the colour
+   * below AA whatever token is chosen. */
+  opacity: 1;
+}
+
+.control:hover:not(:disabled, [aria-invalid='true']) {
+  border-color: var(--color-text-muted);
+}
+
+/* No `outline: none` anywhere in this file. The global `:focus-visible` rule
+ * in src/styles/base.css draws the one ring the product uses; controls only
+ * add the border shift that shows focus has landed *inside* them. */
+.control:focus-visible {
+  border-color: var(--color-accent);
+}
+
+.control:disabled {
+  background-color: var(--color-surface-subtle);
+  border-color: var(--color-border);
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+/* Keyed off `aria-invalid` rather than a class, so the visual state and the
+ * state announced to a screen reader cannot drift apart -- there is only one
+ * flag and both read it. */
+.control[aria-invalid='true'] {
+  border-color: var(--color-danger);
+}
+
+.control[aria-invalid='true']:focus-visible {
+  border-color: var(--color-danger);
+}
+
+/* ---------------------------------------------------------------- */
+/* Sizes                                                             */
+/* ---------------------------------------------------------------- */
+
+.sm {
+  height: var(--control-height-sm);
+  padding-inline: var(--space-4);
+  font-size: var(--text-xs);
+}
+
+.md {
+  height: var(--control-height-md);
+  padding-inline: var(--space-4);
+}
+
+/* ---------------------------------------------------------------- */
+/* Input with a leading glyph                                        */
+/* ---------------------------------------------------------------- */
+
+.root {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.adornment {
+  position: absolute;
+  inset-inline-start: var(--space-4);
+  display: flex;
+  color: var(--color-text-muted);
+  /* The glyph must not swallow the click that should focus the field. */
+  pointer-events: none;
+}
+
+.hasAdornment {
+  padding-inline-start: var(--space-8);
+}
+
+/* ---------------------------------------------------------------- */
+/* Textarea                                                          */
+/* ---------------------------------------------------------------- */
+
+.textarea {
+  height: auto;
+  min-height: calc(var(--control-height-md) * 2);
+  padding-block: var(--space-3);
+  line-height: var(--leading-normal);
+  /* Vertical only: a horizontally resizable textarea can be dragged wider than
+   * its container and break the layout around it. */
+  resize: vertical;
+}
+
+/* ---------------------------------------------------------------- */
+/* Select                                                            */
+/* ---------------------------------------------------------------- */
+
+/**
+ * A real `<select>`, restyled -- not a listbox rebuilt in React.
+ *
+ * The native control brings type-ahead, Home/End, platform keyboard
+ * conventions, and the OS picker on touch devices. All of that is invisible
+ * until it is missing, and a JS reimplementation has to earn every one of them
+ * back. What we give up is styling the option list, which is not worth it.
+ */
+.select {
+  appearance: none;
+  /* Room for the chevron, which is drawn as a sibling because
+   * `background-image` cannot take `currentColor`. */
+  padding-inline-end: var(--space-7);
+  cursor: pointer;
+}
+
+.chevron {
+  position: absolute;
+  inset-inline-end: var(--space-4);
+  display: flex;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.select:disabled + .chevron {
+  color: var(--color-text-disabled);
+}
+
+/* ---------------------------------------------------------------- */
+/* Checkbox                                                          */
+/* ---------------------------------------------------------------- */
+
+.checkboxRoot {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+}
+
+/**
+ * The native input, with its own painting switched off.
+ *
+ * `appearance: none` and nothing else: it keeps its size, its position in the
+ * tab order, its `:checked` state, its label association, its role and its
+ * space-to-toggle behaviour. The alternative -- hiding it and styling a
+ * sibling `<span>` -- throws all of that away and then reimplements the easy
+ * half.
+ */
+.checkboxInput {
+  appearance: none;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background-color: var(--color-surface);
+  border: var(--border-width) solid var(--color-border-control);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard);
+}
+
+.checkboxInput:hover:not(:disabled) {
+  border-color: var(--color-text-muted);
+}
+
+.checkboxInput:checked {
+  background-color: var(--color-accent);
+  border-color: var(--color-accent);
+}
+
+.checkboxInput:disabled {
+  background-color: var(--color-surface-subtle);
+  border-color: var(--color-border);
+  cursor: not-allowed;
+}
+
+.checkboxInput:disabled:checked {
+  background-color: var(--color-text-disabled);
+  border-color: var(--color-text-disabled);
+}
+
+.checkboxMark {
+  position: absolute;
+  color: var(--color-text-on-accent);
+  font-size: 0.75rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-instant) var(--ease-standard);
+}
+
+.checkboxInput:checked ~ .checkboxMark {
+  opacity: 1;
+}
+
+/**
+ * In forced-colours mode the UA discards our background and border colours, so
+ * `:checked` would look identical to unchecked. `ButtonText` is a system
+ * colour the UA guarantees is visible against `ButtonFace`.
+ */
+@media (forced-colors: active) {
+  .checkboxInput:checked {
+    background-color: Highlight;
+    border-color: ButtonText;
+  }
+
+  .checkboxMark {
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
+}

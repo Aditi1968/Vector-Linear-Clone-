@@ -62,12 +62,12 @@
   color: var(--color-text-on-accent);
 }
 
-.primary:hover:not(:disabled) {
+.primary:hover:not(:disabled, [aria-disabled='true']) {
   background-color: var(--color-accent-hover);
   border-color: var(--color-accent-hover);
 }
 
-.primary:active:not(:disabled) {
+.primary:active:not(:disabled, [aria-disabled='true']) {
   background-color: var(--color-accent-active);
   border-color: var(--color-accent-active);
 }
@@ -78,11 +78,11 @@
   color: var(--color-text-primary);
 }
 
-.secondary:hover:not(:disabled) {
+.secondary:hover:not(:disabled, [aria-disabled='true']) {
   background-color: var(--color-surface-hover);
 }
 
-.secondary:active:not(:disabled) {
+.secondary:active:not(:disabled, [aria-disabled='true']) {
   background-color: var(--color-surface-active);
 }
 
@@ -92,12 +92,12 @@
   color: var(--color-text-secondary);
 }
 
-.ghost:hover:not(:disabled) {
+.ghost:hover:not(:disabled, [aria-disabled='true']) {
   background-color: var(--color-surface-hover);
   color: var(--color-text-primary);
 }
 
-.ghost:active:not(:disabled) {
+.ghost:active:not(:disabled, [aria-disabled='true']) {
   background-color: var(--color-surface-active);
 }
 
@@ -107,7 +107,7 @@
   color: var(--color-text-on-accent);
 }
 
-.danger:hover:not(:disabled) {
+.danger:hover:not(:disabled, [aria-disabled='true']) {
   background-color: var(--color-danger-hover);
   border-color: var(--color-danger-hover);
 }
@@ -136,6 +136,24 @@
 .ghost:disabled {
   background-color: transparent;
   border-color: transparent;
+}
+
+/* ---------------------------------------------------------------- */
+/* Loading                                                           */
+/* ---------------------------------------------------------------- */
+
+/**
+ * A loading button keeps its colour.
+ *
+ * It is not disabled -- it is *busy*, and it will be clickable again in a
+ * moment -- so greying it out would say the wrong thing and would also make
+ * the label harder to read at the one moment the user is watching it. The
+ * spinner is the state change; the cursor confirms it.
+ */
+/* Hover and active feedback is excluded above via `:not([aria-disabled])`,
+ * because feedback on a busy button suggests the click will do something. */
+.loading {
+  cursor: progress;
 }
 
 /* ---------------------------------------------------------------- */

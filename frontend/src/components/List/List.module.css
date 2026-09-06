@@ -1,0 +1,76 @@
+/**
+ * The dense list: Vector's primary surface.
+ *
+ * Rows, not cards. Cards put 16px of padding and a border around every item,
+ * which costs roughly half the rows on a screen and makes a list of 200 issues
+ * a scrolling exercise. A row is a hairline and a fixed height, and the fixed
+ * height is what lets the eye scan a column of titles instead of re-finding the
+ * left edge on every line.
+ */
+.list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+
+  min-height: var(--row-height);
+  padding-inline: var(--space-5);
+  border-block-end: var(--border-width) solid var(--color-border-subtle);
+
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+}
+
+.interactive {
+  cursor: pointer;
+  transition: background-color var(--duration-instant) var(--ease-standard);
+}
+
+.interactive:hover {
+  background-color: var(--color-surface-hover);
+}
+
+/**
+ * Selected is a tinted background plus a 2px accent rule down the leading edge.
+ *
+ * Two channels rather than one: a background tint alone is a hue difference of
+ * a few percent, which is invisible in greyscale and to a lot of people in
+ * colour. The rule is a shape.
+ *
+ * Drawn with `box-shadow: inset`, not a border, so the row's height and its
+ * content's alignment do not change between states.
+ */
+.selected {
+  background-color: var(--color-surface-selected);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.selected:hover {
+  background-color: var(--color-surface-selected);
+}
+
+/* Row content is laid out by the feature that owns it; the primitive supplies
+ * only the two slots every row in this product turns out to need. */
+.main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
