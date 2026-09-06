@@ -54,6 +54,7 @@ from app.graphql.scope import WORKSPACE_NOT_FOUND_MESSAGE
 from app.graphql.viewer import UNAUTHENTICATED_MESSAGE
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
+from app.repositories.invitations import InvitationRepository
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.labels import LabelRepository
@@ -61,6 +62,7 @@ from app.repositories.memberships import MembershipRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.relations import RelationRepository
 from app.repositories.teams import TeamRepository
+from app.repositories.workspaces import WorkspaceRepository
 from app.services.comments import CommentService
 from app.services.cycles import CycleService
 from app.services.issues import IssueService
@@ -249,7 +251,15 @@ async def world(postgres_dsn):
                 # be a fake: the refusals below come from a missing row in
                 # `workspace_members` and not from a stub deciding to raise.
                 membership_service=MembershipService(
-                    pool=pool, repository=MembershipRepository()
+                    pool=pool,
+                    repository=MembershipRepository(),
+                    # Unread on every path this file exercises, but the service
+                    # is one object: these are the repositories workspace
+                    # creation and invitation acceptance write through, and a
+                    # service built without them fails at the first call that
+                    # needs one rather than here, where the omission was made.
+                    workspaces=WorkspaceRepository(),
+                    invitations=InvitationRepository(),
                 ),
             )
 
