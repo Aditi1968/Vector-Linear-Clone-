@@ -14,6 +14,7 @@ type CommentConnection {
 }
 
 input CommentCreateInput {
+  workspaceSlug: String!
   issueId: UUID!
   body: String!
 }
@@ -24,6 +25,7 @@ type CommentCreatePayload {
 }
 
 input CommentDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -43,6 +45,7 @@ type Cycle {
 }
 
 input CycleCreateInput {
+  workspaceSlug: String!
   teamId: UUID!
   number: Int!
   startsAt: DateTime!
@@ -61,6 +64,7 @@ type CyclePayload {
 }
 
 input CycleUpdateInput {
+  workspaceSlug: String!
   id: UUID!
   number: Int!
   startsAt: DateTime!
@@ -132,6 +136,7 @@ type IssueArchivePayload {
 }
 
 input IssueClearParentInput {
+  workspaceSlug: String!
   issueId: UUID!
 }
 
@@ -141,6 +146,8 @@ type IssueConnection {
 }
 
 input IssueCreateInput {
+  workspaceSlug: String!
+  teamId: UUID!
   title: String!
   description: String = null
   priority: Int! = 0
@@ -155,6 +162,7 @@ type IssueCreatePayload {
 }
 
 input IssueLabelInput {
+  workspaceSlug: String!
   issueId: UUID!
   labelId: UUID!
 }
@@ -182,6 +190,7 @@ type IssueRelationConnection {
 }
 
 input IssueRelationCreateInput {
+  workspaceSlug: String!
   sourceIssueId: UUID!
   targetIssueId: UUID!
   type: IssueRelationType!
@@ -193,6 +202,7 @@ type IssueRelationCreatePayload {
 }
 
 input IssueRelationDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -209,6 +219,7 @@ enum IssueRelationType {
 }
 
 input IssueSetCycleInput {
+  workspaceSlug: String!
   issueId: UUID!
   cycleId: UUID = null
 }
@@ -219,11 +230,13 @@ type IssueSetCyclePayload {
 }
 
 input IssueSetParentInput {
+  workspaceSlug: String!
   issueId: UUID!
   parentId: UUID!
 }
 
 input IssueSetProjectInput {
+  workspaceSlug: String!
   issueId: UUID!
   projectId: UUID = null
   milestoneId: UUID = null
@@ -250,6 +263,7 @@ type IssueSummaryConnection {
 }
 
 input IssueUpdateInput {
+  workspaceSlug: String!
   title: String
   description: String
   priority: Int
@@ -278,11 +292,13 @@ type LabelConnection {
 }
 
 input LabelCreateInput {
+  workspaceSlug: String!
   name: String!
   color: String = null
 }
 
 input LabelDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -297,6 +313,7 @@ type LabelPayload {
 }
 
 input LabelUpdateInput {
+  workspaceSlug: String!
   id: UUID!
   name: String!
   color: String!
@@ -320,7 +337,7 @@ type LogoutPayload {
 type Mutation {
   issueCreate(input: IssueCreateInput!): IssueCreatePayload!
   issueUpdate(id: UUID!, input: IssueUpdateInput!): IssueUpdatePayload!
-  issueArchive(id: UUID!): IssueArchivePayload!
+  issueArchive(workspaceSlug: String!, id: UUID!): IssueArchivePayload!
   register(input: RegisterInput!): RegisterPayload!
   login(input: LoginInput!): LoginPayload!
   logout: LogoutPayload!
@@ -333,7 +350,7 @@ type Mutation {
   commentDelete(input: CommentDeleteInput!): CommentDeletePayload!
   cycleCreate(input: CycleCreateInput!): CyclePayload!
   cycleUpdate(input: CycleUpdateInput!): CyclePayload!
-  cycleDelete(id: UUID!): CycleDeletePayload!
+  cycleDelete(workspaceSlug: String!, id: UUID!): CycleDeletePayload!
   issueSetCycle(input: IssueSetCycleInput!): IssueSetCyclePayload!
   projectCreate(input: ProjectCreateInput!): ProjectPayload!
   projectUpdate(input: ProjectUpdateInput!): ProjectPayload!
@@ -374,6 +391,7 @@ type ProjectConnection {
 }
 
 input ProjectCreateInput {
+  workspaceSlug: String!
   name: String!
   description: String = null
   state: ProjectState! = PLANNED
@@ -382,6 +400,7 @@ input ProjectCreateInput {
 }
 
 input ProjectDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -401,12 +420,14 @@ type ProjectMilestone {
 }
 
 input ProjectMilestoneCreateInput {
+  workspaceSlug: String!
   projectId: UUID!
   name: String!
   targetDate: Date = null
 }
 
 input ProjectMilestoneDeleteInput {
+  workspaceSlug: String!
   id: UUID!
 }
 
@@ -421,6 +442,7 @@ type ProjectMilestonePayload {
 }
 
 input ProjectMilestoneUpdateInput {
+  workspaceSlug: String!
   id: UUID!
   name: String
   targetDate: Date
@@ -441,11 +463,13 @@ enum ProjectState {
 }
 
 input ProjectTeamInput {
+  workspaceSlug: String!
   projectId: UUID!
   teamId: UUID!
 }
 
 input ProjectUpdateInput {
+  workspaceSlug: String!
   id: UUID!
   name: String
   description: String
@@ -455,8 +479,8 @@ input ProjectUpdateInput {
 }
 
 type Query {
-  issue(id: UUID!): Issue
-  issues(first: Int! = 50, after: String = null): IssueConnection!
+  issue(workspaceSlug: String!, id: UUID!): Issue
+  issues(workspaceSlug: String!, teamId: UUID = null, first: Int! = 50, after: String = null): IssueConnection!
   me: User
 
   """
@@ -465,12 +489,12 @@ type Query {
   teams(workspaceSlug: String!): [Team!]!
   myWorkspaces: [WorkspaceMembership!]!
   myWorkspace(slug: String!): WorkspaceMembership!
-  label(id: UUID!): Label
-  labels(first: Int! = 50, after: String = null): LabelConnection!
-  cycle(id: UUID!): Cycle
-  cycles(teamId: UUID!): [Cycle!]!
-  project(id: UUID!): Project
-  projects(first: Int! = 50, after: String = null): ProjectConnection!
+  label(workspaceSlug: String!, id: UUID!): Label
+  labels(workspaceSlug: String!, first: Int! = 50, after: String = null): LabelConnection!
+  cycle(workspaceSlug: String!, id: UUID!): Cycle
+  cycles(workspaceSlug: String!, teamId: UUID!): [Cycle!]!
+  project(workspaceSlug: String!, id: UUID!): Project
+  projects(workspaceSlug: String!, first: Int! = 50, after: String = null): ProjectConnection!
 }
 
 input RegisterInput {

@@ -5,7 +5,9 @@ import type {
   IssueListData,
   IssueRowFields,
   IssueValidationError,
+  WorkspaceTeamsData,
 } from '../features/issues/api'
+import type { WorkspaceEntryQuery } from '../generated/operations'
 
 /**
  * Server responses, built against the real operation types.
@@ -29,6 +31,20 @@ import type {
  * so a fixture with a made-up id would make the detail tests assert the
  * not-found screen while believing they were testing a successful fetch.
  */
+/**
+ * The workspace every test in this suite operates in.
+ *
+ * Every field the API exposes now takes a `workspaceSlug`, and the frontend
+ * reads it from `/:workspaceSlug/...` -- so a test that renders a screen
+ * starts at a URL carrying this, and a fixture that answers a query is
+ * answering one that named it. `src/test/render.tsx` puts it in the default
+ * `initialPath`; nothing here has to repeat it.
+ */
+export const WORKSPACE_SLUG = 'acme'
+
+/** The team `WorkspaceTeams` answers with, and `issueCreate` files against. */
+export const TEAM_ID = '00000000-0000-4000-8000-00000000ee01'
+
 export function issueId(seed: number): string {
   return `00000000-0000-4000-8000-${String(seed).padStart(12, '0')}`
 }
@@ -159,4 +175,46 @@ export function validationError(
   message: string,
 ): IssueValidationError {
   return { __typename: 'ValidationErrorType', field, code, message }
+}
+
+/**
+ * The answer to `WorkspaceEntry`, which is what `/` resolves through.
+ *
+ * An empty list is a real state -- an account in no workspace -- and is the
+ * one case worth spelling out, so the argument is the slugs and not a count.
+ */
+export function workspaceEntryData(
+  ...slugs: readonly string[]
+): WorkspaceEntryQuery {
+  return {
+    myWorkspaces: slugs.map((slug) => ({
+      __typename: 'WorkspaceMembership' as const,
+      workspace: {
+        __typename: 'Workspace' as const,
+        slug,
+        name: slug,
+      },
+    })),
+  }
+}
+
+/**
+ * The answer to `WorkspaceTeams`.
+ *
+ * The composer runs this: `issueCreate` requires a `teamId` and the server
+ * picks no default, so a create cannot be submitted until it has answered.
+ * An empty list is the state a workspace with no teams is in, which the form
+ * reports rather than crashing on.
+ */
+export function workspaceTeamsData(
+  ...teams: readonly { id: string; key: string }[]
+): WorkspaceTeamsData {
+  return {
+    teams: teams.map((team) => ({ __typename: 'Team' as const, ...team })),
+  }
+}
+
+/** The single-team workspace every create test files into. */
+export function oneTeam(): WorkspaceTeamsData {
+  return workspaceTeamsData({ id: TEAM_ID, key: 'ENG' })
 }

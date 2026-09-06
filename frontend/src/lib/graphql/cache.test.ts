@@ -24,6 +24,11 @@ import { createCache } from './cache'
  * `ObservableQuery` over a controlled link, at real page sizes.
  */
 
+// The workspace every write below is for. `issues` requires one now, and the
+// field policy keys on it -- so a test that left it out would not be testing
+// the policy the application uses.
+const WORKSPACE_SLUG = 'acme'
+
 const PAGE_ONE_END = cursor('page-one')
 const PAGE_TWO_END = cursor('page-two')
 const PAGE_THREE_END = cursor('page-three')
@@ -32,14 +37,22 @@ function writePage(
   cache: ReturnType<typeof createCache>,
   after: string | null,
   data: IssueListData,
+  workspaceSlug = WORKSPACE_SLUG,
 ): void {
-  cache.writeQuery({ query: IssueListDocument, variables: { after }, data })
+  cache.writeQuery({
+    query: IssueListDocument,
+    variables: { workspaceSlug, after },
+    data,
+  })
 }
 
-function readTitles(cache: ReturnType<typeof createCache>): string[] {
+function readTitles(
+  cache: ReturnType<typeof createCache>,
+  workspaceSlug = WORKSPACE_SLUG,
+): string[] {
   const data = cache.readQuery({
     query: IssueListDocument,
-    variables: { after: null },
+    variables: { workspaceSlug, after: null },
   })
 
   return (data?.issues.nodes ?? []).map((node) => node.title)
@@ -70,7 +83,7 @@ describe('issues field policy', () => {
     expect(readTitles(cache)).toEqual(['Alpha', 'Bravo', 'Charlie'])
   })
 
-  it('keeps every page in one cache field regardless of arguments', () => {
+  it('keeps every page of ONE workspace in one cache field', () => {
     const cache = createCache()
 
     writePage(
@@ -88,14 +101,47 @@ describe('issues field policy', () => {
     const issueFields = Object.keys(root).filter((key) => key.startsWith('issues'))
 
     /*
-      One field, keyed on the name alone. This is what `keyArgs: false` buys,
-      and the failure it prevents is silent: with argument-keyed fields,
+      One field, keyed on the workspace and nothing else. `first` and `after`
+      describe where in a list a page sits, so they are absent from the key,
+      and the failure that buys is silent: with them in it,
       `issues({"after":null})` and `issues({"after":"..."})` become unrelated
       entries, `fetchMore` writes page two somewhere no active query is
       watching, and the list never grows no matter how many times the button
       is pressed. Apollo reports none of that.
     */
-    expect(issueFields).toEqual(['issues'])
+    expect(issueFields).toEqual([`issues:{"workspaceSlug":"${WORKSPACE_SLUG}"}`])
+  })
+
+  it('does not merge two workspaces into one list', () => {
+    const cache = createCache()
+
+    writePage(
+      cache,
+      null,
+      issueListData([issueRow(1, { title: 'Ours' })], {
+        hasNextPage: false,
+        endCursor: PAGE_ONE_END,
+      }),
+    )
+    writePage(
+      cache,
+      null,
+      issueListData([issueRow(2, { title: 'Theirs' })], {
+        hasNextPage: false,
+        endCursor: PAGE_TWO_END,
+      }),
+      'other-workspace',
+    )
+
+    /*
+      The reason `keyArgs` names `workspaceSlug` at all. The server refuses to
+      hand one workspace another's issues; a cache that keyed on the field
+      name alone would put both workspaces' pages in one field and render the
+      leak the server declined to produce -- from data each request was
+      individually entitled to.
+    */
+    expect(readTitles(cache)).toEqual(['Ours'])
+    expect(readTitles(cache, 'other-workspace')).toEqual(['Theirs'])
   })
 
   it('drops a node the incoming page repeats', () => {
@@ -202,7 +248,7 @@ describe('issues field policy', () => {
 
     const data = cache.readQuery({
       query: IssueListDocument,
-      variables: { after: null },
+      variables: { workspaceSlug: WORKSPACE_SLUG, after: null },
     })
 
     /*
@@ -248,7 +294,7 @@ function openList() {
 
   const observable = client.watchQuery({
     query: IssueListDocument,
-    variables: { after: null },
+    variables: { workspaceSlug: WORKSPACE_SLUG, after: null },
     // Exactly what `useIssueList` sets, and for the same reason: the whole
     // loading model depends on the status changing mid-flight.
     notifyOnNetworkStatusChange: true,

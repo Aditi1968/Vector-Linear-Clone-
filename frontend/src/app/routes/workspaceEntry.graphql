@@ -1,0 +1,24 @@
+# Which workspace to open when the URL does not say.
+#
+# Every screen in the product is addressed as `/:workspaceSlug/...` now that
+# the API requires a workspace on every field, so `/` has to resolve to one
+# before anything can be rendered. This is that resolution and its only
+# consumer is ./WorkspaceEntry.
+#
+# `myWorkspaces` and not `myWorkspace(slug:)`, because the whole point is
+# that no slug is known yet. It takes no arguments at all: the list is the
+# viewer's own memberships, bounded server-side by
+# `app.services.memberships.MEMBERSHIP_LIST_LIMIT`, so there is nothing to
+# page and nothing a client could ask for that would widen it.
+#
+# `name` is selected alongside `slug` for the empty and error states, which
+# are the two screens this query exists to make correct -- an account in no
+# workspace is a real state and not a failure.
+query WorkspaceEntry {
+  myWorkspaces {
+    workspace {
+      slug
+      name
+    }
+  }
+}

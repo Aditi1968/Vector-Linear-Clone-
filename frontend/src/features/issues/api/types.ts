@@ -43,7 +43,10 @@ import type {
   IssueListQuery,
   IssueListQueryVariables,
   IssueRowFieldsFragment,
+  WorkspaceTeamsQuery,
+  WorkspaceTeamsQueryVariables,
 } from '../../../generated/operations'
+import type { IssueCreateInput as IssueCreateInputType } from '../../../generated/schema'
 
 /**
  * `IssueCreateInput` as the schema declares it, re-exported unchanged.
@@ -61,6 +64,25 @@ import type {
  * three regardless, which is still valid.
  */
 export type { IssueCreateInput } from '../../../generated/schema'
+
+/**
+ * What the composer actually collects: `IssueCreateInput` minus the two
+ * fields nobody types.
+ *
+ * `workspaceSlug` comes from the URL and `teamId` from `WorkspaceTeams`, and
+ * ./useCreateIssue supplies both. Derived from the schema type with `Omit`
+ * rather than declared, so a field added to `IssueCreateInput` appears here
+ * automatically and a field REMOVED from it becomes a compile error in this
+ * file rather than a silently ignored property on the wire.
+ */
+export type IssueDraft = Omit<IssueCreateInputType, 'workspaceSlug' | 'teamId'>
+
+/** The teams of one workspace, as this feature selects them. */
+export type WorkspaceTeamsData = WorkspaceTeamsQuery
+export type WorkspaceTeamsVariables = WorkspaceTeamsQueryVariables
+
+/** One row of `teams`, which is all ./useCreateIssue needs a team for. */
+export type WorkspaceTeam = WorkspaceTeamsQuery['teams'][number]
 
 /**
  * The fields every list row selects.

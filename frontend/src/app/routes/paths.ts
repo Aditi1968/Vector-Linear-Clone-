@@ -9,10 +9,9 @@
  * be found and rewritten, and the ones that are missed keep working in
  * development (where there is one workspace) and break in production.
  *
- * Nothing here invents a workspace concept. There is no workspace GraphQL
- * surface yet, no slug, no route param, and this module does not pretend
- * otherwise. What it does is put the *seam* in one file, so that the concept
- * can be added in one place when the backend actually has one.
+ * The workspace segment has now arrived, and the seam is why it cost two
+ * lines here and none anywhere else: `createAppPaths` already took a prefix,
+ * so every path gained `/:workspaceSlug` by the prefix becoming non-empty.
  */
 
 /**
@@ -24,6 +23,16 @@ const ISSUES_SEGMENT = 'issues'
 
 /** The dynamic segment carrying an issue id, as `useParams` will key it. */
 export const ISSUE_ID_PARAM = 'issueId'
+
+/**
+ * The dynamic segment carrying the workspace slug, as `useParams` keys it.
+ *
+ * Named here rather than written into the route table and the hook
+ * separately: the two have to agree exactly, and a typo in either is not a
+ * crash but a `undefined` slug that turns every request into an
+ * authentication failure a long way from its cause.
+ */
+export const WORKSPACE_SLUG_PARAM = 'workspaceSlug'
 
 /**
  * Route paths as the router declares them.
@@ -50,11 +59,11 @@ export interface AppPaths {
 /**
  * Build the path set for a given scope prefix.
  *
- * `scopePrefix` is the seam. It is `''` today, which yields the flat paths
- * the router currently declares. When workspaces land it becomes
- * `/${workspaceSlug}` and every path gains the segment at once -- with no
- * change to any caller, because callers only ever ask for `issues()` or
- * `issue(id)` and never see the prefix.
+ * `scopePrefix` is the seam, and it is `/${workspaceSlug}` in the running
+ * application: every path gains the segment at once, with no change to any
+ * caller, because callers only ever ask for `issues()` or `issue(id)` and
+ * never see the prefix. It still defaults to `''` for the one caller that
+ * has no workspace -- ./WorkspaceEntry, which is resolving which one to use.
  */
 export function createAppPaths(scopePrefix = ''): AppPaths {
   return {
@@ -71,8 +80,9 @@ export function createAppPaths(scopePrefix = ''): AppPaths {
 /**
  * The unscoped path set.
  *
- * For code that runs outside React and therefore cannot use a hook -- the
- * route table's redirect, for instance. Components use `useAppPaths()`,
- * which is the form that survives the addition of a workspace scope.
+ * For code that runs outside React and therefore cannot use a hook. Nothing
+ * a signed-in user sees should reach for it now that every screen is under a
+ * workspace: an unscoped `/issues` matches `/:workspaceSlug` with the slug
+ * `issues`, which is a workspace nobody has. Components use `useAppPaths()`.
  */
 export const appPaths: AppPaths = createAppPaths()

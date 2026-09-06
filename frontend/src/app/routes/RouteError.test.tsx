@@ -59,27 +59,26 @@ function Exploding(): never {
   throw THROWN
 }
 
-/** The real table, plus one route that fails. */
+/** The real table, plus one route that fails inside the workspace shell. */
 function routesWith(extra: RouteObject): RouteObject[] {
-  const [root] = routes
+  // The workspace route, not `routes[0]`. The table's first entry is the
+  // index route that resolves `/` to a workspace, and it has no children to
+  // hang a failing route off -- the shell is the one under `/:workspaceSlug`.
+  // `RouteObject` is a union and an index route may not have children, so
+  // the predicate is what makes the spread below type-check as well as what
+  // picks the right route: TypeScript infers it and narrows `shell` to the
+  // non-index member.
+  const shell = routes.find((route) => route.index !== true)
 
-  if (root === undefined) {
-    throw new Error('The route table has no root route')
-  }
-
-  if (root.index === true) {
-    // Narrowing rather than paranoia: `RouteObject` is a union, and an index
-    // route may not have children -- so without this the spread below would
-    // produce a shape the type rejects. The root is the shell route and is
-    // not an index route.
-    throw new Error('Expected the route table to start with a non-index route')
+  if (shell === undefined) {
+    throw new Error('The route table has no non-index shell route')
   }
 
   return [
     {
       // Carries the real `errorElement`. See the note at the top of the file.
-      ...root,
-      children: [...(root.children ?? []), extra],
+      ...shell,
+      children: [...(shell.children ?? []), extra],
     },
   ]
 }
@@ -101,7 +100,7 @@ describe('RouteError', () => {
     // detail itself. Silenced so the run stays readable, and asserted below.
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/explode')
+    renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
 
     // Something controlled rendered: not a blank page, and not a crash that
     // took the render down with it.
@@ -169,7 +168,7 @@ describe('RouteError', () => {
         },
         element: <div />,
       }),
-      '/missing',
+      '/acme/missing',
     )
 
     // A router-thrown response carries a status worth showing, unlike an
@@ -185,7 +184,7 @@ describe('RouteError', () => {
   it('renders standalone rather than inside the shell, deliberately', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/explode')
+    renderAt(routesWith({ path: 'explode', element: <Exploding /> }), '/acme/explode')
 
     /*
       `RouteError` owns its own `<main>`, and that is *not* the duplicate

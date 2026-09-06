@@ -1,8 +1,19 @@
 import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { issueListData, issueRow } from '../test/factories'
+import {
+  issueListData,
+  issueRow,
+  WORKSPACE_SLUG,
+  workspaceEntryData,
+} from '../test/factories'
 import { main, renderApp } from '../test/render'
+
+
+// A URL inside the workspace that matches no page. `/somewhere-else` is not
+// one any more: the first segment is the workspace slug, so an unknown
+// top-level path is a workspace nobody has rather than a missing page.
+const UNKNOWN_PATH = `/${WORKSPACE_SLUG}/somewhere-else`
 
 /**
  * The application shell.
@@ -62,26 +73,45 @@ describe('application shell', () => {
     expect(main().id).toBe(href?.slice(1))
   })
 
-  it('redirects the root URL to the issue list', async () => {
+  it('resolves the root URL to the first workspace it can see', async () => {
     const { link, currentPath } = renderApp({ initialPath: '/' })
 
+    // `/` cannot be a page: every screen is inside a workspace and the URL
+    // does not say which. It asks, and only then is there a list to render.
+    await link.resolve('WorkspaceEntry', {
+      data: workspaceEntryData(WORKSPACE_SLUG, 'other'),
+    })
     await link.resolve('IssueList', { data: issueListData([issueRow(1)]) })
 
-    expect(currentPath()).toBe('/issues')
+    // The FIRST membership, and the workspace is in the URL rather than in
+    // state -- which is what makes the resulting link shareable.
+    expect(currentPath()).toBe(`/${WORKSPACE_SLUG}/issues`)
     expect(screen.getByRole('heading', { level: 1, name: 'Issues' })).toBeInTheDocument()
   })
 
+  it('says so rather than looking broken when there is no workspace', async () => {
+    const { link } = renderApp({ initialPath: '/' })
+
+    await link.resolve('WorkspaceEntry', { data: workspaceEntryData() })
+
+    // A real state -- an account created but not invited anywhere -- and not
+    // a failure, so it gets a sentence rather than an error screen.
+    expect(
+      screen.getByRole('heading', { level: 1, name: 'No workspace yet' }),
+    ).toBeInTheDocument()
+  })
+
   it('navigates to Issues from another route', async () => {
-    const { link, user, currentPath } = renderApp({ initialPath: '/somewhere-else' })
+    const { link, user, currentPath } = renderApp({ initialPath: UNKNOWN_PATH })
 
     // The unknown route renders inside the shell rather than replacing it.
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
-    expect(currentPath()).toBe('/somewhere-else')
+    expect(currentPath()).toBe(UNKNOWN_PATH)
 
     const nav = screen.getByRole('navigation', { name: 'Main' })
     await user.click(within(nav).getByRole('link', { name: 'Issues' }))
 
-    expect(currentPath()).toBe('/issues')
+    expect(currentPath()).toBe(`/${WORKSPACE_SLUG}/issues`)
 
     await link.resolve('IssueList', {
       data: issueListData([issueRow(1, { title: 'Reached the list' })]),
@@ -92,7 +122,7 @@ describe('application shell', () => {
 
   it('marks the Issues navigation item as the current page while on a detail view', async () => {
     const { link } = renderApp({
-      initialPath: '/issues/00000000-0000-4000-8000-000000000001',
+      initialPath: `/${WORKSPACE_SLUG}/issues/00000000-0000-4000-8000-000000000001`,
     })
 
     await link.idle()
@@ -146,7 +176,7 @@ describe('application shell', () => {
     })
 
     it('is disabled on a screen that cannot create issues', () => {
-      renderApp({ initialPath: '/somewhere-else' })
+      renderApp({ initialPath: UNKNOWN_PATH })
 
       // Disabled rather than enabled-and-inert. A primary button that
       // swallows a click is a bug report, not a feature gap.
@@ -155,11 +185,11 @@ describe('application shell', () => {
   })
 
   it('renders an unknown URL inside the shell, with one main landmark', () => {
-    const { currentPath } = renderApp({ initialPath: '/somewhere-else' })
+    const { currentPath } = renderApp({ initialPath: UNKNOWN_PATH })
 
     // The URL that missed is kept, which is what makes a mistyped link
     // recoverable rather than a dead end.
-    expect(currentPath()).toBe('/somewhere-else')
+    expect(currentPath()).toBe(UNKNOWN_PATH)
     expect(screen.getByRole('navigation', { name: 'Main' })).toBeInTheDocument()
 
     // The not-found screen renders a fragment and adds no `<main>` of its
@@ -175,7 +205,7 @@ describe('application shell', () => {
   })
 
   it('does not present search as something that works', () => {
-    renderApp({ initialPath: '/somewhere-else' })
+    renderApp({ initialPath: UNKNOWN_PATH })
 
     /*
       The accessible name is pinned exactly rather than matched loosely.

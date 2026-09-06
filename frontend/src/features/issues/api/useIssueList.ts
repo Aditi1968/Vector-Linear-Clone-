@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react'
 import { NetworkStatus } from '@apollo/client'
 import { useQuery } from '@apollo/client/react'
 
+import { useWorkspaceSlug } from '../../../app/routes'
 import { describeError } from '../lib/errors'
 import { IssueListDocument } from './documents'
 import type { IssueRowFields } from './types'
@@ -57,8 +58,19 @@ export interface UseIssueListResult {
  * entire loading model depends on the status changing mid-flight, and a
  * default that quietly flipped would turn "load more" into a dead button
  * rather than into a type error.
+ *
+ * ## The workspace comes from the URL
+ *
+ * `issues` requires a `workspaceSlug`, and this hook reads it from the route
+ * rather than taking it as an argument. Two reasons, and neither is
+ * convenience: no screen that renders this list has a workspace to pass that
+ * the URL does not already state, and a prop would let two components on one
+ * page disagree about which tenant they are showing. The cache keys pages on
+ * the same argument (see `src/lib/graphql/cache.ts`), so moving between
+ * workspaces reads a different list rather than merging two.
  */
 export function useIssueList(): UseIssueListResult {
+  const workspaceSlug = useWorkspaceSlug()
   const [loadMoreErrorMessage, setLoadMoreErrorMessage] = useState<string | null>(null)
 
   /**
@@ -76,10 +88,11 @@ export function useIssueList(): UseIssueListResult {
   const inFlightCursor = useRef<string | null>(null)
 
   const { data, error, networkStatus, fetchMore, refetch } = useQuery(IssueListDocument, {
-    // `null` rather than omitted. The merge policy reads `args.after` to
-    // decide whether a result starts the list or extends it, and stating the
-    // cursor keeps that decision reading from a value the document declares.
-    variables: { after: null },
+    // `after: null` rather than omitted. The merge policy reads `args.after`
+    // to decide whether a result starts the list or extends it, and stating
+    // the cursor keeps that decision reading from a value the document
+    // declares.
+    variables: { workspaceSlug, after: null },
     notifyOnNetworkStatusChange: true,
   })
 

@@ -1,6 +1,7 @@
 import { useCallback } from 'react'
 import { useQuery } from '@apollo/client/react'
 
+import { useWorkspaceSlug } from '../../../app/routes'
 import { describeError } from '../lib/errors'
 import { IssueDetailDocument } from './documents'
 import type { IssueDetailFields } from './types'
@@ -48,13 +49,20 @@ export interface UseIssueDetailResult {
  * clicking a row.
  */
 export function useIssueDetail(issueId: string | undefined): UseIssueDetailResult {
+  // From the route, like the id beside it. `issue(workspaceSlug:, id:)`
+  // resolves an id belonging to another workspace to null, so a URL pairing
+  // this workspace with somebody else's issue id renders the not-found
+  // screen -- the same screen an id that exists nowhere gets, and the same
+  // answer the server gives.
+  const workspaceSlug = useWorkspaceSlug()
+
   const isRequestable = issueId !== undefined && UUID_PATTERN.test(issueId)
 
   const { data, error, loading, refetch } = useQuery(IssueDetailDocument, {
     // `id` still has to type-check when the query is skipped, so an id that
     // will not be sent is passed as the empty string rather than smuggled
     // past the type with a cast.
-    variables: { id: issueId ?? '' },
+    variables: { workspaceSlug, id: issueId ?? '' },
     skip: !isRequestable,
   })
 

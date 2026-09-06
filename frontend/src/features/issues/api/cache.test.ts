@@ -26,6 +26,11 @@ import { IssueListDocument, prependCreatedIssue } from './index'
  * make fail loudly rather than silently.
  */
 
+// The workspace every list here belongs to. `prependCreatedIssue` takes one
+// because the cached list is keyed on it, which is what stops a created
+// issue from being prepended to another tenant's list.
+const WORKSPACE_SLUG = 'acme'
+
 const PAGE_ONE_END = cursor('page-one')
 const PAGE_TWO_END = cursor('page-two')
 
@@ -59,7 +64,7 @@ function openList() {
 
   const observable = client.watchQuery({
     query: IssueListDocument,
-    variables: { after: null },
+    variables: { workspaceSlug: WORKSPACE_SLUG, after: null },
     notifyOnNetworkStatusChange: true,
   })
 
@@ -139,7 +144,7 @@ describe('prependCreatedIssue', () => {
       expect(latest(probe.emissions).ids).toHaveLength(50)
 
       const created = issueDetail(999, { title: 'Just created' })
-      prependCreatedIssue(probe.client.cache, created)
+      prependCreatedIssue(probe.client.cache, created, WORKSPACE_SLUG)
       await probe.link.idle()
 
       const after = latest(probe.emissions)
@@ -178,8 +183,8 @@ describe('prependCreatedIssue', () => {
 
       // A retried update, or a future optimistic response reconciled against
       // the real one.
-      prependCreatedIssue(probe.client.cache, created)
-      prependCreatedIssue(probe.client.cache, created)
+      prependCreatedIssue(probe.client.cache, created, WORKSPACE_SLUG)
+      prependCreatedIssue(probe.client.cache, created, WORKSPACE_SLUG)
       await probe.link.idle()
 
       const after = latest(probe.emissions)
@@ -198,10 +203,13 @@ describe('prependCreatedIssue', () => {
 
     // No list on screen to keep consistent. Writing one would invent a first
     // page out of a single row and then report `hasNextPage: false` about it.
-    prependCreatedIssue(client.cache, issueDetail(999))
+    prependCreatedIssue(client.cache, issueDetail(999), WORKSPACE_SLUG)
 
     expect(
-      client.cache.readQuery({ query: IssueListDocument, variables: { after: null } }),
+      client.cache.readQuery({
+        query: IssueListDocument,
+        variables: { workspaceSlug: WORKSPACE_SLUG, after: null },
+      }),
     ).toBeNull()
   })
 })

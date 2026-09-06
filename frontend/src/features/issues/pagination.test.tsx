@@ -1,7 +1,12 @@
 import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
-import { cursor, issueListData, issueRow } from '../../test/factories'
+import {
+  cursor,
+  issueListData,
+  issueRow,
+  WORKSPACE_SLUG,
+} from '../../test/factories'
 import { issueRowTexts, issueRows, main, renderApp } from '../../test/render'
 
 /**
@@ -46,7 +51,9 @@ describe('issue list pagination', () => {
 
     // `after: null` and not an omitted key: the merge policy reads
     // `args.after` to decide whether a result starts the list or extends it.
-    expect(variables).toEqual({ after: null })
+    // The workspace rides along on every page, because the field requires
+    // one and the cache keys the list on it.
+    expect(variables).toEqual({ workspaceSlug: WORKSPACE_SLUG, after: null })
   })
 
   it('sends the previous page endCursor as `after`, and nothing that could be an offset', async () => {
@@ -74,7 +81,7 @@ describe('issue list pagination', () => {
           have.
     */
     expect(Number.isNaN(Number(variables['after']))).toBe(true)
-    expect(Object.keys(variables)).toEqual(['after'])
+    expect(Object.keys(variables)).toEqual(['workspaceSlug', 'after'])
 
     // The whole sequence, in order: no cursor, then the frontier the server
     // reported. Two numbers here would mean an offset implementation.

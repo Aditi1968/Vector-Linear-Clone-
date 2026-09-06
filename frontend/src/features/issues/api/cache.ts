@@ -4,14 +4,18 @@ import { IssueListDocument } from './documents'
 import type { IssueDetailFields, IssueListVariables } from './types'
 
 /**
- * Variables the cached list is stored under.
+ * Variables the cached list is stored under, for one workspace.
  *
- * `after: null` is the first page's variables, and with the field policy's
- * `keyArgs: false` (see `src/lib/graphql/cache.ts`) every page of `issues`
- * lives in one cache field regardless of arguments. So this reads and writes
- * *the* list, not a page of it.
+ * `after: null` is the first page's variables. The field policy in
+ * `src/lib/graphql/cache.ts` keys on `workspaceSlug` and not on the cursor,
+ * so every page of one workspace's `issues` lives in one cache field and
+ * this reads and writes *the* list rather than a page of it -- while a
+ * second workspace's list is a different field entirely, which is what stops
+ * an issue created here from being prepended to another tenant's list.
  */
-const FIRST_PAGE_VARIABLES: IssueListVariables = { after: null }
+function firstPageVariables(workspaceSlug: string): IssueListVariables {
+  return { workspaceSlug, after: null }
+}
 
 /**
  * Put a just-created issue into the cached list.
@@ -81,9 +85,10 @@ const FIRST_PAGE_VARIABLES: IssueListVariables = { after: null }
 export function prependCreatedIssue(
   cache: ApolloCache,
   created: IssueDetailFields,
+  workspaceSlug: string,
 ): void {
   cache.updateQuery(
-    { query: IssueListDocument, variables: FIRST_PAGE_VARIABLES },
+    { query: IssueListDocument, variables: firstPageVariables(workspaceSlug) },
     (existing) => {
       if (existing === null) {
         return
