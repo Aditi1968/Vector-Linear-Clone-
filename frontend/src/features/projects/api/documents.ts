@@ -20,6 +20,7 @@ export {
   ProjectDetailDocument,
   ProjectIssuesDocument,
   ProjectListDocument,
+  ProjectMembersDocument,
   ProjectMilestoneCreateDocument,
   ProjectMilestoneDeleteDocument,
   ProjectMilestoneUpdateDocument,

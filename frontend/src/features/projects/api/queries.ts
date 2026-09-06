@@ -7,10 +7,17 @@ import {
   ProjectDetailDocument,
   ProjectIssuesDocument,
   ProjectListDocument,
+  ProjectMembersDocument,
   ProjectTeamsDocument,
 } from './documents'
 import { describeError } from './errors'
-import type { ProjectDetailFields, ProjectIssue, ProjectRowFields, ProjectTeam } from './types'
+import type {
+  ProjectDetailFields,
+  ProjectIssue,
+  ProjectMember,
+  ProjectRowFields,
+  ProjectTeam,
+} from './types'
 
 /**
  * Canonical hyphenated UUID.
@@ -26,6 +33,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 /** Stable identities for "nothing yet", so memoised children are not defeated. */
 const NO_PROJECTS: readonly ProjectRowFields[] = []
 const NO_TEAMS: readonly ProjectTeam[] = []
+const NO_MEMBERS: readonly ProjectMember[] = []
 const NO_ISSUES: readonly ProjectIssue[] = []
 
 export interface UseProjectListResult {
@@ -187,6 +195,39 @@ export function useProjectTeams(): UseProjectTeamsResult {
 
   return {
     teams: data?.teams ?? NO_TEAMS,
+    isLoading: loading,
+    errorMessage: error === undefined ? null : describeError(error),
+  }
+}
+
+export interface UseProjectMembersResult {
+  members: readonly ProjectMember[]
+  isLoading: boolean
+  /**
+   * Deliberately not surfaced as a page-level error.
+   *
+   * A member list that fails to load costs a lead's *name*, and the screen
+   * degrades to saying the lead is someone it cannot identify. Taking the
+   * whole project page down over it would be a worse answer than that.
+   */
+  errorMessage: string | null
+}
+
+/**
+ * The workspace's members, for resolving and choosing a project lead.
+ *
+ * `Project.leadId` is a bare UUID and there is no `Project.lead` field, so
+ * this is the only thing standing between a person's name and a UUID printed
+ * on screen.
+ */
+export function useProjectMembers(): UseProjectMembersResult {
+  const workspaceSlug = useWorkspaceSlug()
+  const { data, error, loading } = useQuery(ProjectMembersDocument, {
+    variables: { workspaceSlug },
+  })
+
+  return {
+    members: data?.workspaceMembers ?? NO_MEMBERS,
     isLoading: loading,
     errorMessage: error === undefined ? null : describeError(error),
   }

@@ -25,6 +25,7 @@ import type {
   ProjectDetailQuery,
   ProjectIssuesQuery,
   ProjectListQuery,
+  ProjectMembersQuery,
   ProjectMilestoneFieldsFragment,
   ProjectRowFieldsFragment,
   ProjectTeamsQuery,
@@ -53,6 +54,9 @@ export type ProjectDetailFields = ProjectDetailFieldsFragment
 
 /** One milestone, as every screen that renders one receives it. */
 export type ProjectMilestone = ProjectMilestoneFieldsFragment
+
+/** One member of the workspace, as the lead picker and the lead label need them. */
+export type ProjectMember = ProjectMembersQuery['workspaceMembers'][number]
 
 /** One team of the workspace, as the membership editor needs it. */
 export type ProjectTeam = ProjectTeamsQuery['teams'][number]
