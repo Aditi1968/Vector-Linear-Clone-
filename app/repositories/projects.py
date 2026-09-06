@@ -8,6 +8,29 @@ from app.domain.projects import ProjectEntity, ProjectMilestoneEntity
 from app.domain.tenancy import WorkspaceScope
 
 
+# `list[...]` is not spellable inside the class below, and the reason is worth
+# knowing rather than working around twice.
+#
+# The class has a method called `list` -- the API's name, kept deliberately;
+# see the note on ruff's `A` rules in pyproject.toml. A class body is an
+# ordinary namespace evaluated top to bottom, so from that `def` onwards the
+# name `list` in it IS the method. `-> list[ProjectMilestoneEntity]` on a
+# method below it is then a subscript of a function: `TypeError: 'function'
+# object is not subscriptable` at import time, and `Function ... is not valid
+# as a type` from mypy.
+#
+# `from __future__ import annotations` is the tempting fix and the wrong one:
+# it defers evaluation, so the import succeeds and mypy still cannot read the
+# signature -- the same defect, now silent. An alias resolved out here, where
+# `list` is still the builtin, fixes both halves.
+#
+# Only the milestone list needs one. Every other `list[...]` in the class sits
+# above the `def list`, where the name still means the builtin -- which is a
+# fact about the current ordering and not a rule, so a method moved below it
+# needs this alias too.
+Milestones = list[ProjectMilestoneEntity]
+
+
 class ProjectRepository:
     """SQL access for `projects`, `project_teams` and `project_milestones`.
 
@@ -61,6 +84,7 @@ class ProjectRepository:
                 description,
                 state,
                 target_date,
+                lead_id,
                 created_at,
                 updated_at,
                 (
@@ -109,6 +133,7 @@ class ProjectRepository:
                 description,
                 state,
                 target_date,
+                lead_id,
                 created_at,
                 updated_at,
                 (
@@ -165,6 +190,7 @@ class ProjectRepository:
                     description,
                     state,
                     target_date,
+                    lead_id,
                     created_at,
                     updated_at,
                     (
@@ -193,6 +219,7 @@ class ProjectRepository:
                     description,
                     state,
                     target_date,
+                    lead_id,
                     created_at,
                     updated_at,
                     (
@@ -228,6 +255,7 @@ class ProjectRepository:
         description: str | None,
         state: str,
         target_date: date | None,
+        lead_id: UUID | None,
     ) -> ProjectEntity:
         """Insert one project into this workspace.
 
@@ -235,6 +263,13 @@ class ProjectRepository:
         so omitting it would be a NOT NULL violation rather than a quiet
         mis-filing. `state` likewise: the schema names the legal states and
         refuses everything else, but it does not choose one.
+
+        `lead_id` is written into the same row as `workspace_id`, which is what
+        makes `projects_lead_fk` a check worth having: both halves of that
+        composite key come from this one statement, so a lead who is not a
+        member of THIS workspace raises ForeignKeyViolationError here rather
+        than being admitted by a SELECT the caller ran a moment earlier. There
+        is no pre-check, deliberately -- see the class docstring.
 
         `team_ids` comes back as an empty array literal rather than from a
         query. A project one statement old has no `project_teams` rows -- no
@@ -248,15 +283,17 @@ class ProjectRepository:
                 name,
                 description,
                 state,
-                target_date
+                target_date,
+                lead_id
             )
-            VALUES ($1, $2, $3, $4, $5)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING
                 id,
                 name,
                 description,
                 state,
                 target_date,
+                lead_id,
                 created_at,
                 updated_at,
                 ARRAY[]::UUID[] AS team_ids
@@ -266,6 +303,7 @@ class ProjectRepository:
             description,
             state,
             target_date,
+            lead_id,
         )
 
         return self._to_project(row)
@@ -284,6 +322,8 @@ class ProjectRepository:
         state: str | None,
         set_target_date: bool,
         target_date: date | None,
+        set_lead_id: bool,
+        lead_id: UUID | None,
     ) -> ProjectEntity | None:
         """Apply a partial update, or return nothing if there is no such row.
 
@@ -306,6 +346,13 @@ class ProjectRepository:
 
         Returning None means no row in THIS workspace has that id. The caller
         cannot tell that from "no such project anywhere", which is the point.
+
+        Setting `lead_id` re-checks `projects_lead_fk` against the row's
+        existing `workspace_id`, which this statement never touches -- so a
+        lead from another tenant is refused here exactly as it is on insert.
+        Clearing it (`set_lead_id` true, `lead_id` None) writes a NULL, and
+        MATCH SIMPLE then exempts the row, which is what "this project has no
+        lead" is stored as.
         """
         row = await connection.fetchrow(
             """
@@ -319,6 +366,7 @@ class ProjectRepository:
                 target_date = CASE
                     WHEN $9::BOOLEAN THEN $10::DATE ELSE target_date
                 END,
+                lead_id = CASE WHEN $11::BOOLEAN THEN $12::UUID ELSE lead_id END,
                 updated_at = now()
             WHERE workspace_id = $1 AND id = $2
             RETURNING
@@ -327,6 +375,7 @@ class ProjectRepository:
                 description,
                 state,
                 target_date,
+                lead_id,
                 created_at,
                 updated_at,
                 (
@@ -348,6 +397,8 @@ class ProjectRepository:
             state,
             set_target_date,
             target_date,
+            set_lead_id,
+            lead_id,
         )
 
         if row is None:
@@ -374,7 +425,9 @@ class ProjectRepository:
         transaction. That ordering is deliberate -- see the note there on why
         the schema refuses to do it silently.
         """
-        status = await connection.execute(
+        # Annotated rather than compared inline: asyncpg ships no types, so
+        # `execute` is Any and `Any == str` would silently satisfy `bool`.
+        status: str = await connection.execute(
             """
             DELETE FROM projects
             WHERE workspace_id = $1 AND id = $2
@@ -436,7 +489,9 @@ class ProjectRepository:
         indistinguishability every read in this class provides, on the write
         path.
         """
-        status = await connection.execute(
+        # Annotated rather than compared inline: asyncpg ships no types, so
+        # `execute` is Any and `Any == str` would silently satisfy `bool`.
+        status: str = await connection.execute(
             """
             DELETE FROM project_teams
             WHERE workspace_id = $1 AND project_id = $2 AND team_id = $3
@@ -602,7 +657,8 @@ class ProjectRepository:
         *,
         scope: WorkspaceScope,
         project_id: UUID,
-    ) -> list[ProjectMilestoneEntity]:
+        limit: int,
+    ) -> Milestones:
         """One project's milestones, in display order.
 
         Not paginated, and that is a product statement rather than an
@@ -610,9 +666,15 @@ class ProjectRepository:
         whole, so a cursor would buy a second round trip for every project
         page and a `hasNextPage` nobody reads.
 
+        `limit` is required rather than defaulted, so the bound is a decision
+        the service states out loud; see MILESTONE_LIST_LIMIT for what it is
+        and why an unpaginated list needs one at all.
+
         `ORDER BY position, id` -- `id` because `position` is not unique, so
         without it two milestones sharing a number come back in whatever order
-        the scan produced, differently between calls and between replicas.
+        the scan produced, differently between calls and between replicas. It
+        is also what makes the truncation deterministic: without a total order
+        the rows the limit keeps would vary between calls.
         """
         rows = await connection.fetch(
             """
@@ -627,9 +689,11 @@ class ProjectRepository:
             FROM project_milestones
             WHERE workspace_id = $1 AND project_id = $2
             ORDER BY position, id
+            LIMIT $3
             """,
             scope.workspace_id,
             project_id,
+            limit,
         )
 
         return [self._to_milestone(row) for row in rows]
@@ -640,13 +704,26 @@ class ProjectRepository:
         *,
         scope: WorkspaceScope,
         project_ids: Sequence[UUID],
-    ) -> list[ProjectMilestoneEntity]:
+        limit_per_project: int,
+    ) -> Milestones:
         """Every listed project's milestones, in one statement.
 
         The batching half of `Project.milestones`. Ordered by project first so
         the caller can group without re-sorting, then by the same
         `(position, id)` `list_milestones` uses -- one ordering rule for
         milestones, stated in two places that this file keeps identical.
+
+        The limit is PER PROJECT, which is why it is a window function and not
+        a `LIMIT`. A plain limit over the result would divide one budget among
+        however many projects were on the page, so a project would come back
+        whole when read alone and truncated when read in a list -- and which
+        projects lost rows would depend on the page they landed on. Ranking
+        inside `PARTITION BY project_id` gives each project the same bound it
+        gets from `list_milestones`.
+
+        `ORDER BY position, id` inside the window matches the outer ordering
+        exactly. If the two disagreed the rows kept would not be the rows
+        shown first, which is the subtle way a per-partition limit goes wrong.
         """
         rows = await connection.fetch(
             """
@@ -658,12 +735,27 @@ class ProjectRepository:
                 position,
                 created_at,
                 updated_at
-            FROM project_milestones
-            WHERE workspace_id = $1 AND project_id = ANY($2::UUID[])
+            FROM (
+                SELECT
+                    id,
+                    project_id,
+                    name,
+                    target_date,
+                    position,
+                    created_at,
+                    updated_at,
+                    row_number() OVER (
+                        PARTITION BY project_id ORDER BY position, id
+                    ) AS rank
+                FROM project_milestones
+                WHERE workspace_id = $1 AND project_id = ANY($2::UUID[])
+            ) ranked
+            WHERE rank <= $3
             ORDER BY project_id, position, id
             """,
             scope.workspace_id,
             list(project_ids),
+            limit_per_project,
         )
 
         return [self._to_milestone(row) for row in rows]
@@ -681,7 +773,9 @@ class ProjectRepository:
         carrying issues makes the server refuse this. The service clears those
         issues first, in the same transaction.
         """
-        status = await connection.execute(
+        # Annotated rather than compared inline: asyncpg ships no types, so
+        # `execute` is Any and `Any == str` would silently satisfy `bool`.
+        status: str = await connection.execute(
             """
             DELETE FROM project_milestones
             WHERE workspace_id = $1 AND id = $2
@@ -722,6 +816,7 @@ class ProjectRepository:
             description=row["description"],
             state=row["state"],
             target_date=row["target_date"],
+            lead_id=row["lead_id"],
             team_ids=tuple(row["team_ids"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],

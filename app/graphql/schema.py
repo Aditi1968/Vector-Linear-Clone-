@@ -10,9 +10,11 @@ from app.config import Environment
 from app.graphql.limits import operation_limit_extensions
 from app.graphql.mutations.auth import AuthMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
+from app.graphql.mutations.projects import ProjectMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.issues import Query as IssueQuery
 from app.graphql.queries.memberships import MembershipQuery
+from app.graphql.queries.projects import ProjectQuery
 from app.graphql.queries.teams import TeamQuery
 
 
@@ -30,8 +32,17 @@ from app.graphql.queries.teams import TeamQuery
 #
 # Tuple order is SDL field order, so it stays stable across exports and
 # `frontend/schema.graphql` does not churn.
-Query = merge_types("Query", (IssueQuery, AuthQuery, TeamQuery, MembershipQuery))
-Mutation = merge_types("Mutation", (IssueMutation, AuthMutation))
+#
+# These two calls are the ONLY definition of the root types. A second
+# `class Query(...)` anywhere below them silently shadows the merge -- the name
+# is simply rebound, `build_schema` picks up whichever came last, and the
+# fields of every feature not named in that class vanish from the API with the
+# whole suite still green. This has happened here once already. Add a feature
+# by extending the tuples, never by declaring another root.
+Query = merge_types(
+    "Query", (IssueQuery, AuthQuery, TeamQuery, MembershipQuery, ProjectQuery)
+)
+Mutation = merge_types("Mutation", (IssueMutation, AuthMutation, ProjectMutation))
 
 
 # The public error vocabulary. An error reaches a client with its own

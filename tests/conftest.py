@@ -253,6 +253,7 @@ def graphql_context(**services) -> VectorContext:
         "workspace_service",
         "auth_service",
         "membership_service",
+        "project_service",
     }
     environment = services.pop("environment", "test")
     tenant = services.pop("tenant", None) or FakeTenant()
@@ -345,6 +346,8 @@ def as_record(entity: IssueEntity) -> dict:
         "title": entity.title,
         "description": entity.description,
         "priority": entity.priority,
+        "project_id": entity.project_id,
+        "milestone_id": entity.milestone_id,
         "completed_at": entity.completed_at,
         "created_at": entity.created_at,
         "updated_at": entity.updated_at,
@@ -364,6 +367,11 @@ def make_entity(index: int) -> IssueEntity:
         title=f"Issue {index}",
         description=None,
         priority=1,
+        # In no project. That is what the great majority of issues are, so it
+        # is what the default fixture should be; a test about projects builds
+        # its own entity rather than every unrelated suite carrying one.
+        project_id=None,
+        milestone_id=None,
         completed_at=None,
         created_at=created_at,
         updated_at=created_at,

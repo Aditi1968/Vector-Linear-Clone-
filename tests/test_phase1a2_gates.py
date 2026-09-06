@@ -69,6 +69,10 @@ EXPECTED_MIGRATIONS = [
     "003_auth.sql",
     "004_membership.sql",
     "005_team_workflows.sql",
+    # 006, 007 and 008 are owned by branches that have not landed. The gap is
+    # deliberate and not a hole to be filled: this list is what the repository
+    # HAS, so a number reserved elsewhere belongs here only once its file does.
+    "009_projects.sql",
 ]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the

@@ -37,7 +37,6 @@ Marked `db`: deselected by default, skipped when Docker is unreachable.
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from uuid import UUID
 
 import asyncpg
@@ -50,14 +49,10 @@ from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
 from app.services.teams import TeamService
 
-from tests.conftest import reset_schema
+from tests.conftest import apply_all_migrations, reset_schema
 
 
 pytestmark = pytest.mark.db
-
-MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
-MIGRATION_001 = MIGRATIONS_DIR / "001_issues.sql"
-MIGRATION_002 = MIGRATIONS_DIR / "002_tenancy.sql"
 
 # The tenant 002 seeds, named in that file as literals precisely so a test can
 # assert against a constant. Every seed row here belongs to it: this file is
@@ -68,11 +63,16 @@ BOOTSTRAP_TEAM_ID = UUID("00000000-0000-7000-8000-000000000002")
 
 SCOPE = WorkspaceScope(workspace_id=BOOTSTRAP_WORKSPACE_ID)
 
+# `number` and `workflow_state_id` are supplied because 005 made both NOT
+# NULL; see the same note in the sibling file. Neither participates in the
+# ordering this file forces plans over.
 INSERT = """
     INSERT INTO issues (
         id,
         workspace_id,
         team_id,
+        number,
+        workflow_state_id,
         title,
         description,
         priority,
@@ -80,7 +80,16 @@ INSERT = """
         created_at,
         updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+"""
+
+# The board 005 gives 002's bootstrap team, so nothing here has to seed one.
+WORKFLOW_STATE_QUERY = """
+    SELECT id
+    FROM workflow_states
+    WHERE workspace_id = $1 AND team_id = $2
+    ORDER BY position, id
+    LIMIT 1
 """
 
 # Three splits the ten rows 3/3/3/1, which is what the ordering assertions
@@ -221,12 +230,21 @@ async def _seed(dsn: str, *, analyze: bool) -> None:
         # has to follow the FK graph, and that graph grows with every
         # migration. A list here goes stale silently.
         await reset_schema(connection)
-        await connection.execute(MIGRATION_001.read_text(encoding="utf-8"))
 
-        # 002 as well as 001: the repository's SELECT leads with
-        # `workspace_id = $1`, and both that column and the bootstrap tenant
-        # these rows are filed against arrive with it.
-        await connection.execute(MIGRATION_002.read_text(encoding="utf-8"))
+        # The whole chain, not 001 and 002. This suite reads through the real
+        # IssueRepository, so it needs whatever that SELECT currently names --
+        # 009 added `project_id` and `milestone_id` -- and it writes rows, so
+        # it owes the schema 005's two NOT NULL columns. Forcing plans over a
+        # table missing half its real columns would be forcing them over a
+        # table no deployment has.
+        await apply_all_migrations(connection)
+
+        workflow_state_id = await connection.fetchval(
+            WORKFLOW_STATE_QUERY,
+            BOOTSTRAP_WORKSPACE_ID,
+            BOOTSTRAP_TEAM_ID,
+        )
+
         await connection.executemany(
             INSERT,
             [
@@ -234,6 +252,8 @@ async def _seed(dsn: str, *, analyze: bool) -> None:
                     row.id,
                     BOOTSTRAP_WORKSPACE_ID,
                     BOOTSTRAP_TEAM_ID,
+                    number,
+                    workflow_state_id,
                     row.title,
                     row.description,
                     row.priority,
@@ -241,7 +261,7 @@ async def _seed(dsn: str, *, analyze: bool) -> None:
                     row.created_at,
                     row.updated_at,
                 )
-                for row in SEED
+                for number, row in enumerate(SEED, start=1)
             ],
         )
 

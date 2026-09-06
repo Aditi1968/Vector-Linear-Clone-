@@ -266,9 +266,10 @@ async def wired(postgres_dsn):
                     ),
                     # This fixture predates authentication and exercises the
                     # tenancy path only; no resolver it reaches resolves a
-                    # viewer.
+                    # viewer, a membership or a project.
                     auth_service=None,
                     membership_service=None,
+                    project_service=None,
                     team_service=team_service,
                     workspace_service=workspace_service,
                     environment="test",

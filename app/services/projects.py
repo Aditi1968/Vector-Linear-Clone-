@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import date
 from typing import NoReturn
 from uuid import UUID
@@ -23,6 +24,14 @@ from app.repositories.issues import IssueRepository
 from app.repositories.projects import ProjectRepository
 
 
+# The same alias, for the same reason, as in app/repositories/projects.py --
+# `ProjectService` also has a method called `list`, which shadows the builtin
+# for every annotation below it in the class body. That note has the full
+# explanation, including why `from __future__ import annotations` is the wrong
+# fix.
+Milestones = list[ProjectMilestoneEntity]
+
+
 NAME_MIN_LENGTH = 1
 NAME_MAX_LENGTH = 200
 
@@ -32,6 +41,23 @@ POSITION_MIN = 0
 
 FIRST_MIN = 1
 FIRST_MAX = 100
+
+# The most milestones one project answers with.
+#
+# Not a page size and not a clamp on a user-supplied argument: no caller
+# chooses it, and `Project.milestones` takes none. It is the bound that keeps
+# an unpaginated list reachable from a paginated one from being unbounded --
+# `projects(first: 100) { milestones { ... } }` is a single document, and
+# app/graphql/limits.py charges `milestones` once because it declares no
+# page-size argument, so nothing above this layer prices the fan-out.
+#
+# Set far above any real project on purpose, exactly as MEMBERSHIP_LIST_LIMIT
+# is: a plan has milestones in the low tens, so truncation is not a case real
+# users reach, and the honest reading is "a backstop" rather than "page one".
+# When a real project approaches it, this field grows a cursor the way
+# `projects` has one; raising the number would paper over an unpaginated list
+# instead of paginating it.
+MILESTONE_LIST_LIMIT = 200
 
 
 # Constraint name -> the field error it means, for the violations that are
@@ -69,6 +95,25 @@ _CONSTRAINT_ERRORS: dict[str, ValidationIssue] = {
         field="projectId",
         code="NOT_FOUND",
         message="Project not found",
+    ),
+    # The lead is not a member of this project's workspace.
+    #
+    # One message for three situations that must stay indistinguishable: no
+    # such user anywhere, a real user who belongs to some other workspace, and
+    # a real user who belongs to this one but whose membership was revoked
+    # between the client reading the member list and sending this. Naming which
+    # would let anyone holding a workspace answer "is this person a member of
+    # yours?" for any user id they can guess, and the id space is not the
+    # secret -- the membership is.
+    #
+    # NOT_MEMBER rather than NOT_FOUND, because the two say different things to
+    # a client that has both a user picker and a member list: this is the one
+    # field error a UI can act on by refreshing the list it drew the value
+    # from.
+    "projects_lead_fk": ValidationIssue(
+        field="leadId",
+        code="NOT_MEMBER",
+        message="Lead must be a member of this workspace",
     ),
 }
 
@@ -241,27 +286,41 @@ class ProjectService:
         *,
         scope: WorkspaceScope,
         project_id: UUID,
-    ) -> list[ProjectMilestoneEntity]:
+    ) -> Milestones:
         """One project's milestones, in display order.
 
         A project in another workspace, and one that does not exist, both
         produce an empty list -- the same answer a real project with no
         milestones gives. Nothing here reveals which of the three it was.
+
+        Bounded by MILESTONE_LIST_LIMIT, which the service states rather than
+        the repository defaulting to.
         """
         async with self._pool.acquire() as connection:
             return await self._repository.list_milestones(
                 connection,
                 scope=scope,
                 project_id=project_id,
+                limit=MILESTONE_LIST_LIMIT,
             )
 
     async def list_milestones_for_projects(
         self,
         *,
         scope: WorkspaceScope,
-        project_ids: list[UUID],
-    ) -> list[ProjectMilestoneEntity]:
-        """Several projects' milestones at once, for batching."""
+        # `Sequence`, not `list`: the name means the method here, as the note
+        # on `Milestones` above explains. It reads better anyway -- this only
+        # iterates the ids.
+        project_ids: Sequence[UUID],
+    ) -> Milestones:
+        """Several projects' milestones at once, for batching.
+
+        The same MILESTONE_LIST_LIMIT, applied PER PROJECT rather than to the
+        batch. A limit over the whole result would make one project's
+        milestones depend on how many other projects happened to be on the
+        same page -- a project would render completely on its own and
+        truncated in a list, which is a difference no client could explain.
+        """
         if not project_ids:
             return []
 
@@ -270,6 +329,7 @@ class ProjectService:
                 connection,
                 scope=scope,
                 project_ids=project_ids,
+                limit_per_project=MILESTONE_LIST_LIMIT,
             )
 
     # --------------------------------------------------------------- project
@@ -282,6 +342,7 @@ class ProjectService:
         description: str | None,
         state: str,
         target_date: date | None,
+        lead_id: UUID | None = None,
     ) -> ProjectEntity:
         """Create one project in this workspace, associated with no teams yet.
 
@@ -290,6 +351,14 @@ class ProjectService:
         belong to another workspace -- and folding those failures into
         creation would mean either abandoning the project over one bad team id
         or reporting a partial success that no payload shape describes well.
+
+        The lead IS on this call, and the asymmetry with teams is not an
+        inconsistency: a lead is a column on the row being inserted, so it
+        succeeds or fails with the insert and there is no partial state to
+        report. Nothing here checks that the lead is a member first --
+        `projects_lead_fk` is composite over the workspace, so the same
+        statement that writes the row is what refuses a non-member, with no
+        window between the two for a membership to be revoked in.
         """
         self._validate_project_fields(name=name, description=description, state=state)
 
@@ -297,14 +366,24 @@ class ProjectService:
             # The service owns the transaction boundary: later this block
             # will also carry the audit / sync / outbox writes.
             async with connection.transaction():
-                return await self._repository.create(
-                    connection,
-                    scope=scope,
-                    name=name,
-                    description=description,
-                    state=state,
-                    target_date=target_date,
-                )
+                try:
+                    return await self._repository.create(
+                        connection,
+                        scope=scope,
+                        name=name,
+                        description=description,
+                        state=state,
+                        target_date=target_date,
+                        lead_id=lead_id,
+                    )
+                except asyncpg.ForeignKeyViolationError as error:
+                    # Only projects_lead_fk can fire here -- it is the one
+                    # foreign key on this INSERT whose value came from a
+                    # client. projects_workspace_fk breaking would mean the
+                    # request resolved a workspace that no longer exists, which
+                    # is not something the caller can correct, so `_raise_mapped`
+                    # re-raises it rather than reporting it as bad input.
+                    _raise_mapped(error)
 
     async def update(
         self,
@@ -315,6 +394,7 @@ class ProjectService:
         description: str | None | UnsetType = UNSET,
         state: str | UnsetType = UNSET,
         target_date: date | None | UnsetType = UNSET,
+        lead_id: UUID | None | UnsetType = UNSET,
     ) -> ProjectEntity:
         """Apply a partial update and return the project as it now stands.
 
@@ -323,6 +403,12 @@ class ProjectService:
         columns are NOT NULL -- so their types admit no None at all, and a
         client that sends null for either is refused by the GraphQL layer
         before this is called.
+
+        `lead_id` is the field that needs all three cases most: leaving the
+        lead alone while renaming a project, handing it to someone else, and
+        taking it off a project entirely are three different intentions, and a
+        signature that could not tell the first from the third would silently
+        unassign a lead on every rename.
 
         A patch that sets nothing does not reach the database. The UPDATE
         would be harmless except for `updated_at = now()`, and stamping a row
@@ -336,6 +422,7 @@ class ProjectService:
             and description is UNSET
             and state is UNSET
             and target_date is UNSET
+            and lead_id is UNSET
         ):
             existing = await self.get_by_id(scope=scope, project_id=project_id)
 
@@ -346,23 +433,28 @@ class ProjectService:
 
         async with self._pool.acquire() as connection:
             async with connection.transaction():
-                updated = await self._repository.update(
-                    connection,
-                    scope=scope,
-                    project_id=project_id,
-                    set_name=name is not UNSET,
-                    name=None if isinstance(name, UnsetType) else name,
-                    set_description=description is not UNSET,
-                    description=(
-                        None if isinstance(description, UnsetType) else description
-                    ),
-                    set_state=state is not UNSET,
-                    state=None if isinstance(state, UnsetType) else state,
-                    set_target_date=target_date is not UNSET,
-                    target_date=(
-                        None if isinstance(target_date, UnsetType) else target_date
-                    ),
-                )
+                try:
+                    updated = await self._repository.update(
+                        connection,
+                        scope=scope,
+                        project_id=project_id,
+                        set_name=name is not UNSET,
+                        name=None if isinstance(name, UnsetType) else name,
+                        set_description=description is not UNSET,
+                        description=(
+                            None if isinstance(description, UnsetType) else description
+                        ),
+                        set_state=state is not UNSET,
+                        state=None if isinstance(state, UnsetType) else state,
+                        set_target_date=target_date is not UNSET,
+                        target_date=(
+                            None if isinstance(target_date, UnsetType) else target_date
+                        ),
+                        set_lead_id=lead_id is not UNSET,
+                        lead_id=None if isinstance(lead_id, UnsetType) else lead_id,
+                    )
+                except asyncpg.ForeignKeyViolationError as error:
+                    _raise_mapped(error)
 
         if updated is None:
             raise ValidationError([_PROJECT_NOT_FOUND])

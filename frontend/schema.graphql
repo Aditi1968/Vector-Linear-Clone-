@@ -1,3 +1,6 @@
+"""Date (isoformat)"""
+scalar Date
+
 """Date with time (isoformat)"""
 scalar DateTime
 
@@ -6,9 +9,12 @@ type Issue {
   title: String!
   description: String
   priority: Int!
+  projectId: UUID
+  milestoneId: UUID
   completedAt: DateTime
   createdAt: DateTime!
   updatedAt: DateTime!
+  project: Project
 }
 
 type IssueConnection {
@@ -23,6 +29,17 @@ input IssueCreateInput {
 }
 
 type IssueCreatePayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
+}
+
+input IssueSetProjectInput {
+  issueId: UUID!
+  projectId: UUID = null
+  milestoneId: UUID = null
+}
+
+type IssueSetProjectPayload {
   issue: Issue
   errors: [ValidationErrorType!]!
 }
@@ -47,11 +64,119 @@ type Mutation {
   register(input: RegisterInput!): RegisterPayload!
   login(input: LoginInput!): LoginPayload!
   logout: LogoutPayload!
+  projectCreate(input: ProjectCreateInput!): ProjectPayload!
+  projectUpdate(input: ProjectUpdateInput!): ProjectPayload!
+  projectDelete(input: ProjectDeleteInput!): ProjectDeletePayload!
+  projectTeamAdd(input: ProjectTeamInput!): ProjectPayload!
+  projectTeamRemove(input: ProjectTeamInput!): ProjectPayload!
+  projectMilestoneCreate(input: ProjectMilestoneCreateInput!): ProjectMilestonePayload!
+  projectMilestoneUpdate(input: ProjectMilestoneUpdateInput!): ProjectMilestonePayload!
+  projectMilestoneDelete(input: ProjectMilestoneDeleteInput!): ProjectMilestoneDeletePayload!
+  issueSetProject(input: IssueSetProjectInput!): IssueSetProjectPayload!
 }
 
 type PageInfo {
   hasNextPage: Boolean!
   endCursor: String
+}
+
+type Project {
+  id: UUID!
+  name: String!
+  description: String
+  state: ProjectState!
+  targetDate: Date
+  leadId: UUID
+  teamIds: [UUID!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  milestones: [ProjectMilestone!]!
+}
+
+type ProjectConnection {
+  nodes: [Project!]!
+  pageInfo: PageInfo!
+}
+
+input ProjectCreateInput {
+  name: String!
+  description: String = null
+  state: ProjectState! = PLANNED
+  targetDate: Date = null
+  leadId: UUID = null
+}
+
+input ProjectDeleteInput {
+  id: UUID!
+}
+
+type ProjectDeletePayload {
+  deletedProjectId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type ProjectMilestone {
+  id: UUID!
+  projectId: UUID!
+  name: String!
+  targetDate: Date
+  position: Int!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input ProjectMilestoneCreateInput {
+  projectId: UUID!
+  name: String!
+  targetDate: Date = null
+}
+
+input ProjectMilestoneDeleteInput {
+  id: UUID!
+}
+
+type ProjectMilestoneDeletePayload {
+  deletedMilestoneId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type ProjectMilestonePayload {
+  milestone: ProjectMilestone
+  errors: [ValidationErrorType!]!
+}
+
+input ProjectMilestoneUpdateInput {
+  id: UUID!
+  name: String
+  targetDate: Date
+  position: Int
+}
+
+type ProjectPayload {
+  project: Project
+  errors: [ValidationErrorType!]!
+}
+
+enum ProjectState {
+  PLANNED
+  STARTED
+  PAUSED
+  COMPLETED
+  CANCELED
+}
+
+input ProjectTeamInput {
+  projectId: UUID!
+  teamId: UUID!
+}
+
+input ProjectUpdateInput {
+  id: UUID!
+  name: String
+  description: String
+  state: ProjectState
+  targetDate: Date
+  leadId: UUID
 }
 
 type Query {
@@ -65,6 +190,8 @@ type Query {
   teams(workspaceSlug: String!): [Team!]!
   myWorkspaces: [WorkspaceMembership!]!
   myWorkspace(slug: String!): WorkspaceMembership!
+  project(id: UUID!): Project
+  projects(first: Int! = 50, after: String = null): ProjectConnection!
 }
 
 input RegisterInput {

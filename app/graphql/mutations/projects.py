@@ -90,6 +90,7 @@ class ProjectMutation:
                 description=input.description,
                 state=input.state.value,
                 target_date=input.target_date,
+                lead_id=input.lead_id,
             )
         except ValidationError as exc:
             return ProjectPayload(project=None, errors=_errors(exc))
@@ -118,6 +119,7 @@ class ProjectMutation:
                 description=_patch(input.description),
                 state=state.value if isinstance(state, ProjectStateType) else state,
                 target_date=_patch(input.target_date),
+                lead_id=_patch(input.lead_id),
             )
         except ValidationError as exc:
             return ProjectPayload(project=None, errors=_errors(exc))

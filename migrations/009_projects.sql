@@ -23,6 +23,14 @@
 -- and executes statement-at-a-time in autocommit, which for this file means a
 -- failure part way through leaves `issues` carrying two nullable columns with
 -- no constraints behind them.
+--
+-- DEPENDS ON 002, which creates `workspaces`, `teams` and the tenancy columns
+-- on `issues`, and on 004, which creates `workspace_members`. projects_lead_fk
+-- below references that table's primary key, so applying this file before 004
+-- fails on that constraint and -- inside the single transaction the runner
+-- wraps the file in -- leaves nothing behind. That failure IS the dependency
+-- check: the ledger records what has been applied and not what depends on
+-- what, so the schema itself is what has to refuse an out-of-order apply.
 
 
 CREATE TABLE projects (
@@ -54,6 +62,14 @@ CREATE TABLE projects (
     -- a user ever meant to pick.
     target_date DATE,
 
+    -- Who is accountable for this project, or nobody.
+    --
+    -- Nullable because a project without a lead is an ordinary state -- one
+    -- filed before anyone picked it up -- and not a missing value to be
+    -- backfilled. See projects_lead_fk below for the part that matters: this
+    -- column does NOT reference `users`.
+    lead_id UUID,
+
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -67,6 +83,46 @@ CREATE TABLE projects (
 
     CONSTRAINT projects_state_check
         CHECK (state IN ('planned', 'started', 'paused', 'completed', 'canceled')),
+
+    -- The lead must be a member of THIS project's workspace.
+    --
+    -- `REFERENCES users (id)` is the obvious spelling and it is the bug. It
+    -- checks that the lead is a real account somewhere in the system and says
+    -- nothing about where -- so any user id, from any tenant, would be
+    -- accepted as the lead of any workspace's project, and the only thing
+    -- standing between a client and that row would be a service remembering to
+    -- look first.
+    --
+    -- The reference is composite instead, onto the pair
+    -- `workspace_members (workspace_id, user_id)` -- which is that table's
+    -- PRIMARY KEY, chosen in migrations/004_membership.sql for exactly this
+    -- (its comment marks it [FK TARGET]). One `workspace_id` column feeds both
+    -- this constraint and projects_workspace_fk, so the lead is checked against
+    -- the same tenant the project belongs to. A non-member lead is then not a
+    -- row PostgreSQL will store, whatever the application does or forgets.
+    --
+    -- MATCH SIMPLE (the default) skips the check entirely for a row with any
+    -- NULL among its referencing columns. That is the wanted behaviour and it
+    -- is only safe because `workspace_id` is NOT NULL: the sole column that can
+    -- be NULL is lead_id, so the exemption is precisely "this project has no
+    -- lead" and cannot be widened by a NULL arriving in the other half. Were
+    -- workspace_id nullable, a row could carry a real lead_id and skip the
+    -- check outright -- which is the trap MATCH FULL exists for, and the reason
+    -- this note is here rather than left to be rediscovered.
+    --
+    -- ON DELETE RESTRICT, matching every other foreign key in this schema.
+    -- Removing someone from a workspace while they still lead a project is
+    -- refused rather than silently vacating the projects they lead; the caller
+    -- reassigns them first. PostgreSQL 15+ would accept
+    -- `ON DELETE SET NULL (lead_id)` -- the column list is required, since
+    -- nulling the whole key would null the NOT NULL workspace_id -- and it is
+    -- deliberately not used: this file argues the same point about
+    -- project_teams, that a DELETE against one table must not quietly rewrite
+    -- rows in another and report `DELETE 1`.
+    CONSTRAINT projects_lead_fk
+        FOREIGN KEY (workspace_id, lead_id)
+        REFERENCES workspace_members (workspace_id, user_id)
+        ON DELETE RESTRICT ON UPDATE RESTRICT,
 
     -- [FK TARGET] Redundant beside the primary key on id only if you do not
     -- look at what points here. A foreign key may reference a UNIQUE column
@@ -222,6 +278,21 @@ ALTER TABLE issues ADD CONSTRAINT issues_milestone_requires_project
 -- the cursor comparison in ProjectRepository.list total and therefore stable.
 CREATE INDEX projects_workspace_created_at_id_idx
     ON projects (workspace_id, created_at DESC, id DESC);
+
+-- The referencing side of projects_lead_fk, and the answer to "which projects
+-- does this person lead".
+--
+-- PostgreSQL indexes the REFERENCED side of a foreign key and never the
+-- referencing side, so without this every deletion from `workspace_members`
+-- scans `projects` in full to satisfy the RESTRICT above -- on the path of
+-- every member removal in every workspace.
+--
+-- Not partial on `lead_id IS NOT NULL`, though many projects will have none,
+-- for the reason given on issues_workspace_project_milestone_idx below: the
+-- predicate a referential-integrity check issues is generated by PostgreSQL
+-- rather than written here, so whether it matches a partial index is a property
+-- of the planner's implication prover rather than of this schema.
+CREATE INDEX projects_workspace_lead_idx ON projects (workspace_id, lead_id);
 
 -- The reverse direction of project_teams: "which projects is this team on",
 -- and, more importantly, the referencing side of project_teams_team_fk.

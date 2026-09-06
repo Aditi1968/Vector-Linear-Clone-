@@ -35,6 +35,19 @@ class ProjectCreateInput:
     state: ProjectStateType = ProjectStateType.PLANNED
     target_date: date | None = None
 
+    # The one user id this API accepts as an argument, and the exception is
+    # worth stating because the rule it bends is a real one: a client may never
+    # name WHO IS ASKING -- that comes from the session, through
+    # `info.context.viewer()`, and a `userId` argument standing in for it would
+    # let any caller act as anyone.
+    #
+    # This names a different thing: a value being stored on a row, the same
+    # kind of argument as `name` or `targetDate`. It is safe to accept because
+    # it is not trusted -- `projects_lead_fk` refuses any id that is not a
+    # member of this project's workspace, so the worst a forged one achieves is
+    # a NOT_MEMBER field error. Nothing anywhere reads authorization off it.
+    lead_id: UUID | None = None
+
 
 @strawberry.input
 class ProjectUpdateInput:
@@ -43,6 +56,10 @@ class ProjectUpdateInput:
     description: str | None = strawberry.UNSET
     state: ProjectStateType | None = strawberry.UNSET
     target_date: date | None = strawberry.UNSET
+    # UNSET-defaulted like the rest, and here the three cases are the whole
+    # feature: omitted leaves the lead alone, an id reassigns it, and an
+    # explicit null takes the lead off the project.
+    lead_id: UUID | None = strawberry.UNSET
 
 
 @strawberry.input

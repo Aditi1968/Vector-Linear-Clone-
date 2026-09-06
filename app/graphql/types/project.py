@@ -91,6 +91,19 @@ class ProjectType:
     state: ProjectStateType
     target_date: date | None
 
+    # The workspace member accountable for this project, as an id.
+    #
+    # An id and not a `User`, for a reason `UserType`'s own docstring states:
+    # it carries `email`, and today the only field returning one is `me`, so
+    # the only address any caller can read is their own. Exposing a `lead:
+    # User` here would publish every project lead's email address to everyone
+    # who can read the project -- a decision about that type, made in passing
+    # by a feature branch. When a User does become reachable from other
+    # people's data, `lead: User` is added beside this field and this one is
+    # deprecated; a field named `leadId` can do that without changing type,
+    # which is the same argument the `teamIds` note below makes.
+    lead_id: UUID | None
+
     # The teams this project spans, as ids.
     #
     # Ids and not `[Team!]!`, because this schema has no Team type yet. Naming
@@ -140,6 +153,7 @@ class ProjectType:
             # `projects_state_check` without widening this.
             state=ProjectStateType(entity.state),
             target_date=entity.target_date,
+            lead_id=entity.lead_id,
             team_ids=list(entity.team_ids),
             created_at=entity.created_at,
             updated_at=entity.updated_at,

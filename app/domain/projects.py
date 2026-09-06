@@ -52,6 +52,15 @@ class ProjectEntity:
     description: str | None
     state: str
     target_date: date | None
+
+    # The workspace member accountable for this project, or None.
+    #
+    # A user id and not a UserEntity. `projects_lead_fk` guarantees the id
+    # names a member of this project's workspace, and nothing in the domain
+    # needs more than that; loading the account is a transport concern, paid
+    # for only by a caller that asks for the person rather than the pointer.
+    lead_id: UUID | None
+
     team_ids: tuple[UUID, ...]
     created_at: datetime
     updated_at: datetime
