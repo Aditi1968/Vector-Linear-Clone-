@@ -8,7 +8,7 @@ import {
   issueListData,
   issueRejected,
   issueRow,
-  oneTeam,
+  workspaceContextData,
   TEAM_ID,
   validationError,
   WORKSPACE_SLUG,
@@ -56,19 +56,19 @@ function titleField(): HTMLElement {
  * Open the composer, and answer the one query it runs on mount.
  *
  * `issueCreate` requires a `teamId` and the server picks no default, so the
- * form cannot be submitted until `WorkspaceTeams` has answered. Resolving it
+ * form cannot be submitted until `IssueWorkspaceContext` has answered. Resolving it
  * here rather than in every test keeps the tests about creating an issue
  * instead of about the lookup that makes it possible.
  */
 async function openComposer(view: ReturnType<typeof renderApp>): Promise<void> {
   await view.user.click(screen.getByRole('button', { name: 'New issue' }))
-  await view.link.resolve('WorkspaceTeams', { data: oneTeam() })
+  await view.link.resolve('IssueWorkspaceContext', { data: workspaceContextData() })
 }
 
 /**
  * The two fields the composer never asks anyone for.
  *
- * The workspace comes from the URL and the team from `WorkspaceTeams`, so
+ * The workspace comes from the URL and the team from the context query, so
  * they are on every create and are not part of what the form collects --
  * which is exactly what the assertions below are checking by spelling them
  * separately from the typed fields.

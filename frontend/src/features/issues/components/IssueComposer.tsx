@@ -110,7 +110,7 @@ export function IssueComposer({ onCancel, onCreated }: IssueComposerProps) {
       priority,
     })
 
-    if (outcome.status === 'created') {
+    if (outcome.status === 'saved') {
       onCreated(outcome.issue)
       return
     }
