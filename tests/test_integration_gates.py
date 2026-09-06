@@ -297,6 +297,7 @@ def _domain_module(entity_name: str) -> str:
         "WorkspaceMembershipEntity": "memberships",
         "TeamEntity": "teams",
         "WorkflowStateEntity": "teams",
+        "SlackInstallationEntity": "slack",
     }
 
     assert entity_name in known, (

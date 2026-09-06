@@ -397,6 +397,7 @@ export type Mutation = {
   projectTeamRemove: ProjectPayload;
   projectUpdate: ProjectPayload;
   register: RegisterPayload;
+  slackDisconnect: SlackDisconnectPayload;
 };
 
 
@@ -545,6 +546,11 @@ export type MutationRegisterArgs = {
   input: RegisterInput;
 };
 
+
+export type MutationSlackDisconnectArgs = {
+  input: SlackDisconnectInput;
+};
+
 export type PageInfo = {
   __typename?: 'PageInfo';
   endCursor?: Maybe<Scalars['String']['output']>;
@@ -669,6 +675,7 @@ export type Query = {
   myWorkspaces: Array<WorkspaceMembership>;
   project?: Maybe<Project>;
   projects: ProjectConnection;
+  slackIntegration: SlackIntegration;
   /** The teams in a workspace, each with the workflow states its issues can occupy. */
   teams: Array<Team>;
 };
@@ -722,6 +729,11 @@ export type QueryProjectsArgs = {
 };
 
 
+export type QuerySlackIntegrationArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
 export type QueryTeamsArgs = {
   workspaceSlug: Scalars['String']['input'];
 };
@@ -737,6 +749,27 @@ export type RegisterPayload = {
   errors: Array<ValidationErrorType>;
   user?: Maybe<User>;
 };
+
+export type SlackDisconnectInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type SlackDisconnectPayload = {
+  __typename?: 'SlackDisconnectPayload';
+  integration: SlackIntegration;
+};
+
+export type SlackIntegration = {
+  __typename?: 'SlackIntegration';
+  scopes: Array<Scalars['String']['output']>;
+  status: SlackIntegrationStatus;
+  teamName?: Maybe<Scalars['String']['output']>;
+};
+
+export type SlackIntegrationStatus =
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'UNCONFIGURED';
 
 export type Team = {
   __typename?: 'Team';

@@ -348,6 +348,7 @@ type Mutation {
   issueClearParent(input: IssueClearParentInput!): IssueParentPayload!
   issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
   issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
+  slackDisconnect(input: SlackDisconnectInput!): SlackDisconnectPayload!
 }
 
 type PageInfo {
@@ -471,6 +472,7 @@ type Query {
   cycles(teamId: UUID!): [Cycle!]!
   project(id: UUID!): Project
   projects(first: Int! = 50, after: String = null): ProjectConnection!
+  slackIntegration(workspaceSlug: String!): SlackIntegration!
 }
 
 input RegisterInput {
@@ -482,6 +484,26 @@ input RegisterInput {
 type RegisterPayload {
   user: User
   errors: [ValidationErrorType!]!
+}
+
+input SlackDisconnectInput {
+  workspaceSlug: String!
+}
+
+type SlackDisconnectPayload {
+  integration: SlackIntegration!
+}
+
+type SlackIntegration {
+  status: SlackIntegrationStatus!
+  teamName: String
+  scopes: [String!]!
+}
+
+enum SlackIntegrationStatus {
+  UNCONFIGURED
+  DISCONNECTED
+  CONNECTED
 }
 
 type Team {
