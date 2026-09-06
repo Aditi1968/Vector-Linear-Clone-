@@ -35,25 +35,33 @@
 -- the constraints absent, and no record that anything happened.
 
 
--- [FK TARGET] The pair three foreign keys below point at, added for exactly
--- the reason 002 adds teams_workspace_id_key: PostgreSQL allows a foreign
--- key to reference only a UNIQUE-constrained column SET, so without this the
--- composite keys are not weaker, they cannot be declared at all.
+-- [FK TARGET -- DECLARED IN 006, NOT HERE] The three foreign keys below all
+-- reference `issues (workspace_id, id)`, and PostgreSQL allows a foreign key
+-- to reference only a UNIQUE-constrained column SET. That constraint is
+-- `issues_workspace_id_key`, and this file DEPENDS on it rather than
+-- declaring it: migrations/006 adds it, for exactly the reason 002 adds
+-- teams_workspace_id_key.
 --
 -- It looks redundant beside `issues_pkey` on (id) and is not. A unique key
 -- on (id) alone says nothing about which workspace that id sits in, so a
 -- single-column FK to it would let a relation join two issues in two
 -- different tenants while every constraint in the database still reported
--- success. The whole tenant guarantee of this file rests on this one line.
+-- success. The whole tenant guarantee of this file rests on that one
+-- constraint existing.
 --
--- MERGE NOTE (2026-09-06): migrations 003-009 are being written in parallel.
--- Any of them that needs to reference an issue by tenant pair -- labels,
--- comments, project membership -- needs this same constraint and must not
--- add a second copy of it. If two migrations both declare it, the second to
--- run fails on the duplicate name; the fix is to delete the later
--- declaration, not to rename it, because two identical unique indexes on one
--- table are write amplification with no reader.
-ALTER TABLE issues ADD CONSTRAINT issues_workspace_id_key UNIQUE (workspace_id, id);
+-- MERGE NOTE (2026-09-06): 006 owns it because it is the lowest-numbered
+-- pending migration and therefore the only one every later migration can
+-- depend on. Several of 006-010 need to reference an issue by tenant pair --
+-- relations here, and labels, comments and project membership elsewhere --
+-- and exactly one of them may declare it: two declarations means the second
+-- to run fails on the duplicate name, and two identical unique indexes on
+-- one table would be write amplification with no reader.
+--
+-- The practical consequence for anyone running this file alone: applying
+-- 001-005 and then 010 fails at the first composite foreign key below, with
+-- "there is no unique constraint matching given keys for referenced table".
+-- That is this dependency being reported, not a defect in either file. The
+-- chain is applied in order, with 006 present.
 
 
 -- Nullable, and permanently so: "has no parent" is the ordinary state of an
