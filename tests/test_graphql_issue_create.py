@@ -4,7 +4,6 @@ These never touch Neon: the invalid case uses the real IssueService with a
 pool that refuses to be acquired, and the success case uses a fake service.
 """
 
-from datetime import datetime, timezone
 from uuid import UUID
 
 from app.domain.issues import IssueEntity
@@ -14,7 +13,15 @@ from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
 from app.services.teams import TeamService
 
-from tests.conftest import TEST_SCOPE, TEST_TEAM_ID, ExplodingPool, FakeTenant
+from tests.conftest import (
+    TEST_SCOPE,
+    TEST_TEAM_ID,
+    AnonymousAuthService,
+    ExplodingPool,
+    FakeTenant,
+    graphql_context,
+    make_entity,
+)
 
 
 # Built directly rather than imported, so these tests need no DATABASE_URL.
@@ -40,10 +47,20 @@ mutation CreateIssue($input: IssueCreateInput!) {
 """
 
 
-class Context:
-    def __init__(self, issue_service):
-        self.issue_service = issue_service
-        self.tenant = FakeTenant()
+def Context(issue_service):
+    """The context these tests execute a document against.
+
+    Through `graphql_context` rather than a local stand-in class, so that a
+    slot added to `VectorContext` is filled in one place. `auth_service` is
+    wired because `issueCreate` reads the viewer to record authorship, and
+    anonymous is the answer these tests want: `creator_id` is nullable
+    precisely so a request with no session can still file an issue.
+    """
+    return graphql_context(
+        issue_service=issue_service,
+        auth_service=AnonymousAuthService(),
+        tenant=FakeTenant(),
+    )
 
 
 class FakeIssueService:
@@ -53,18 +70,8 @@ class FakeIssueService:
         self._entity = entity
         self.calls: list[dict] = []
 
-    async def create(
-        self, *, scope, team_id, title: str, description: str | None, priority: int
-    ):
-        self.calls.append(
-            {
-                "scope": scope,
-                "team_id": team_id,
-                "title": title,
-                "description": description,
-                "priority": priority,
-            }
-        )
+    async def create(self, *, scope, team_id, **fields):
+        self.calls.append({"scope": scope, "team_id": team_id, **fields})
 
         return self._entity
 
@@ -72,9 +79,7 @@ class FakeIssueService:
 class BrokenIssueService:
     """Raises an unexpected failure, standing in for an asyncpg outage."""
 
-    async def create(
-        self, *, scope, team_id, title: str, description: str | None, priority: int
-    ):
+    async def create(self, *, scope, team_id, **fields):
         raise RuntimeError("connection reset by peer")
 
 
@@ -118,14 +123,12 @@ async def test_invalid_input_returns_structured_payload():
 
 
 async def test_valid_input_returns_issue_and_empty_errors():
-    entity = IssueEntity(
+    entity = make_entity(
+        1,
         id=UUID("00000000-0000-7000-8000-000000000001"),
         title="A valid title",
         description="described",
         priority=2,
-        completed_at=None,
-        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
-        updated_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
     service = FakeIssueService(entity)
 
@@ -155,6 +158,11 @@ async def test_valid_input_returns_issue_and_empty_errors():
 
     # The tenant reaches the service, and is the request's rather than the
     # document's: nothing in the mutation above names a workspace or a team.
+    #
+    # `creator_id` is None because the context authenticates nobody, and it
+    # is asserted rather than ignored: the resolver must take authorship from
+    # the viewer, so a value appearing here for an anonymous request would
+    # mean it came from somewhere a client can reach.
     assert service.calls == [
         {
             "scope": TEST_SCOPE,
@@ -162,6 +170,10 @@ async def test_valid_input_returns_issue_and_empty_errors():
             "title": "A valid title",
             "description": "described",
             "priority": 2,
+            "assignee_id": None,
+            "creator_id": None,
+            "estimate": None,
+            "due_date": None,
         }
     ]
 

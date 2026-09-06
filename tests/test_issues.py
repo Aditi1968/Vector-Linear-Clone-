@@ -134,6 +134,6 @@ async def test_title_at_max_length_is_valid(issue_service: IssueService):
 async def test_validation_error_message_is_generic():
     """The exception message must not be built from the field errors."""
     with pytest.raises(ValidationError) as exc_info:
-        IssueService._validate_create(title="", priority=99)
+        IssueService._validate_create(title="", priority=99, estimate=None)
 
     assert str(exc_info.value) == "Validation failed"

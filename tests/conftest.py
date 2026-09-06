@@ -36,6 +36,14 @@ TEST_TEAM_ID = UUID("00000000-0000-7000-8000-0000000000fb")
 
 TEST_SCOPE = WorkspaceScope(workspace_id=TEST_WORKSPACE_ID)
 
+# The workflow state a fake row sits in, and the key its team renders under.
+# Neither reaches a database either, so they only have to be well-formed:
+# `teams_key_format` in 005 requires uppercase with no hyphen, and a hyphen
+# here would make `identifier` ambiguous, which is the one thing the entity's
+# rendering relies on.
+TEST_WORKFLOW_STATE_ID = UUID("00000000-0000-7000-8000-0000000000fc")
+TEST_TEAM_KEY = "ENG"
+
 # uuidv7() in migrations/001_issues.sql is native to PostgreSQL 18; 16 and 17
 # reject the migration outright, so the tag is pinned rather than floating.
 POSTGRES_IMAGE = "postgres:18"
@@ -318,6 +326,22 @@ class FakeIssueRepository:
         return list(self.rows)
 
 
+class AnonymousAuthService:
+    """Authenticates nobody, which is a real answer rather than a gap.
+
+    `VectorContext.viewer()` resolves through the auth service, so any test
+    exercising a resolver that asks who the caller is has to wire one --
+    `issueCreate` does, because it records authorship. An `UnusedService` in
+    that slot would fail the request instead of answering "anonymous", and
+    anonymous is exactly the case these transport tests want: it is what a
+    request with no session cookie gets, and `issues.creator_id` is nullable
+    to accommodate it.
+    """
+
+    async def authenticate(self, token: str | None) -> None:
+        return None
+
+
 class FakeTenant:
     """The tenant seam the GraphQL layer reads, without a database.
 
@@ -339,13 +363,29 @@ class FakeTenant:
 
 
 def as_record(entity: IssueEntity) -> dict:
-    """asyncpg.Record supports __getitem__, which a dict models well enough."""
+    """asyncpg.Record supports __getitem__, which a dict models well enough.
+
+    Keyed by the column names the repository's SELECT list produces, not by
+    the entity's attribute names -- the two differ at `team_key`, which is a
+    subquery alias rather than a column of `issues`. Building this from the
+    entity keeps a fake row and a real one in step: a column added to the
+    entity and forgotten here fails every test that maps a row.
+    """
     return {
         "id": entity.id,
+        "team_id": entity.team_id,
+        "team_key": entity.team_key,
+        "number": entity.number,
         "title": entity.title,
         "description": entity.description,
         "priority": entity.priority,
+        "workflow_state_id": entity.workflow_state_id,
+        "assignee_id": entity.assignee_id,
+        "creator_id": entity.creator_id,
+        "estimate": entity.estimate,
+        "due_date": entity.due_date,
         "completed_at": entity.completed_at,
+        "archived_at": entity.archived_at,
         "created_at": entity.created_at,
         "updated_at": entity.updated_at,
     }
@@ -355,19 +395,40 @@ def normalize(sql: str) -> str:
     return " ".join(sql.split())
 
 
-def make_entity(index: int) -> IssueEntity:
-    """Deterministic entity; higher index means newer created_at."""
+def make_entity(index: int, **overrides) -> IssueEntity:
+    """Deterministic entity; higher index means newer created_at.
+
+    `number` follows the index so that `identifier` is predictable per
+    entity, and `**overrides` lets a test vary one field without restating
+    the other fifteen -- which is what keeps a test about, say, the assignee
+    from silently also asserting a title.
+    """
     created_at = BASE_TIME + timedelta(minutes=index)
 
-    return IssueEntity(
-        id=UUID(int=index),
-        title=f"Issue {index}",
-        description=None,
-        priority=1,
-        completed_at=None,
-        created_at=created_at,
-        updated_at=created_at,
-    )
+    # Merged as a dict rather than spread after the keywords. `f(id=..., **o)`
+    # raises TypeError the moment `o` carries a key already named, so the
+    # spread form makes exactly the fields a test is most likely to override
+    # the ones it cannot.
+    fields = {
+        "id": UUID(int=index),
+        "team_id": TEST_TEAM_ID,
+        "team_key": TEST_TEAM_KEY,
+        "number": index,
+        "title": f"Issue {index}",
+        "description": None,
+        "priority": 1,
+        "workflow_state_id": TEST_WORKFLOW_STATE_ID,
+        "assignee_id": None,
+        "creator_id": None,
+        "estimate": None,
+        "due_date": None,
+        "completed_at": None,
+        "archived_at": None,
+        "created_at": created_at,
+        "updated_at": created_at,
+    }
+
+    return IssueEntity(**(fields | overrides))
 
 
 @pytest.fixture

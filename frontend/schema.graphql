@@ -1,14 +1,55 @@
+"""Date (isoformat)"""
+scalar Date
+
 """Date with time (isoformat)"""
 scalar DateTime
 
 type Issue {
   id: UUID!
+  teamId: UUID!
+
+  """
+  The name this issue is known by outside the product -- ENG-42. Its team's key, a hyphen, and the issue's number.
+  """
+  identifier: String!
+
+  """
+  Sequential within the team and never reused. Unique only alongside the team; two teams both have a number 42.
+  """
+  number: Int!
   title: String!
   description: String
   priority: Int!
+  workflowStateId: UUID!
+  assigneeId: UUID
+
+  """
+  Who filed the issue, or null where that is not known -- an issue created before accounts existed, or one whose author's account has since been deleted.
+  """
+  creatorId: UUID
+  estimate: Int
+
+  """
+  A calendar day, not an instant: the same day for every viewer, in every timezone.
+  """
+  dueDate: Date
+
+  """
+  When the issue stopped being worked on. Derived from the workflow state's category and not settable directly: it is non-null exactly while the issue sits in a completed or canceled state.
+  """
   completedAt: DateTime
+
+  """
+  When the issue was taken off the board. Always null here, because archived issues are absent from every query -- only the archive mutation's own result carries a value.
+  """
+  archivedAt: DateTime
   createdAt: DateTime!
   updatedAt: DateTime!
+}
+
+type IssueArchivePayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
 }
 
 type IssueConnection {
@@ -20,9 +61,27 @@ input IssueCreateInput {
   title: String!
   description: String = null
   priority: Int! = 0
+  assigneeId: UUID = null
+  estimate: Int = null
+  dueDate: Date = null
 }
 
 type IssueCreatePayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
+}
+
+input IssueUpdateInput {
+  title: String
+  description: String
+  priority: Int
+  workflowStateId: UUID
+  assigneeId: UUID
+  estimate: Int
+  dueDate: Date
+}
+
+type IssueUpdatePayload {
   issue: Issue
   errors: [ValidationErrorType!]!
 }
@@ -44,6 +103,8 @@ type LogoutPayload {
 
 type Mutation {
   issueCreate(input: IssueCreateInput!): IssueCreatePayload!
+  issueUpdate(id: UUID!, input: IssueUpdateInput!): IssueUpdatePayload!
+  issueArchive(id: UUID!): IssueArchivePayload!
   register(input: RegisterInput!): RegisterPayload!
   login(input: LoginInput!): LoginPayload!
   logout: LogoutPayload!

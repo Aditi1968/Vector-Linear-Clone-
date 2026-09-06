@@ -37,7 +37,6 @@ Marked `db`: deselected by default, skipped when Docker is unreachable.
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from uuid import UUID
 
 import asyncpg
@@ -50,14 +49,10 @@ from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
 from app.services.teams import TeamService
 
-from tests.conftest import reset_schema
+from tests.conftest import apply_all_migrations, reset_schema
 
 
 pytestmark = pytest.mark.db
-
-MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
-MIGRATION_001 = MIGRATIONS_DIR / "001_issues.sql"
-MIGRATION_002 = MIGRATIONS_DIR / "002_tenancy.sql"
 
 # The tenant 002 seeds, named in that file as literals precisely so a test can
 # assert against a constant. Every seed row here belongs to it: this file is
@@ -73,6 +68,8 @@ INSERT = """
         id,
         workspace_id,
         team_id,
+        number,
+        workflow_state_id,
         title,
         description,
         priority,
@@ -80,7 +77,16 @@ INSERT = """
         created_at,
         updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+"""
+
+# The team's `unstarted` state, which is where 005 puts a new issue. Selected
+# by category rather than by name for the reason 005 gives: 'Todo' is a label
+# a team may rename, 'unstarted' is a category its CHECK constrains.
+DEFAULT_STATE = """
+    SELECT id
+    FROM workflow_states
+    WHERE workspace_id = $1 AND team_id = $2 AND type = 'unstarted'
 """
 
 # Three splits the ten rows 3/3/3/1, which is what the ordering assertions
@@ -221,12 +227,24 @@ async def _seed(dsn: str, *, analyze: bool) -> None:
         # has to follow the FK graph, and that graph grows with every
         # migration. A list here goes stale silently.
         await reset_schema(connection)
-        await connection.execute(MIGRATION_001.read_text(encoding="utf-8"))
 
-        # 002 as well as 001: the repository's SELECT leads with
-        # `workspace_id = $1`, and both that column and the bootstrap tenant
-        # these rows are filed against arrive with it.
-        await connection.execute(MIGRATION_002.read_text(encoding="utf-8"))
+        # The whole chain, not the 001+002 prefix this file used to apply.
+        # The subject here is which *plan* the server picks for the
+        # application's page, so the indexes available to the planner have to
+        # be the ones the product ships -- and 006 adds the partial index the
+        # live walk is meant to use. A prefix would have the planner choosing
+        # between a different set of options than production offers it.
+        await apply_all_migrations(connection)
+
+        state_id = await connection.fetchval(
+            DEFAULT_STATE,
+            BOOTSTRAP_WORKSPACE_ID,
+            BOOTSTRAP_TEAM_ID,
+        )
+
+        # `number` only has to be unique per team --
+        # `issues_team_number_key`. Nothing here reads it; it is supplied
+        # because the column is NOT NULL.
         await connection.executemany(
             INSERT,
             [
@@ -234,6 +252,8 @@ async def _seed(dsn: str, *, analyze: bool) -> None:
                     row.id,
                     BOOTSTRAP_WORKSPACE_ID,
                     BOOTSTRAP_TEAM_ID,
+                    number,
+                    state_id,
                     row.title,
                     row.description,
                     row.priority,
@@ -241,7 +261,7 @@ async def _seed(dsn: str, *, analyze: bool) -> None:
                     row.created_at,
                     row.updated_at,
                 )
-                for row in SEED
+                for number, row in enumerate(SEED, start=1)
             ],
         )
 

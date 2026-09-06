@@ -25,7 +25,12 @@ from app.domain.pagination import IssuePage
 from app.graphql import limits
 from app.graphql.schema import MASKED_ERROR_MESSAGE, build_schema
 
-from tests.conftest import FakeTenant, make_entity
+from tests.conftest import (
+    AnonymousAuthService,
+    FakeTenant,
+    graphql_context,
+    make_entity,
+)
 
 
 ALL_ENVIRONMENTS: list[Environment] = ["development", "test", "production"]
@@ -69,10 +74,20 @@ mutation CreateIssue($input: IssueCreateInput!) {
 """
 
 
-class Context:
-    def __init__(self, issue_service):
-        self.issue_service = issue_service
-        self.tenant = FakeTenant()
+def Context(issue_service):
+    """The context these tests execute a document against.
+
+    Built through `graphql_context` rather than as a local stand-in class.
+    `VectorContext` grows slots, and a hand-rolled double stops matching it
+    silently -- which is how `issueCreate` starting to read the viewer
+    surfaced here as an AttributeError inside a resolver rather than as a
+    failure that named the cause.
+    """
+    return graphql_context(
+        issue_service=issue_service,
+        auth_service=AnonymousAuthService(),
+        tenant=FakeTenant(),
+    )
 
 
 class ExplodingIssueService:
@@ -81,7 +96,7 @@ class ExplodingIssueService:
     async def list(self, *, scope, first: int, after: str | None):
         raise RuntimeError(INTERNAL_MARKER)
 
-    async def create(self, *, scope, team_id, title, description, priority):
+    async def create(self, *, scope, team_id, **fields):
         raise RuntimeError(INTERNAL_MARKER)
 
 
@@ -109,7 +124,7 @@ class RejectingIssueService:
     async def list(self, *, scope, first: int, after: str | None):
         raise ValidationError(self._issues)
 
-    async def create(self, *, scope, team_id, title, description, priority):
+    async def create(self, *, scope, team_id, **fields):
         raise ValidationError(self._issues)
 
 

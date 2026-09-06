@@ -51,19 +51,28 @@ import type { CodegenConfig } from '@graphql-codegen/cli'
  */
 const SHARED = {
   /*
-   * The two custom scalars this schema declares, mapped to what the
-   * transport actually delivers: a hyphenated UUID string and an ISO-8601
-   * datetime string.
+   * The three custom scalars this schema declares, mapped to what the
+   * transport actually delivers: a hyphenated UUID string, an ISO-8601
+   * datetime string, and -- for `Issue.dueDate` -- an ISO-8601 *date*
+   * string, `YYYY-MM-DD`.
    *
-   * Neither is parsed into a richer type at this boundary on purpose. Apollo
+   * None is parsed into a richer type at this boundary on purpose. Apollo
    * stores what it is given, and a `Date` in the cache would be
    * reconstructed on every read and defeat the cache's structural equality
    * checks. Parsing happens where a date is formatted
    * (`src/features/issues/lib/dates.ts`).
+   *
+   * `Date` and `DateTime` map to the same TypeScript type and are not the
+   * same thing, which is worth knowing at the point of use: a due date is a
+   * calendar day, identical for every viewer in every timezone, and
+   * `new Date('2026-03-14')` parses it as UTC midnight and can render as the
+   * 13th west of Greenwich. The backend's migration 006 records why the
+   * column is a DATE rather than a TIMESTAMPTZ.
    */
   scalars: {
     UUID: 'string',
     DateTime: 'string',
+    Date: 'string',
   },
 
   /*

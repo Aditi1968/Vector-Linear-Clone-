@@ -31,7 +31,6 @@ Marked `db`: deselected by default, skipped when Docker is unreachable.
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from operator import attrgetter
-from pathlib import Path
 from uuid import UUID
 
 import asyncpg
@@ -44,14 +43,10 @@ from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
 from app.services.teams import TeamService
 
-from tests.conftest import reset_schema
+from tests.conftest import apply_all_migrations, reset_schema
 
 
 pytestmark = pytest.mark.db
-
-MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
-MIGRATION_001 = MIGRATIONS_DIR / "001_issues.sql"
-MIGRATION_002 = MIGRATIONS_DIR / "002_tenancy.sql"
 
 # The tenant 002 seeds, written as literals rather than read back out of the
 # database: 002 names both rows in the file precisely so that a test can
@@ -69,6 +64,8 @@ INSERT = """
         id,
         workspace_id,
         team_id,
+        number,
+        workflow_state_id,
         title,
         description,
         priority,
@@ -76,7 +73,16 @@ INSERT = """
         created_at,
         updated_at
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+"""
+
+# The team's `unstarted` state, which is where 005 puts a new issue. Selected
+# by category rather than by name for the reason 005 gives: 'Todo' is a label
+# a team may rename, 'unstarted' is a category its CHECK constrains.
+DEFAULT_STATE = """
+    SELECT id
+    FROM workflow_states
+    WHERE workspace_id = $1 AND team_id = $2 AND type = 'unstarted'
 """
 
 # Small on purpose. At three rows a wrong page is readable at a glance, and
@@ -335,12 +341,26 @@ async def seeded(postgres_dsn):
         # has to follow the FK graph, and that graph grows with every
         # migration. A list here goes stale silently.
         await reset_schema(connection)
-        await connection.execute(MIGRATION_001.read_text(encoding="utf-8"))
 
-        # 002 as well as 001: the repository's SELECT leads with
-        # `workspace_id = $1`, and both that column and the bootstrap tenant
-        # these rows are filed against arrive with it.
-        await connection.execute(MIGRATION_002.read_text(encoding="utf-8"))
+        # The whole chain, not the 001+002 prefix this file used to apply.
+        # The subject here is the *application* -- the repository's keyset
+        # walk -- so the schema it runs against has to be the one the
+        # application will meet: 005 made `number` and `workflow_state_id`
+        # NOT NULL, and 006 added the `archived_at IS NULL` predicate and the
+        # partial index that serves it. A prefix would test the walk against
+        # a table the product no longer has.
+        await apply_all_migrations(connection)
+
+        state_id = await connection.fetchval(
+            DEFAULT_STATE,
+            BOOTSTRAP_WORKSPACE_ID,
+            BOOTSTRAP_TEAM_ID,
+        )
+
+        # `number` follows the seed's own order rather than the expected
+        # output order, and only has to be unique per team --
+        # `issues_team_number_key`. Nothing in this file reads it; it is here
+        # because the column is NOT NULL.
         await connection.executemany(
             INSERT,
             [
@@ -348,6 +368,8 @@ async def seeded(postgres_dsn):
                     row.id,
                     BOOTSTRAP_WORKSPACE_ID,
                     BOOTSTRAP_TEAM_ID,
+                    number,
+                    state_id,
                     row.title,
                     row.description,
                     row.priority,
@@ -355,7 +377,7 @@ async def seeded(postgres_dsn):
                     row.created_at,
                     row.updated_at,
                 )
-                for row in SEED
+                for number, row in enumerate(SEED, start=1)
             ],
         )
 

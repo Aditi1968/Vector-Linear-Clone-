@@ -1,10 +1,11 @@
+from datetime import date
 from typing import TYPE_CHECKING
 from uuid import UUID
 
 import asyncpg
 
 from app.domain.errors import ValidationError, ValidationIssue
-from app.domain.issues import IssueEntity
+from app.domain.issues import IssueEntity, IssuePatch, Unset
 from app.domain.pagination import (
     InvalidCursorError,
     IssueCursor,
@@ -26,8 +27,41 @@ TITLE_MAX_LENGTH = 500
 PRIORITY_MIN = 0
 PRIORITY_MAX = 4
 
+ESTIMATE_MIN = 0
+
 FIRST_MIN = 1
 FIRST_MAX = 100
+
+
+# Foreign keys whose violation is a client mistake, and the field error each
+# one becomes.
+#
+# Discriminating on the constraint name is what keeps this from being the
+# thing CLAUDE.md forbids -- turning unexpected database errors into
+# validation errors. Each name here identifies exactly one rule, and each of
+# those rules is about a value the client supplied, so the translation says
+# only what the constraint already said. A foreign key not in this mapping --
+# `issues_team_fk`, `issues_creator_fk` -- is violated only by a value the
+# server chose, which makes it a defect here and not a correction for the
+# client to make; those propagate untouched.
+#
+# `issues_assignee_fk` is violated identically by a user who does not exist
+# and by one who exists in another workspace, and both arrive here as this
+# single message. That is not a limitation to work around: distinguishing
+# them would answer "does this user id exist" for a caller who is only
+# entitled to know about their own workspace.
+_EXPECTED_FOREIGN_KEYS: dict[str, ValidationIssue] = {
+    "issues_assignee_fk": ValidationIssue(
+        field="assigneeId",
+        code="NOT_A_MEMBER",
+        message="Assignee must be a member of this workspace",
+    ),
+    "issues_workflow_state_fk": ValidationIssue(
+        field="workflowStateId",
+        code="NOT_FOUND",
+        message="Workflow state does not belong to this issue's team",
+    ),
+}
 
 
 class IssueService:
@@ -48,6 +82,41 @@ class IssueService:
     Holding a scope is not permission to act in it. Nothing in this class
     checks that the caller belongs to the workspace it named; that check
     does not exist yet, and when it does it will not live here.
+
+    The completed_at rule
+    ---------------------
+    `completed_at` is derived, never set. No input type carries it and no
+    method here accepts it. The rule, applied on every write:
+
+        completed_at is non-NULL if and only if the issue's workflow state
+        is in a terminal category -- 'completed' or 'canceled'.
+
+    with one refinement about which instant it holds:
+
+      * entering a terminal category from a non-terminal one stamps now();
+      * leaving a terminal category clears it to NULL;
+      * moving between two terminal categories -- Done to Canceled -- keeps
+        the timestamp already there, because the work stopped when it first
+        stopped and relabelling why does not restart it;
+      * a write that does not change the state leaves it as it is.
+
+    Every one of those falls out of a single expression evaluated by the
+    server (`COALESCE(completed_at, now())` when terminal, NULL otherwise),
+    so there is no branch here for a caller to reach around. Categories are
+    compared, never names: 'Done' is a label a team may rename or delete,
+    'completed' is a category migration 005's CHECK constrains.
+
+    A newly created issue needs no such expression. It starts in whatever
+    `TeamService.default_workflow_state_id` returns, which is the team's
+    `unstarted` state, so the rule's answer for it is NULL -- which is the
+    column's default.
+
+    The rule is enforced at the write and not by a database constraint
+    because the two columns live in different tables -- a CHECK cannot join
+    `workflow_states` -- and a trigger is the other option this project has
+    deliberately not taken up yet. Recomputing on every write rather than
+    only on state changes is what compensates: a row that somehow disagrees
+    is repaired by its next update rather than keeping the disagreement.
     """
 
     def __init__(
@@ -79,11 +148,11 @@ class IssueService:
         scope: WorkspaceScope,
         issue_id: UUID,
     ) -> IssueEntity | None:
-        """One issue from this workspace, or nothing.
+        """One live issue from this workspace, or nothing.
 
-        "Not in this workspace" and "does not exist" are the same answer on
-        purpose; the repository explains why the distinction must not be
-        observable.
+        "Not in this workspace", "archived" and "does not exist" are the
+        same answer on purpose; the repository explains why the distinction
+        must not be observable.
         """
         async with self._pool.acquire() as connection:
             return await self._repository.get_by_id(
@@ -98,8 +167,12 @@ class IssueService:
         scope: WorkspaceScope,
         team_id: UUID,
         title: str,
-        description: str | None,
-        priority: int,
+        description: str | None = None,
+        priority: int = 0,
+        assignee_id: UUID | None = None,
+        creator_id: UUID | None = None,
+        estimate: int | None = None,
+        due_date: date | None = None,
     ) -> IssueEntity:
         """File one issue in this workspace, against this team.
 
@@ -108,40 +181,141 @@ class IssueService:
         another tenant's work lands, using a rule invisible at the call
         site; the caller that knows which team it means is the one that has
         to say so.
+
+        `creator_id` is likewise passed in and never derived here. It
+        records who filed the issue, so the only honest source for it is
+        whatever authenticated the request -- the resolver reads
+        `info.context.viewer()` and hands the answer down. It is None for an
+        unauthenticated caller, which is a state the column already allows
+        and which every issue predating `users` is in anyway. It is
+        deliberately not a client-supplied field: a caller able to name the
+        creator could forge authorship.
+
+        There is no `workflow_state_id` parameter. A new issue goes wherever
+        new work goes on its team, which is the team's `unstarted` state;
+        filing directly into some other state is a move, and moves go
+        through `update`.
+
+        The allocation and the insert share one transaction, and the
+        allocation is last before it. `TeamService.allocate_issue_number`
+        holds a row lock on the team from the moment it runs until this
+        transaction ends, serialising every other create on the same team
+        for that span, so the less that sits between the two the better.
+        Rollback carries the increment back with it, which is what keeps the
+        numbering gapless after a failed create.
         """
-        self._validate_create(title=title, priority=priority)
+        self._validate_create(title=title, priority=priority, estimate=estimate)
 
         async with self._pool.acquire() as connection:
             # The service owns the transaction boundary: later this block
             # will also carry the audit / sync / outbox writes.
-            async with connection.transaction():
-                # Resolved before the number is claimed, deliberately. The
-                # allocation takes a row lock on the team that is held to
-                # the end of this transaction and serialises every other
-                # creation on the same team for that whole span, so the
-                # read that does not need the lock happens outside it.
-                workflow_state_id = await self._teams.default_workflow_state_id(
-                    connection,
-                    scope=scope,
-                    team_id=team_id,
-                )
+            try:
+                async with connection.transaction():
+                    # Resolved before the number is claimed, deliberately.
+                    # The allocation takes a row lock on the team that is
+                    # held to the end of this transaction and serialises
+                    # every other creation on the same team for that whole
+                    # span, so the read that does not need the lock happens
+                    # outside it.
+                    workflow_state_id = await self._teams.default_workflow_state_id(
+                        connection,
+                        scope=scope,
+                        team_id=team_id,
+                    )
 
-                number = await self._teams.allocate_issue_number(
-                    connection,
-                    scope=scope,
-                    team_id=team_id,
-                )
+                    number = await self._teams.allocate_issue_number(
+                        connection,
+                        scope=scope,
+                        team_id=team_id,
+                    )
 
-                return await self._repository.create(
+                    return await self._repository.create(
+                        connection,
+                        scope=scope,
+                        team_id=team_id,
+                        number=number,
+                        workflow_state_id=workflow_state_id,
+                        title=title,
+                        description=description,
+                        priority=priority,
+                        assignee_id=assignee_id,
+                        creator_id=creator_id,
+                        estimate=estimate,
+                        due_date=due_date,
+                    )
+            except asyncpg.ForeignKeyViolationError as exc:
+                # Caught outside the transaction block so the rollback has
+                # already happened by the time this runs. Catching inside it
+                # would swallow the error and let the block commit -- with
+                # the counter incremented and no issue to show for it.
+                error = _validation_error_for(exc.constraint_name)
+
+                if error is None:
+                    raise
+
+                raise error from None
+
+    async def update(
+        self,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+        patch: IssuePatch,
+    ) -> IssueEntity | None:
+        """Apply a patch to one live issue in this workspace, or nothing.
+
+        None means the issue is not there to update -- nonexistent, another
+        tenant's, or archived -- and those stay indistinguishable, exactly
+        as they are for a read. An update is otherwise a probe: a caller
+        holding a guessed id could learn which ids exist by watching which
+        updates report a different kind of failure.
+
+        A single statement does the whole job, so no transaction is opened.
+        The patch is not read back and merged in here; see the repository
+        for why that shape would lose concurrent edits.
+        """
+        self._validate_patch(patch)
+
+        async with self._pool.acquire() as connection:
+            try:
+                return await self._repository.update(
                     connection,
                     scope=scope,
-                    team_id=team_id,
-                    number=number,
-                    workflow_state_id=workflow_state_id,
-                    title=title,
-                    description=description,
-                    priority=priority,
+                    issue_id=issue_id,
+                    patch=patch,
                 )
+            except asyncpg.ForeignKeyViolationError as exc:
+                error = _validation_error_for(exc.constraint_name)
+
+                if error is None:
+                    raise
+
+                raise error from None
+
+    async def archive(
+        self,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+    ) -> IssueEntity | None:
+        """Take one issue off this workspace's board, or answer nothing.
+
+        Archival rather than deletion, for the reasons migration 006 sets
+        out: the identifier `CORE-42` is the issue's name everywhere outside
+        this database, and 005 never reissues a number, so a discarded row
+        turns every reference to it into one that resolves to nothing.
+
+        None covers "no such issue", "another tenant's" and "already
+        archived" alike. The last one collapses into the others rather than
+        reporting success a second time, which keeps `archived_at` the
+        moment of archival rather than of the most recent attempt.
+        """
+        async with self._pool.acquire() as connection:
+            return await self._repository.archive(
+                connection,
+                scope=scope,
+                issue_id=issue_id,
+            )
 
     async def list(
         self,
@@ -150,7 +324,7 @@ class IssueService:
         first: int,
         after: str | None,
     ) -> IssuePage:
-        """Forward keyset page of one workspace's issues, newest first.
+        """Forward keyset page of one workspace's live issues, newest first.
 
         A single SELECT needs no explicit write transaction, so this
         acquires a connection without opening one.
@@ -226,42 +400,154 @@ class IssueService:
         return cursor
 
     @staticmethod
-    def _validate_create(*, title: str, priority: int) -> None:
+    def _validate_create(*, title: str, priority: int, estimate: int | None) -> None:
         """Collect every violation, then raise once.
 
-        Field order is deterministic (title, then priority) so that clients
-        can rely on it. The codes and messages are a public contract.
+        Field order is deterministic (title, then priority, then estimate)
+        so that clients can rely on it. The codes and messages are a public
+        contract.
         """
-        issues: list[ValidationIssue] = []
-
-        # The title is validated as supplied -- never trimmed or rewritten.
-        if len(title) < TITLE_MIN_LENGTH:
-            issues.append(
-                ValidationIssue(
-                    field="title",
-                    code="REQUIRED",
-                    message="Title is required",
-                )
-            )
-        elif len(title) > TITLE_MAX_LENGTH:
-            issues.append(
-                ValidationIssue(
-                    field="title",
-                    code="TOO_LONG",
-                    message=f"Title must be at most {TITLE_MAX_LENGTH} characters",
-                )
-            )
-
-        if priority < PRIORITY_MIN or priority > PRIORITY_MAX:
-            issues.append(
-                ValidationIssue(
-                    field="priority",
-                    code="OUT_OF_RANGE",
-                    message=(
-                        f"Priority must be between {PRIORITY_MIN} and {PRIORITY_MAX}"
-                    ),
-                )
-            )
+        issues = [
+            *_title_issues(title),
+            *_priority_issues(priority),
+            *_estimate_issues(estimate),
+        ]
 
         if issues:
             raise ValidationError(issues)
+
+    @staticmethod
+    def _validate_patch(patch: IssuePatch) -> None:
+        """The same field rules as a create, applied to whatever is present.
+
+        Only fields the patch actually carries are checked. A field left
+        UNSET is not being written, so validating it would mean rejecting an
+        update for the state of a value the request never mentioned -- which
+        would make an issue that predates a rule permanently uneditable.
+
+        An empty patch is refused rather than treated as a no-op. Every
+        write here stamps `updated_at`, so accepting one would record an
+        edit that changed nothing, and "last modified" is a fact the product
+        shows.
+
+        An explicit null for `title`, `priority` or `workflowStateId` is
+        refused too, and that check has to live here because GraphQL cannot
+        express it. An input field is required exactly when it is non-null
+        and has no default, so a field that may be omitted from a patch is
+        necessarily one that may arrive as null -- see `IssueUpdateInput`.
+        Refusing it here turns what would otherwise be a NOT NULL violation
+        from the driver into the field error it actually is.
+        """
+        if patch.is_empty:
+            raise ValidationError(
+                [
+                    ValidationIssue(
+                        field="input",
+                        code="EMPTY",
+                        message="At least one field must be provided",
+                    )
+                ]
+            )
+
+        issues: list[ValidationIssue] = []
+
+        # Field order is deterministic and matches the input type's, so that
+        # clients can rely on it; the codes and messages are a public
+        # contract.
+        for name, value in (
+            ("title", patch.title),
+            ("priority", patch.priority),
+            ("workflowStateId", patch.workflow_state_id),
+        ):
+            if value is None:
+                issues.append(
+                    ValidationIssue(
+                        field=name,
+                        code="NOT_NULLABLE",
+                        message=f"{name} cannot be cleared",
+                    )
+                )
+
+        if isinstance(patch.title, str):
+            issues.extend(_title_issues(patch.title))
+
+        if isinstance(patch.priority, int):
+            issues.extend(_priority_issues(patch.priority))
+
+        if not isinstance(patch.estimate, Unset):
+            issues.extend(_estimate_issues(patch.estimate))
+
+        if issues:
+            raise ValidationError(issues)
+
+
+def _validation_error_for(constraint_name: str) -> ValidationError | None:
+    """The field error this foreign key stands for, or None for the rest.
+
+    Takes the constraint's name rather than the exception, so nothing about
+    asyncpg reaches this function -- and so the caller keeps the original
+    exception in hand for the None case, where a bare `raise` re-raises it
+    with its traceback intact. A constraint absent from the mapping is not a
+    rule about client input, and is left to be masked and logged with every
+    other unexpected failure.
+    """
+    return (
+        ValidationError([issue])
+        if (issue := _EXPECTED_FOREIGN_KEYS.get(constraint_name)) is not None
+        else None
+    )
+
+
+def _title_issues(title: str) -> list[ValidationIssue]:
+    # The title is validated as supplied -- never trimmed or rewritten.
+    if len(title) < TITLE_MIN_LENGTH:
+        return [
+            ValidationIssue(
+                field="title",
+                code="REQUIRED",
+                message="Title is required",
+            )
+        ]
+
+    if len(title) > TITLE_MAX_LENGTH:
+        return [
+            ValidationIssue(
+                field="title",
+                code="TOO_LONG",
+                message=f"Title must be at most {TITLE_MAX_LENGTH} characters",
+            )
+        ]
+
+    return []
+
+
+def _priority_issues(priority: int) -> list[ValidationIssue]:
+    if priority < PRIORITY_MIN or priority > PRIORITY_MAX:
+        return [
+            ValidationIssue(
+                field="priority",
+                code="OUT_OF_RANGE",
+                message=f"Priority must be between {PRIORITY_MIN} and {PRIORITY_MAX}",
+            )
+        ]
+
+    return []
+
+
+def _estimate_issues(estimate: int | None) -> list[ValidationIssue]:
+    """No upper bound, matching `issues_estimate_non_negative` in 006.
+
+    A ceiling here would be a guess at the unit a team estimates in, and
+    the schema declines to make that guess for the reasons 006 records.
+    Clearing an estimate (None) is always allowed.
+    """
+    if estimate is not None and estimate < ESTIMATE_MIN:
+        return [
+            ValidationIssue(
+                field="estimate",
+                code="OUT_OF_RANGE",
+                message=f"Estimate must be {ESTIMATE_MIN} or greater",
+            )
+        ]
+
+    return []

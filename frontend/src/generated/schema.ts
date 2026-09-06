@@ -18,6 +18,8 @@ export type Scalars = {
   Boolean: { input: boolean; output: boolean; }
   Int: { input: number; output: number; }
   Float: { input: number; output: number; }
+  /** Date (isoformat) */
+  Date: { input: string; output: string; }
   /** Date with time (isoformat) */
   DateTime: { input: string; output: string; }
   UUID: { input: string; output: string; }
@@ -25,13 +27,34 @@ export type Scalars = {
 
 export type Issue = {
   __typename?: 'Issue';
+  /** When the issue was taken off the board. Always null here, because archived issues are absent from every query -- only the archive mutation's own result carries a value. */
+  archivedAt?: Maybe<Scalars['DateTime']['output']>;
+  assigneeId?: Maybe<Scalars['UUID']['output']>;
+  /** When the issue stopped being worked on. Derived from the workflow state's category and not settable directly: it is non-null exactly while the issue sits in a completed or canceled state. */
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   createdAt: Scalars['DateTime']['output'];
+  /** Who filed the issue, or null where that is not known -- an issue created before accounts existed, or one whose author's account has since been deleted. */
+  creatorId?: Maybe<Scalars['UUID']['output']>;
   description?: Maybe<Scalars['String']['output']>;
+  /** A calendar day, not an instant: the same day for every viewer, in every timezone. */
+  dueDate?: Maybe<Scalars['Date']['output']>;
+  estimate?: Maybe<Scalars['Int']['output']>;
   id: Scalars['UUID']['output'];
+  /** The name this issue is known by outside the product -- ENG-42. Its team's key, a hyphen, and the issue's number. */
+  identifier: Scalars['String']['output'];
+  /** Sequential within the team and never reused. Unique only alongside the team; two teams both have a number 42. */
+  number: Scalars['Int']['output'];
   priority: Scalars['Int']['output'];
+  teamId: Scalars['UUID']['output'];
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
+  workflowStateId: Scalars['UUID']['output'];
+};
+
+export type IssueArchivePayload = {
+  __typename?: 'IssueArchivePayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
 };
 
 export type IssueConnection = {
@@ -41,13 +64,32 @@ export type IssueConnection = {
 };
 
 export type IssueCreateInput = {
+  assigneeId?: InputMaybe<Scalars['UUID']['input']>;
   description?: InputMaybe<Scalars['String']['input']>;
+  dueDate?: InputMaybe<Scalars['Date']['input']>;
+  estimate?: InputMaybe<Scalars['Int']['input']>;
   priority?: Scalars['Int']['input'];
   title: Scalars['String']['input'];
 };
 
 export type IssueCreatePayload = {
   __typename?: 'IssueCreatePayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
+};
+
+export type IssueUpdateInput = {
+  assigneeId?: InputMaybe<Scalars['UUID']['input']>;
+  description?: InputMaybe<Scalars['String']['input']>;
+  dueDate?: InputMaybe<Scalars['Date']['input']>;
+  estimate?: InputMaybe<Scalars['Int']['input']>;
+  priority?: InputMaybe<Scalars['Int']['input']>;
+  title?: InputMaybe<Scalars['String']['input']>;
+  workflowStateId?: InputMaybe<Scalars['UUID']['input']>;
+};
+
+export type IssueUpdatePayload = {
+  __typename?: 'IssueUpdatePayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
 };
@@ -71,15 +113,28 @@ export type LogoutPayload = {
 
 export type Mutation = {
   __typename?: 'Mutation';
+  issueArchive: IssueArchivePayload;
   issueCreate: IssueCreatePayload;
+  issueUpdate: IssueUpdatePayload;
   login: LoginPayload;
   logout: LogoutPayload;
   register: RegisterPayload;
 };
 
 
+export type MutationIssueArchiveArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
 export type MutationIssueCreateArgs = {
   input: IssueCreateInput;
+};
+
+
+export type MutationIssueUpdateArgs = {
+  id: Scalars['UUID']['input'];
+  input: IssueUpdateInput;
 };
 
 

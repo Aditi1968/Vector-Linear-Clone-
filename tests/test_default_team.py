@@ -46,6 +46,7 @@ from app.services.workspaces import WorkspaceService
 from tests.conftest import (
     TEST_SCOPE,
     TEST_WORKSPACE_ID,
+    AnonymousAuthService,
     FakeConnection,
     FakePool,
     apply_all_migrations,
@@ -264,10 +265,13 @@ async def wired(postgres_dsn):
                         repository=IssueRepository(),
                         teams=team_service,
                     ),
-                    # This fixture predates authentication and exercises the
-                    # tenancy path only; no resolver it reaches resolves a
-                    # viewer.
-                    auth_service=None,
+                    # `issueCreate` resolves a viewer, because it records
+                    # authorship in `issues.creator_id`. Anonymous is the
+                    # honest answer for this fixture -- it opens no session
+                    # and sends no cookie -- and the column is nullable
+                    # precisely so that an unauthenticated create still has
+                    # somewhere to land.
+                    auth_service=AnonymousAuthService(),
                     membership_service=None,
                     team_service=team_service,
                     workspace_service=workspace_service,
