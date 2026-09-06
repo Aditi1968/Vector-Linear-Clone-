@@ -14,11 +14,11 @@ from app.services.issues import IssueService
 from app.services.teams import TeamService
 
 from tests.conftest import (
-    TEST_SCOPE,
+    TEST_AUTHORIZED_SCOPE,
     TEST_TEAM_ID,
-    AnonymousAuthService,
+    TEST_USER_ID,
+    TEST_WORKSPACE_SLUG,
     ExplodingPool,
-    FakeTenant,
     graphql_context,
     make_entity,
 )
@@ -27,6 +27,13 @@ from tests.conftest import (
 # Built directly rather than imported, so these tests need no DATABASE_URL.
 schema = build_schema("test")
 
+
+# The two fields every create carries now. Spread into each case so that a
+# test varies only the field it is about.
+CREATE_INPUT = {
+    "workspaceSlug": TEST_WORKSPACE_SLUG,
+    "teamId": str(TEST_TEAM_ID),
+}
 
 ISSUE_CREATE_MUTATION = """
 mutation CreateIssue($input: IssueCreateInput!) {
@@ -51,16 +58,13 @@ def Context(issue_service):
     """The context these tests execute a document against.
 
     Through `graphql_context` rather than a local stand-in class, so that a
-    slot added to `VectorContext` is filled in one place. `auth_service` is
-    wired because `issueCreate` reads the viewer to record authorship, and
-    anonymous is the answer these tests want: `creator_id` is nullable
-    precisely so a request with no session can still file an issue.
+    slot added to `VectorContext` is filled in one place. The viewer and the
+    membership come from that helper's defaults, and both are load-bearing
+    now: `issueCreate` authorizes the workspace named on the input and then
+    records authorship from the membership row that authorized it, so there
+    is no anonymous create left to test.
     """
-    return graphql_context(
-        issue_service=issue_service,
-        auth_service=AnonymousAuthService(),
-        tenant=FakeTenant(),
-    )
+    return graphql_context(issue_service=issue_service)
 
 
 class FakeIssueService:
@@ -95,7 +99,9 @@ async def test_invalid_input_returns_structured_payload():
 
     result = await schema.execute(
         ISSUE_CREATE_MUTATION,
-        variable_values={"input": {"title": "", "description": None, "priority": 99}},
+        variable_values={
+            "input": CREATE_INPUT | {"title": "", "description": None, "priority": 99}
+        },
         context_value=context,
     )
 
@@ -135,7 +141,8 @@ async def test_valid_input_returns_issue_and_empty_errors():
     result = await schema.execute(
         ISSUE_CREATE_MUTATION,
         variable_values={
-            "input": {
+            "input": CREATE_INPUT
+            | {
                 "title": "A valid title",
                 "description": "described",
                 "priority": 2,
@@ -156,22 +163,24 @@ async def test_valid_input_returns_issue_and_empty_errors():
         }
     }
 
-    # The tenant reaches the service, and is the request's rather than the
-    # document's: nothing in the mutation above names a workspace or a team.
+    # The scope that reaches the service is the AUTHORIZED one -- built from
+    # a membership row -- and not merely a workspace the document named. The
+    # team is the document's, because the client says which team it is filing
+    # against; the workspace is not, because a slug only selects what is being
+    # asked about and the membership decides whether it may be.
     #
-    # `creator_id` is None because the context authenticates nobody, and it
-    # is asserted rather than ignored: the resolver must take authorship from
-    # the viewer, so a value appearing here for an anonymous request would
-    # mean it came from somewhere a client can reach.
+    # `creator_id` is the viewer's id and is asserted rather than ignored: the
+    # resolver must take authorship from the session, so any other value here
+    # would mean it came from somewhere a client can reach.
     assert service.calls == [
         {
-            "scope": TEST_SCOPE,
+            "scope": TEST_AUTHORIZED_SCOPE,
             "team_id": TEST_TEAM_ID,
             "title": "A valid title",
             "description": "described",
             "priority": 2,
             "assignee_id": None,
-            "creator_id": None,
+            "creator_id": TEST_USER_ID,
             "estimate": None,
             "due_date": None,
         }
@@ -183,7 +192,8 @@ async def test_unexpected_errors_are_not_converted_to_validation_errors():
     result = await schema.execute(
         ISSUE_CREATE_MUTATION,
         variable_values={
-            "input": {"title": "A valid title", "description": None, "priority": 2}
+            "input": CREATE_INPUT
+            | {"title": "A valid title", "description": None, "priority": 2}
         },
         context_value=Context(BrokenIssueService()),
     )

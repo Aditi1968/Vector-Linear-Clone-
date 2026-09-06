@@ -26,6 +26,19 @@ from app.graphql.types.project import ProjectStateType
 
 @strawberry.input
 class ProjectCreateInput:
+    # Every workspace-scoped mutation names its tenant, and every mutation
+    # that takes an `input` names it HERE rather than beside the input. One
+    # place per operation, so a client never has to remember which mutations
+    # spell it as an argument; the two that take no input at all
+    # (`issueArchive`, `cycleDelete`) carry it as a field argument, because
+    # inventing a one-field input object for them would be worse.
+    #
+    # A slug and not a workspace id, deliberately. CLAUDE.md forbids trusting
+    # a workspace id from the frontend: the slug is a public string that
+    # selects WHAT is being asked about, and `app.graphql.scope` decides
+    # whether the session behind the request may act there.
+    workspace_slug: str
+
     name: str
     description: str | None = None
     # A default here and not in the schema. migrations/009_projects.sql
@@ -51,6 +64,7 @@ class ProjectCreateInput:
 
 @strawberry.input
 class ProjectUpdateInput:
+    workspace_slug: str
     id: UUID
     name: str | None = strawberry.UNSET
     description: str | None = strawberry.UNSET
@@ -64,6 +78,7 @@ class ProjectUpdateInput:
 
 @strawberry.input
 class ProjectDeleteInput:
+    workspace_slug: str
     id: UUID
 
 
@@ -77,12 +92,14 @@ class ProjectTeamInput:
     removal of has a project it cannot get back out of a state.
     """
 
+    workspace_slug: str
     project_id: UUID
     team_id: UUID
 
 
 @strawberry.input
 class ProjectMilestoneCreateInput:
+    workspace_slug: str
     project_id: UUID
     name: str
     target_date: date | None = None
@@ -90,6 +107,7 @@ class ProjectMilestoneCreateInput:
 
 @strawberry.input
 class ProjectMilestoneUpdateInput:
+    workspace_slug: str
     id: UUID
     name: str | None = strawberry.UNSET
     target_date: date | None = strawberry.UNSET
@@ -98,6 +116,7 @@ class ProjectMilestoneUpdateInput:
 
 @strawberry.input
 class ProjectMilestoneDeleteInput:
+    workspace_slug: str
     id: UUID
 
 
@@ -117,6 +136,7 @@ class IssueSetProjectInput:
     into a phase of it.
     """
 
+    workspace_slug: str
     issue_id: UUID
     project_id: UUID | None = None
     milestone_id: UUID | None = None

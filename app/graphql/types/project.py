@@ -11,6 +11,7 @@ from app.domain.projects import (
     ProjectMilestoneEntity,
     ProjectPage,
 )
+from app.domain.tenancy import WorkspaceScope
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.pagination import PageInfo
 
@@ -117,6 +118,21 @@ class ProjectType:
     created_at: datetime
     updated_at: datetime
 
+    # Carried, not exposed: `strawberry.Private` keeps it out of the schema.
+    #
+    # The scope the root field AUTHORIZED, handed down so that a nested
+    # resolver runs in the same workspace its parent was read from. It is not
+    # taken from the row -- an entity that remembered its own tenant would let
+    # this resolver scope a query with a value that arrived from an earlier
+    # query's RESULT, which is how a compromised row becomes a key to another
+    # workspace. It travels from `authorized_scope`, which is the only thing
+    # that produces one, through the resolver that built this object.
+    #
+    # Per object rather than per request, because one document may name two
+    # workspaces in two root fields; a single ambient scope would serve the
+    # second field's children out of the first field's tenant.
+    scope: strawberry.Private[WorkspaceScope]
+
     @strawberry.field
     async def milestones(self, info: Info) -> list[ProjectMilestoneType]:
         """This project's milestones, in display order.
@@ -124,24 +140,17 @@ class ProjectType:
         Batched. Rendering a page of projects with their milestones would
         otherwise issue one query per project, and the batch loader collapses
         them into one -- see app/graphql/loaders/projects.py.
-
-        The workspace comes from the request rather than from this object.
-        `ProjectType` carries no workspace and must not: an entity that
-        remembered its tenant would let a resolver scope a query with a value
-        that arrived from an earlier query's result instead of from the
-        request.
         """
-        scope = await info.context.tenant.scope()
-
         entities = await info.context.project_milestones_loader.load(
-            (scope.workspace_id, self.id)
+            (self.scope.workspace_id, self.id)
         )
 
         return [ProjectMilestoneType.from_entity(entity) for entity in entities]
 
     @classmethod
-    def from_entity(cls, entity: ProjectEntity) -> "ProjectType":
+    def from_entity(cls, entity: ProjectEntity, scope: WorkspaceScope) -> "ProjectType":
         return cls(
+            scope=scope,
             id=entity.id,
             name=entity.name,
             description=entity.description,
@@ -166,9 +175,11 @@ class ProjectConnection:
     page_info: PageInfo
 
     @classmethod
-    def from_domain(cls, page: ProjectPage) -> "ProjectConnection":
+    def from_domain(
+        cls, page: ProjectPage, scope: WorkspaceScope
+    ) -> "ProjectConnection":
         return cls(
-            nodes=[ProjectType.from_entity(entity) for entity in page.nodes],
+            nodes=[ProjectType.from_entity(entity, scope) for entity in page.nodes],
             page_info=PageInfo(
                 has_next_page=page.has_next_page,
                 end_cursor=page.end_cursor,

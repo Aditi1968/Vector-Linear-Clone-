@@ -3,20 +3,15 @@ from graphql import GraphQLError
 from strawberry.types import Info
 
 from app.domain.errors import WorkspaceAccessDeniedError
+from app.graphql.scope import WORKSPACE_NOT_FOUND_MESSAGE
 from app.graphql.types.membership import WorkspaceMembershipType
 from app.graphql.viewer import viewer_user_id
 
 
-# One message for a workspace that does not exist and for one the viewer does
-# not belong to. A constant because it is a contract rather than prose:
-# NOT_FOUND is in `app.graphql.schema.PUBLIC_ERROR_CODES`, so this string
-# reaches clients verbatim.
-#
-# Phrased as a miss rather than a refusal, because a refusal would confirm the
-# workspace is real. The server does not know which case it is in -- see
-# WorkspaceAccessDeniedError -- so this is the only answer it could give
-# truthfully anyway.
-WORKSPACE_NOT_FOUND_MESSAGE = "Workspace not found"
+# WORKSPACE_NOT_FOUND_MESSAGE is imported rather than declared here now that
+# every workspace-scoped resolver raises it. It moved to app/graphql/scope.py,
+# beside the helper that raises it everywhere else, so that this field and the
+# whole scoped API cannot answer a non-member two different ways.
 
 
 @strawberry.type

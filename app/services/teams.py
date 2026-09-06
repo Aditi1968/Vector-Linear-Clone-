@@ -32,28 +32,6 @@ class TeamService:
         self._pool = pool
         self._repository = repository
 
-    async def default_team_id(self, scope: WorkspaceScope) -> UUID:
-        """The team new issues in this workspace are filed against.
-
-        A single SELECT needs no explicit write transaction, so this
-        acquires a connection without opening one, and releases it before
-        deciding what the lookup means.
-
-        A workspace with no teams raises rather than returning None. The
-        caller's only use for the answer is an insert that cannot proceed
-        without one, so an Optional here would move an unavoidable failure
-        to a less informative place -- and the failure is real: a workspace
-        with no teams is a tenant nobody can file work in, which is a
-        provisioning defect, not a client mistake.
-        """
-        async with self._pool.acquire() as connection:
-            team_id = await self._repository.find_oldest_id(connection, scope=scope)
-
-        if team_id is None:
-            raise TeamNotFoundError()
-
-        return team_id
-
     async def list_workflows(self, scope: WorkspaceScope) -> list[TeamWorkflow]:
         """Every team in the workspace, each with its workflow states.
 

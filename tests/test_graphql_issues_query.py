@@ -4,16 +4,24 @@ from app.domain.errors import ValidationError, ValidationIssue
 from app.domain.pagination import IssuePage, encode_issue_cursor
 from app.graphql.schema import build_schema
 
-from tests.conftest import TEST_SCOPE, FakeTenant, make_entity
+from tests.conftest import (
+    TEST_AUTHORIZED_SCOPE,
+    TEST_WORKSPACE_SLUG,
+    graphql_context,
+    make_entity,
+)
 
 
 # Built directly rather than imported, so these tests need no DATABASE_URL.
 schema = build_schema("test")
 
 
+# Every document here names a workspace, because every workspace-scoped
+# field now requires one. The slug is a variable rather than a literal so
+# that the refusal tests can send a different one through the same document.
 ISSUES_QUERY = """
-query ListIssues($first: Int!, $after: String) {
-  issues(first: $first, after: $after) {
+query ListIssues($slug: String!, $first: Int!, $after: String) {
+  issues(workspaceSlug: $slug, first: $first, after: $after) {
     nodes {
       id
       title
@@ -29,7 +37,7 @@ query ListIssues($first: Int!, $after: String) {
 
 DEFAULT_ARGS_QUERY = """
 query {
-  issues {
+  issues(workspaceSlug: "acme") {
     nodes {
       id
       title
@@ -44,10 +52,16 @@ query {
 """
 
 
-class Context:
-    def __init__(self, issue_service):
-        self.issue_service = issue_service
-        self.tenant = FakeTenant()
+def Context(issue_service):
+    """The real context, wired to one fake service.
+
+    Built through the shared helper rather than as a bespoke object, because
+    the resolvers now reach two more collaborators before the issue service:
+    the auth service that says who is asking, and the membership service that
+    says whether they may be in this workspace. A hand-rolled stand-in would
+    have to grow both by hand and would drift from the one in conftest.
+    """
+    return graphql_context(issue_service=issue_service)
 
 
 class FakeIssueService:
@@ -55,8 +69,10 @@ class FakeIssueService:
         self._page = page
         self.calls: list[dict] = []
 
-    async def list(self, *, scope, first: int, after: str | None):
-        self.calls.append({"scope": scope, "first": first, "after": after})
+    async def list(self, *, scope, team_id, first: int, after: str | None):
+        self.calls.append(
+            {"scope": scope, "team_id": team_id, "first": first, "after": after}
+        )
 
         return self._page
 
@@ -65,12 +81,12 @@ class InvalidArgumentsService:
     def __init__(self, issues: list[ValidationIssue]):
         self._issues = issues
 
-    async def list(self, *, scope, first: int, after: str | None):
+    async def list(self, *, scope, team_id, first: int, after: str | None):
         raise ValidationError(self._issues)
 
 
 class BrokenIssueService:
-    async def list(self, *, scope, first: int, after: str | None):
+    async def list(self, *, scope, team_id, first: int, after: str | None):
         raise RuntimeError("connection reset by peer")
 
 
@@ -87,7 +103,14 @@ async def test_default_arguments_are_first_50_and_no_cursor():
     )
 
     assert result.errors is None
-    assert service.calls == [{"scope": TEST_SCOPE, "first": 50, "after": None}]
+    assert service.calls == [
+        {
+            "scope": TEST_AUTHORIZED_SCOPE,
+            "team_id": None,
+            "first": 50,
+            "after": None,
+        }
+    ]
 
 
 async def test_explicit_first_is_forwarded():
@@ -95,12 +118,14 @@ async def test_explicit_first_is_forwarded():
 
     result = await schema.execute(
         ISSUES_QUERY,
-        variable_values={"first": 2, "after": None},
+        variable_values={"slug": TEST_WORKSPACE_SLUG, "first": 2, "after": None},
         context_value=Context(service),
     )
 
     assert result.errors is None
-    assert service.calls == [{"scope": TEST_SCOPE, "first": 2, "after": None}]
+    assert service.calls == [
+        {"scope": TEST_AUTHORIZED_SCOPE, "team_id": None, "first": 2, "after": None}
+    ]
 
 
 async def test_cursor_is_forwarded_unchanged():
@@ -110,12 +135,19 @@ async def test_cursor_is_forwarded_unchanged():
 
     result = await schema.execute(
         ISSUES_QUERY,
-        variable_values={"first": 10, "after": cursor},
+        variable_values={"slug": TEST_WORKSPACE_SLUG, "first": 10, "after": cursor},
         context_value=Context(service),
     )
 
     assert result.errors is None
-    assert service.calls == [{"scope": TEST_SCOPE, "first": 10, "after": cursor}]
+    assert service.calls == [
+        {
+            "scope": TEST_AUTHORIZED_SCOPE,
+            "team_id": None,
+            "first": 10,
+            "after": cursor,
+        }
+    ]
 
 
 async def test_domain_page_maps_onto_connection():
@@ -124,7 +156,7 @@ async def test_domain_page_maps_onto_connection():
 
     result = await schema.execute(
         ISSUES_QUERY,
-        variable_values={"first": 2, "after": None},
+        variable_values={"slug": TEST_WORKSPACE_SLUG, "first": 2, "after": None},
         context_value=Context(FakeIssueService(page)),
     )
 
@@ -143,7 +175,7 @@ async def test_domain_page_maps_onto_connection():
 async def test_empty_page_maps_to_null_end_cursor():
     result = await schema.execute(
         ISSUES_QUERY,
-        variable_values={"first": 10, "after": None},
+        variable_values={"slug": TEST_WORKSPACE_SLUG, "first": 10, "after": None},
         context_value=Context(FakeIssueService(empty_page())),
     )
 
@@ -169,7 +201,7 @@ async def test_validation_error_becomes_structured_graphql_error():
 
     result = await schema.execute(
         ISSUES_QUERY,
-        variable_values={"first": 10, "after": "bad"},
+        variable_values={"slug": TEST_WORKSPACE_SLUG, "first": 10, "after": "bad"},
         context_value=Context(service),
     )
 
@@ -195,7 +227,7 @@ async def test_unexpected_errors_still_propagate():
     """A non-ValidationError must not be dressed up as bad user input."""
     result = await schema.execute(
         ISSUES_QUERY,
-        variable_values={"first": 10, "after": None},
+        variable_values={"slug": TEST_WORKSPACE_SLUG, "first": 10, "after": None},
         context_value=Context(BrokenIssueService()),
     )
 

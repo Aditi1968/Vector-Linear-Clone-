@@ -5,6 +5,7 @@ from graphql import GraphQLError
 from strawberry.types import Info
 
 from app.domain.errors import ValidationError
+from app.graphql.scope import authorized_scope
 from app.graphql.types.project import ProjectConnection, ProjectType
 
 
@@ -21,16 +22,20 @@ class ProjectQuery:
     """
 
     @strawberry.field
-    async def project(self, info: Info, id: UUID) -> ProjectType | None:
+    async def project(
+        self,
+        info: Info,
+        workspace_slug: str,
+        id: UUID,
+    ) -> ProjectType | None:
         """One project, or null.
 
-        The workspace comes from the request, never from the document -- see
-        app/graphql/tenancy.py for where it comes from today. A project in
+        The slug is authorized before the id selects anything. A project in
         another workspace resolves to null, the same answer as an id that
         exists nowhere, so this cannot be used to ask whether someone else's
         project exists.
         """
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, workspace_slug)
 
         entity = await info.context.project_service.get_by_id(
             scope=scope,
@@ -40,16 +45,17 @@ class ProjectQuery:
         if entity is None:
             return None
 
-        return ProjectType.from_entity(entity)
+        return ProjectType.from_entity(entity, scope)
 
     @strawberry.field
     async def projects(
         self,
         info: Info,
+        workspace_slug: str,
         first: int = DEFAULT_FIRST,
         after: str | None = None,
     ) -> ProjectConnection:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, workspace_slug)
 
         try:
             page = await info.context.project_service.list(
@@ -80,4 +86,4 @@ class ProjectQuery:
                 },
             ) from None
 
-        return ProjectConnection.from_domain(page)
+        return ProjectConnection.from_domain(page, scope)

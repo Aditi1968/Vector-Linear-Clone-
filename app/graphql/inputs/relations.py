@@ -17,6 +17,19 @@ class IssueSetParentInput:
     the one mutation whose failure mode is silently doing nothing.
     """
 
+    # Every workspace-scoped mutation names its tenant, and every mutation
+    # that takes an `input` names it HERE rather than beside the input. One
+    # place per operation, so a client never has to remember which mutations
+    # spell it as an argument; the two that take no input at all
+    # (`issueArchive`, `cycleDelete`) carry it as a field argument, because
+    # inventing a one-field input object for them would be worse.
+    #
+    # A slug and not a workspace id, deliberately. CLAUDE.md forbids trusting
+    # a workspace id from the frontend: the slug is a public string that
+    # selects WHAT is being asked about, and `app.graphql.scope` decides
+    # whether the session behind the request may act there.
+    workspace_slug: str
+
     issue_id: UUID
     parent_id: UUID
 
@@ -25,6 +38,7 @@ class IssueSetParentInput:
 class IssueClearParentInput:
     """Detach `issueId` from whatever parent it has, if any."""
 
+    workspace_slug: str
     issue_id: UUID
 
 
@@ -39,6 +53,7 @@ class IssueRelationCreateInput:
     it produces.
     """
 
+    workspace_slug: str
     source_issue_id: UUID
     target_issue_id: UUID
     type: IssueRelationTypeEnum
@@ -54,4 +69,5 @@ class IssueRelationDeleteInput:
     canonicalise correctly to match.
     """
 
+    workspace_slug: str
     id: UUID

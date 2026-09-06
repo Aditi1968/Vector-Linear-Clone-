@@ -46,6 +46,16 @@ MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
 # running application uses locally, so it is the one worth proving against.
 BOOTSTRAP_WORKSPACE_ID = UUID("00000000-0000-7000-8000-000000000001")
 
+# The team 002 seeds inside it, named as a literal for the same reason the
+# workspace is: 002 writes both rows in the file precisely so a test can
+# assert against a constant instead of querying for the value it checks.
+#
+# Written down rather than resolved. `TeamService.default_team_id` used to
+# answer this, and it is gone: `IssueCreateInput` requires a `teamId` now, so
+# nothing in the application picks a team on a client's behalf and a test that
+# still asked one to would be exercising a rule the product does not have.
+BOOTSTRAP_TEAM_ID = UUID("00000000-0000-7000-8000-000000000002")
+
 SCOPE = WorkspaceScope(workspace_id=BOOTSTRAP_WORKSPACE_ID)
 
 # The category 005 places a not-yet-completed issue in. Asserted as a category
@@ -141,14 +151,14 @@ async def test_every_migration_applies_in_order(migrated_pool):
 
 
 async def test_creating_an_issue_succeeds_on_a_fully_migrated_database(
-    issue_service, team_service, migrated_pool
+    issue_service, migrated_pool
 ):
     """The regression this file was written for.
 
     Before `IssueService.create` allocated a number and resolved a workflow
     state, this raised NotNullViolationError on `issues.number`.
     """
-    team_id = await team_service.default_team_id(SCOPE)
+    team_id = BOOTSTRAP_TEAM_ID
 
     entity = await issue_service.create(
         scope=SCOPE,
@@ -171,7 +181,7 @@ async def test_creating_an_issue_succeeds_on_a_fully_migrated_database(
 
 
 async def test_numbers_are_allocated_in_sequence_without_gaps(
-    issue_service, team_service, migrated_pool
+    issue_service, migrated_pool
 ):
     """Consecutive creates take consecutive numbers.
 
@@ -185,7 +195,7 @@ async def test_numbers_are_allocated_in_sequence_without_gaps(
     is issue-core's work and is not on main yet. What is on main is the
     column, and the column is what this checks.
     """
-    team_id = await team_service.default_team_id(SCOPE)
+    team_id = BOOTSTRAP_TEAM_ID
 
     created = []
 
@@ -210,9 +220,7 @@ async def test_numbers_are_allocated_in_sequence_without_gaps(
     assert numbers == [numbers[0], numbers[0] + 1, numbers[0] + 2]
 
 
-async def test_a_failed_insert_does_not_consume_a_number(
-    issue_service, team_service, migrated_pool
-):
+async def test_a_failed_insert_does_not_consume_a_number(team_service, migrated_pool):
     """The counter and the row commit together or not at all.
 
     `allocate_issue_number` documents that the increment must live in the
@@ -227,7 +235,7 @@ async def test_a_failed_insert_does_not_consume_a_number(
     state lookup one statement earlier. So the insert itself is made to
     fail, which is exactly the moment the guarantee is about.
     """
-    team_id = await team_service.default_team_id(SCOPE)
+    team_id = BOOTSTRAP_TEAM_ID
 
     async with migrated_pool.acquire() as connection:
         before = await connection.fetchval(
@@ -264,9 +272,7 @@ async def test_a_failed_insert_does_not_consume_a_number(
     )
 
 
-async def test_the_issue_is_visible_to_the_list_that_follows(
-    issue_service, team_service
-):
+async def test_the_issue_is_visible_to_the_list_that_follows(issue_service):
     """Create then read, through the service both times.
 
     The list query gained no new columns in 005, but it selects from a table
@@ -274,7 +280,7 @@ async def test_the_issue_is_visible_to_the_list_that_follows(
     row is a real shape of failure, and it is invisible to a test that only
     creates.
     """
-    team_id = await team_service.default_team_id(SCOPE)
+    team_id = BOOTSTRAP_TEAM_ID
 
     created = await issue_service.create(
         scope=SCOPE,

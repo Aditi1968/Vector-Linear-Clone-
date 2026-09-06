@@ -9,6 +9,7 @@ from app.graphql.inputs.cycle import (
     CycleUpdateInput,
     IssueSetCycleInput,
 )
+from app.graphql.scope import authorized_scope
 from app.graphql.types.cycle import (
     CycleDeletePayload,
     CyclePayload,
@@ -49,7 +50,7 @@ class CycleMutation:
         # not something the client's input can be corrected to fix, so
         # catching it here would report a server-side gap as a field error
         # on the input the client sent.
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.cycle_service.create(
@@ -71,7 +72,7 @@ class CycleMutation:
         info: Info,
         input: CycleUpdateInput,
     ) -> CyclePayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.cycle_service.update(
@@ -88,14 +89,24 @@ class CycleMutation:
         return CyclePayload(cycle=CycleType.from_entity(entity), errors=[])
 
     @strawberry.mutation
-    async def cycle_delete(self, info: Info, id: UUID) -> CycleDeletePayload:
+    async def cycle_delete(
+        self,
+        info: Info,
+        workspace_slug: str,
+        id: UUID,
+    ) -> CycleDeletePayload:
         """Delete a cycle. Issues in it survive and lose only their place.
+
+        One of the two mutations that spell `workspaceSlug` as a field
+        argument rather than on an input, because it takes no input object at
+        all -- inventing a one-field one to carry a slug would be worse than
+        the inconsistency.
 
         A cycle in another workspace answers NOT_FOUND, exactly as one that
         never existed: the delete is scoped, so it removes nothing, and the
         payload must not report which of the two happened.
         """
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, workspace_slug)
 
         try:
             deleted_id = await info.context.cycle_service.delete(
@@ -121,7 +132,7 @@ class CycleMutation:
         nothing gets, deliberately: telling the two apart would let a client
         map another team's cycles by trying ids against its own issue.
         """
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.issue_service.set_cycle(
@@ -132,4 +143,7 @@ class CycleMutation:
         except ValidationError as exc:
             return IssueSetCyclePayload(issue=None, errors=_errors(exc))
 
-        return IssueSetCyclePayload(issue=IssueType.from_entity(entity), errors=[])
+        return IssueSetCyclePayload(
+            issue=IssueType.from_entity(entity, scope),
+            errors=[],
+        )

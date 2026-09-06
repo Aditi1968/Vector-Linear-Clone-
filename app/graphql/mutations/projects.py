@@ -16,6 +16,7 @@ from app.graphql.inputs.project import (
     ProjectTeamInput,
     ProjectUpdateInput,
 )
+from app.graphql.scope import authorized_scope
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import IssueSetProjectPayload, IssueType
 from app.graphql.types.project import (
@@ -81,7 +82,7 @@ class ProjectMutation:
         # Resolved before the try, and outside it. A missing workspace is not
         # something the client's input can be corrected to fix, so catching it
         # here would report a server-side gap as a field error.
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.project_service.create(
@@ -95,7 +96,7 @@ class ProjectMutation:
         except ValidationError as exc:
             return ProjectPayload(project=None, errors=_errors(exc))
 
-        return ProjectPayload(project=ProjectType.from_entity(entity), errors=[])
+        return ProjectPayload(project=ProjectType.from_entity(entity, scope), errors=[])
 
     @strawberry.mutation
     async def project_update(
@@ -103,7 +104,7 @@ class ProjectMutation:
         info: Info,
         input: ProjectUpdateInput,
     ) -> ProjectPayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         # `state` is patched before it is unwrapped, because the three cases
         # are three different values: UNSET stays UNSET, an explicit null
@@ -124,7 +125,7 @@ class ProjectMutation:
         except ValidationError as exc:
             return ProjectPayload(project=None, errors=_errors(exc))
 
-        return ProjectPayload(project=ProjectType.from_entity(entity), errors=[])
+        return ProjectPayload(project=ProjectType.from_entity(entity, scope), errors=[])
 
     @strawberry.mutation
     async def project_delete(
@@ -132,7 +133,7 @@ class ProjectMutation:
         info: Info,
         input: ProjectDeleteInput,
     ) -> ProjectDeletePayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             await info.context.project_service.delete(
@@ -157,7 +158,7 @@ class ProjectMutation:
         anything in this process; the service turns the refusal into a
         NOT_FOUND on the field that named the offending id.
         """
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.project_service.add_team(
@@ -168,7 +169,7 @@ class ProjectMutation:
         except ValidationError as exc:
             return ProjectPayload(project=None, errors=_errors(exc))
 
-        return ProjectPayload(project=ProjectType.from_entity(entity), errors=[])
+        return ProjectPayload(project=ProjectType.from_entity(entity, scope), errors=[])
 
     @strawberry.mutation
     async def project_team_remove(
@@ -176,7 +177,7 @@ class ProjectMutation:
         info: Info,
         input: ProjectTeamInput,
     ) -> ProjectPayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.project_service.remove_team(
@@ -187,7 +188,7 @@ class ProjectMutation:
         except ValidationError as exc:
             return ProjectPayload(project=None, errors=_errors(exc))
 
-        return ProjectPayload(project=ProjectType.from_entity(entity), errors=[])
+        return ProjectPayload(project=ProjectType.from_entity(entity, scope), errors=[])
 
     @strawberry.mutation
     async def project_milestone_create(
@@ -195,7 +196,7 @@ class ProjectMutation:
         info: Info,
         input: ProjectMilestoneCreateInput,
     ) -> ProjectMilestonePayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.project_service.create_milestone(
@@ -218,7 +219,7 @@ class ProjectMutation:
         info: Info,
         input: ProjectMilestoneUpdateInput,
     ) -> ProjectMilestonePayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.project_service.update_milestone(
@@ -242,7 +243,7 @@ class ProjectMutation:
         info: Info,
         input: ProjectMilestoneDeleteInput,
     ) -> ProjectMilestoneDeletePayload:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             await info.context.project_service.delete_milestone(
@@ -273,7 +274,7 @@ class ProjectMutation:
         the one that writes it. The mutation is declared here, with the rest
         of the projects API, because that is where a client looks for it.
         """
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, input.workspace_slug)
 
         try:
             entity = await info.context.issue_service.set_project(
@@ -285,4 +286,7 @@ class ProjectMutation:
         except ValidationError as exc:
             return IssueSetProjectPayload(issue=None, errors=_errors(exc))
 
-        return IssueSetProjectPayload(issue=IssueType.from_entity(entity), errors=[])
+        return IssueSetProjectPayload(
+            issue=IssueType.from_entity(entity, scope),
+            errors=[],
+        )

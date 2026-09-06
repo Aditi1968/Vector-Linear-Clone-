@@ -28,7 +28,7 @@ from uuid import UUID
 
 import pytest
 
-from app.domain.errors import TeamNotFoundError, WorkspaceNotFoundError
+from app.domain.errors import TeamNotFoundError, WorkspaceAccessDeniedError
 from app.domain.teams import (
     TeamEntity,
     TeamWorkflow,
@@ -37,10 +37,20 @@ from app.domain.teams import (
 )
 from app.domain.tenancy import WorkspaceScope
 from app.graphql.schema import build_schema
+from app.graphql.scope import WORKSPACE_NOT_FOUND_MESSAGE
 from app.repositories.teams import TeamRepository
 from app.services.teams import TeamService
 
-from tests.conftest import ExplodingPool, FakeConnection, FakePool, normalize
+from tests.conftest import (
+    TEST_USER_ID,
+    TEST_WORKSPACE_SLUG,
+    ExplodingPool,
+    FakeConnection,
+    FakeMembershipService,
+    FakePool,
+    graphql_context,
+    normalize,
+)
 
 
 MIGRATION_005 = (
@@ -168,24 +178,36 @@ class FakeTeamRepository:
         return self.number
 
 
-class Context:
-    def __init__(self, workspace_service, team_service):
-        self.workspace_service = workspace_service
-        self.team_service = team_service
+def Context(membership_service, team_service):
+    """The real context, wired to the two collaborators `teams` reaches.
+
+    The workspace service is no longer one of them. `teams` used to resolve a
+    slug to a workspace and stop there, which answered any caller who could
+    spell the slug; it now goes through `app.graphql.scope.authorized_scope`,
+    which resolves the viewer first and the MEMBERSHIP second -- so the seam
+    a test replaces is the membership lookup.
+    """
+    return graphql_context(
+        membership_service=membership_service,
+        team_service=team_service,
+    )
 
 
-class FakeWorkspaceService:
-    def __init__(self, scope: WorkspaceScope | None):
-        self._scope = scope
+class RefusingMembershipService:
+    """Refuses every slug, the way the real one refuses a non-member.
+
+    One answer for a slug no workspace holds and for a workspace this user is
+    not in, because the real lookup is a single statement that cannot tell
+    them apart.
+    """
+
+    def __init__(self):
         self.slugs: list[str] = []
 
-    async def scope_for_slug(self, slug: str) -> WorkspaceScope:
+    async def authorized_scope_for_slug(self, *, slug, user_id):
         self.slugs.append(slug)
 
-        if self._scope is None:
-            raise WorkspaceNotFoundError()
-
-        return self._scope
+        raise WorkspaceAccessDeniedError()
 
 
 class FakeTeamService:
@@ -569,9 +591,9 @@ async def test_the_teams_query_returns_a_team_with_its_states():
 
     result = await schema.execute(
         TEAMS_QUERY,
-        variable_values={"slug": "vector"},
+        variable_values={"slug": TEST_WORKSPACE_SLUG},
         context_value=Context(
-            workspace_service=FakeWorkspaceService(SCOPE),
+            membership_service=FakeMembershipService(scope=SCOPE),
             team_service=FakeTeamService([workflow]),
         ),
     )
@@ -606,38 +628,58 @@ async def test_the_teams_query_returns_a_team_with_its_states():
 
 async def test_the_resolver_hands_the_service_a_resolved_scope_not_the_slug():
     team_service = FakeTeamService([])
-    workspace_service = FakeWorkspaceService(SCOPE)
+    membership_service = FakeMembershipService(scope=SCOPE)
 
     result = await schema.execute(
         TEAMS_QUERY,
-        variable_values={"slug": "vector"},
-        context_value=Context(workspace_service, team_service),
+        variable_values={"slug": TEST_WORKSPACE_SLUG},
+        context_value=Context(membership_service, team_service),
     )
 
     assert result.errors is None
-    assert workspace_service.slugs == ["vector"]
+
+    # The slug came from the document and the user id from the session. Both
+    # halves matter: a resolver that read the user from an argument would be
+    # an impersonation API, and one that hardcoded the slug would be the
+    # bootstrap tenant all over again.
+    assert membership_service.calls == [
+        {"slug": TEST_WORKSPACE_SLUG, "user_id": TEST_USER_ID}
+    ]
     assert team_service.scopes == [SCOPE]
 
 
-async def test_an_unknown_workspace_returns_an_empty_list_and_no_error():
-    """The disclosure decision, pinned.
+async def test_a_workspace_the_viewer_may_not_see_is_not_found_and_reads_nothing():
+    """The disclosure decision, pinned -- now with a membership behind it.
 
-    Answering an unknown slug with an error would make this query an oracle
-    for which workspace slugs exist -- and once membership is enforced, the
-    same error would separate "no such workspace" from "not yours". An empty
-    list is the answer both must give.
+    This query used to answer an unknown slug with an empty list, because
+    membership did not exist and an error would have separated "no such
+    workspace" from "not yours". Both now answer with one NOT_FOUND carrying
+    one fixed message, which is the same non-disclosure by a different route:
+    the caller learns nothing about whether the workspace is real.
+
+    The team service is one that fails if it is touched, so this also pins
+    the ordering -- no protected read happens for a caller who was refused.
     """
+    membership_service = RefusingMembershipService()
+
     result = await schema.execute(
         TEAMS_QUERY,
         variable_values={"slug": "nope"},
         context_value=Context(
-            workspace_service=FakeWorkspaceService(None),
+            membership_service=membership_service,
             team_service=ExplodingTeamService(),
         ),
     )
 
-    assert result.errors is None
-    assert result.data == {"teams": []}
+    assert result.data is None
+    assert result.errors is not None
+    assert len(result.errors) == 1
+
+    formatted = result.errors[0].formatted
+
+    assert formatted["message"] == WORKSPACE_NOT_FOUND_MESSAGE
+    assert formatted["extensions"] == {"code": "NOT_FOUND"}
+    assert membership_service.slugs == ["nope"]
 
 
 async def test_the_workspace_id_is_not_published_on_the_team_type():

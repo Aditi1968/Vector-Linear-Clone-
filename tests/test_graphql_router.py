@@ -19,7 +19,7 @@ from app.graphql.context import get_context
 from app.graphql.router import build_graphql_router
 from app.graphql.schema import build_schema
 
-from tests.conftest import FakeTenant, make_entity
+from tests.conftest import graphql_context, make_entity
 
 
 ALL_ENVIRONMENTS: list[Environment] = ["development", "test", "production"]
@@ -38,7 +38,7 @@ query Introspect {
 
 ISSUES_QUERY = """
 query ListIssues {
-  issues(first: 1) {
+  issues(workspaceSlug: "acme", first: 1) {
     nodes {
       id
       title
@@ -48,10 +48,14 @@ query ListIssues {
 """
 
 
-class Context:
-    def __init__(self, issue_service):
-        self.issue_service = issue_service
-        self.tenant = FakeTenant()
+def Context(issue_service):
+    """The real context, wired to one fake service.
+
+    `issues` names a workspace now, so the request has to carry an identity
+    and a membership before it reaches the issue service; `graphql_context`
+    supplies working fakes for both.
+    """
+    return graphql_context(issue_service=issue_service)
 
 
 class FakeIssueService:
@@ -60,7 +64,7 @@ class FakeIssueService:
     def __init__(self, page: IssuePage):
         self._page = page
 
-    async def list(self, *, scope, first: int, after: str | None):
+    async def list(self, *, scope, team_id, first: int, after: str | None):
         return self._page
 
 
