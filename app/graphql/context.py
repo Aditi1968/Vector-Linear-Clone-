@@ -18,6 +18,7 @@ from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
+from app.repositories.github import GithubRepository
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.labels import LabelRepository
@@ -31,6 +32,7 @@ from app.repositories.workspaces import WorkspaceRepository
 from app.services.auth import AuthService
 from app.services.comments import CommentService
 from app.services.cycles import CycleService
+from app.services.github import GithubAppConfig, GithubService
 from app.services.issues import IssueService
 from app.services.labels import LabelService
 from app.services.memberships import MembershipService
@@ -56,6 +58,7 @@ class VectorContext(BaseContext):
         cycle_service: CycleService,
         project_service: ProjectService,
         relation_service: RelationService,
+        github_service: GithubService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -68,6 +71,13 @@ class VectorContext(BaseContext):
         self.comment_service = comment_service
         self.cycle_service = cycle_service
         self.project_service = project_service
+
+        # Holds the deployment's GitHub App credentials, and is the reason
+        # nothing else in this context does. The service answers `configured`
+        # and never the values behind it, and no Strawberry type is built from
+        # `GithubAppConfig`, so there is no field a client can select a
+        # credential through.
+        self.github_service = github_service
 
         # Built here rather than in `get_context` so that a context assembled
         # by hand -- a test, a worker -- gets working loaders from the service
@@ -190,7 +200,8 @@ async def get_context() -> VectorContext:
     # Resolved per request rather than at import, which is what keeps this
     # module importable without a configured environment. get_settings is
     # lru_cached, so this is a dict lookup after the first request.
-    environment = get_settings().environment
+    settings = get_settings()
+    environment = settings.environment
 
     # Constructed once and handed to both the context and the tenant. Two
     # instances would be two objects answering the same question over the
@@ -243,6 +254,14 @@ async def get_context() -> VectorContext:
         relation_service=RelationService(
             pool=pool,
             repository=RelationRepository(),
+        ),
+        github_service=GithubService(
+            pool=pool,
+            repository=GithubRepository(),
+            # Built from the same settings this function already resolved, so
+            # the GraphQL layer and app/rest/github.py cannot disagree about
+            # whether this deployment has a GitHub App.
+            config=GithubAppConfig.from_settings(settings),
         ),
         # Built here rather than resolved here: nothing in this function
         # touches the database. Constructing a context is on the path of

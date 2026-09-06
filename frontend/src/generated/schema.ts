@@ -102,6 +102,30 @@ export type CycleUpdateInput = {
   startsAt: Scalars['DateTime']['input'];
 };
 
+export type GithubDisconnectInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type GithubIntegration = {
+  __typename?: 'GithubIntegration';
+  accountLogin?: Maybe<Scalars['String']['output']>;
+  connectedAt?: Maybe<Scalars['DateTime']['output']>;
+  connectedById?: Maybe<Scalars['UUID']['output']>;
+  repositories: Array<GithubRepository>;
+  status: GithubIntegrationStatus;
+};
+
+export type GithubIntegrationStatus =
+  | 'CONNECTED'
+  | 'DISCONNECTED'
+  | 'UNCONFIGURED';
+
+export type GithubRepository = {
+  __typename?: 'GithubRepository';
+  fullName: Scalars['String']['output'];
+  repositoryId: Scalars['ID']['output'];
+};
+
 export type Issue = {
   __typename?: 'Issue';
   /** When the issue was taken off the board. Always null here, because archived issues are absent from every query -- only the archive mutation's own result carries a value. */
@@ -372,6 +396,7 @@ export type Mutation = {
   cycleCreate: CyclePayload;
   cycleDelete: CycleDeletePayload;
   cycleUpdate: CyclePayload;
+  githubDisconnect: GithubIntegration;
   issueArchive: IssueArchivePayload;
   issueClearParent: IssueParentPayload;
   issueCreate: IssueCreatePayload;
@@ -422,6 +447,11 @@ export type MutationCycleDeleteArgs = {
 
 export type MutationCycleUpdateArgs = {
   input: CycleUpdateInput;
+};
+
+
+export type MutationGithubDisconnectArgs = {
+  input: GithubDisconnectInput;
 };
 
 
@@ -660,6 +690,7 @@ export type Query = {
   __typename?: 'Query';
   cycle?: Maybe<Cycle>;
   cycles: Array<Cycle>;
+  githubIntegration: GithubIntegration;
   issue?: Maybe<Issue>;
   issues: IssueConnection;
   label?: Maybe<Label>;
@@ -681,6 +712,11 @@ export type QueryCycleArgs = {
 
 export type QueryCyclesArgs = {
   teamId: Scalars['UUID']['input'];
+};
+
+
+export type QueryGithubIntegrationArgs = {
+  workspaceSlug: Scalars['String']['input'];
 };
 
 
