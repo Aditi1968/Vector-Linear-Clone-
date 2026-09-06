@@ -173,7 +173,7 @@ describe('the C shortcut', () => {
     expect(screen.getAllByRole('heading', { name: 'New issue' })).toHaveLength(1)
   })
 
-  it('stops working once the screen that owns it is gone', async () => {
+  it('keeps working while an issue is open beside the list', async () => {
     const { link, user } = await renderList()
 
     await user.click(screen.getByRole('link', { name: /Alpha/ }))
@@ -183,10 +183,13 @@ describe('the C shortcut', () => {
 
     await user.keyboard('c')
 
-    // The listener is added while the list is mounted and removed with it.
-    // A shortcut that outlived its screen would open a composer over a page
-    // that has none.
-    expect(composerIsOpen()).toBe(false)
+    /*
+      The list is still the screen -- the inspector opens beside it rather
+      than replacing it -- so the shortcut its listener belongs to is still
+      live. This used to assert the opposite, correctly, when opening an
+      issue unmounted the list.
+    */
+    expect(composerIsOpen()).toBe(true)
   })
 })
 

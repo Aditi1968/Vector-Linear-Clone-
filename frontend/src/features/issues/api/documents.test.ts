@@ -141,6 +141,47 @@ function childFieldNames(
   return [...childFields(fields, name, fragments).keys()].toSorted()
 }
 
+/**
+ * What one selection set costs the backend, by its own rules.
+ *
+ * `app/graphql/limits.py`: a scalar is 1, a field with a selection set is
+ * `page size x (cost of that selection set)`, and the page size comes from
+ * the value written in the document, then the argument's declared default,
+ * then `ASSUMED_PAGE_SIZE = 100`. Fields whose name starts with `__` are
+ * skipped, which is why the typenames Apollo adds are free.
+ *
+ * Only the first two page-size sources are implemented here, because a
+ * document in this codebase that relied on the third would be the bug this
+ * whole file exists to catch.
+ */
+function complexityOf(
+  selectionSet: SelectionSetNode,
+  fragments: Map<string, FragmentDefinitionNode>,
+): number {
+  let total = 0
+
+  for (const [name, field] of fieldsOf(selectionSet, fragments)) {
+    if (name.startsWith('__')) {
+      continue
+    }
+
+    if (field.selectionSet === undefined) {
+      total += 1
+      continue
+    }
+
+    const first = field.arguments?.find(
+      (argument) => argument.name.value === 'first',
+    )
+    const pageSize =
+      first?.value.kind === Kind.INT ? Number(first.value.value) : 1
+
+    total += pageSize * complexityOf(field.selectionSet, fragments)
+  }
+
+  return total
+}
+
 describe('IssueList document', () => {
   const operation = operationOf(IssueListDocument)
   const fragments = fragmentsOf(IssueListDocument)
@@ -187,37 +228,46 @@ describe('IssueList document', () => {
   })
 
   it('stays inside the backend complexity budget', () => {
-    const connection = fieldsOf(requireSelectionSet(issues), fragments)
-    const nodeFields = childFields(connection, 'nodes', fragments)
-    const pageInfoFields = childFields(connection, 'pageInfo', fragments)
-
     /*
-      The backend's own formula (`app/graphql/limits.py`, mirrored here
-      because a client cannot observe it): `first x (fields per node + fields
-      on pageInfo)`, refused when strictly greater than 1000.
+      The backend's own formula (`app/graphql/limits.py`, mirrored in
+      `complexityOf` above because a client cannot observe it): a scalar
+      costs 1, a field with a selection set costs its page size times what is
+      below it, and the document is refused when the total is strictly
+      greater than 1000.
 
       Asserting the computed cost rather than the field count is the point --
       it fails when someone adds a field, which is the change that would
-      otherwise turn a client-side edit into a server-side rejection.
+      otherwise turn a client-side edit into a server-side rejection. The
+      exact number is asserted as well as the ceiling, so that a change which
+      halves the headroom is noticed rather than merely tolerated.
     */
-    const complexity = DEFAULT_PAGE_SIZE * (nodeFields.size + pageInfoFields.size)
+    const complexity = complexityOf(operation.selectionSet, fragments)
 
     expect(complexity).toBeLessThanOrEqual(1000)
-    expect(complexity).toBe(200)
+    expect(complexity).toBe(550)
   })
 
-  it('selects only fields the schema exposes on Issue', () => {
+  it('selects the fields a dense row shows, and no body', () => {
     const connection = fieldsOf(requireSelectionSet(issues), fragments)
 
-    // Seven fields exist on `Issue`; `description` is deliberately not one a
-    // 25-row list pays for.
+    // `description` is deliberately not something a 25-row list pays for;
+    // the detail document adds it. Everything else here is drawn.
     expect(childFieldNames(connection, 'nodes', fragments)).toEqual([
+      'assigneeId',
       'completedAt',
       'createdAt',
+      'cycle',
+      'dueDate',
+      'estimate',
       'id',
+      'identifier',
+      'labels',
       'priority',
+      'project',
+      'teamId',
       'title',
       'updatedAt',
+      'workflowStateId',
     ])
 
     // No per-node cursor exists on this connection to page by.
@@ -290,14 +340,26 @@ describe('IssueDetail document', () => {
       ),
     ).toEqual(['workspaceSlug', 'id'])
 
+    // A strict superset of the row selection, which is what lets a mutation
+    // result normalise over an entity the cached list points at.
     expect(childFieldNames(root, 'issue', fragments)).toEqual([
+      'assigneeId',
       'completedAt',
       'createdAt',
+      'creatorId',
+      'cycle',
       'description',
+      'dueDate',
+      'estimate',
       'id',
+      'identifier',
+      'labels',
       'priority',
+      'project',
+      'teamId',
       'title',
       'updatedAt',
+      'workflowStateId',
     ])
   })
 })

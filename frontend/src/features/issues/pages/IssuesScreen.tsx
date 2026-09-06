@@ -278,8 +278,12 @@ export function IssuesScreen() {
                   // Visually nothing like the first-load skeleton: a small
                   // inline line beneath a list that is still entirely on
                   // screen.
-                  <span className={styles.loadingMore}>
-                    <Spinner label="Loading more issues" />
+                  // One announcement, not two: the live region carries the
+                  // sentence and the spinner beside it is decoration. A
+                  // labelled Spinner here would name itself as well, and a
+                  // screen reader would hear the wait twice.
+                  <span className={styles.loadingMore} role="status">
+                    <Spinner />
                     Loading more issues...
                   </span>
                 ) : loadMoreErrorMessage !== null ? (

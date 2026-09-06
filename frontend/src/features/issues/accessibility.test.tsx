@@ -125,18 +125,25 @@ describe('accessibility', () => {
     expect(main()).toHaveAttribute('tabindex', '-1')
   })
 
-  it('announces a priority as a sentence rather than two fragments', async () => {
+  it('names every indicator rather than leaving it a bare glyph', async () => {
     await renderPopulatedList()
 
-    // The visible "1 Urgent" is `aria-hidden`; one hidden string carries the
-    // whole thing, disclaimer included, so nobody reads "High" off a screen
-    // and concludes the schema has a `High`.
-    expect(
-      within(main()).getByText('Priority 1, labelled Urgent by this app'),
-    ).toBeInTheDocument()
-    expect(
-      within(main()).getByText('Priority 0, labelled No priority by this app'),
-    ).toBeInTheDocument()
+    /*
+      The priority and status glyphs are `role="img"` with a name on the
+      wrapper, so each is one opaque graphic with exactly one announcement --
+      not a stack of unlabelled `<path>`s, and not two fragments a reader has
+      to assemble. The names are this frontend's convention for an integer the
+      API attaches no names to (see lib/priority.ts); the composer still says
+      so in words.
+    */
+    const [alpha, bravo] = within(main()).getAllByRole('link')
+
+    expect(alpha).toHaveAccessibleName(/Priority: Urgent/)
+    expect(bravo).toHaveAccessibleName(/Priority: No priority/)
+
+    // And the identifier, which is the name the issue has outside the
+    // product, is in the row's name too -- it is what a person says out loud.
+    expect(alpha).toHaveAccessibleName(/ENG-1/)
   })
 
   it('exposes the rows as a list of links', async () => {
