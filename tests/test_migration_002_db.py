@@ -1691,21 +1691,37 @@ async def test_the_ledger_timestamps_are_timezone_aware_and_from_the_server_cloc
         assert server_now - applied_at < timedelta(minutes=5), row["version"]
 
 
-async def test_migration_status_reports_both_versions_applied_and_nothing_pending(
+async def test_migration_status_reports_both_versions_applied_and_the_rest_pending(
     connection,
 ):
     """The runner's own view of the database it has just changed.
 
     `migration_status` writes -- the ledger prologue creates the table and can
     adopt 001 -- so it needs a transaction as much as applying does.
+
+    Pending was asserted as empty while 002 was the last migration in the
+    repository, and 004 made that false. It is derived from the directory
+    now: this fixture applies exactly 001 and 002, so every other file on
+    disk must come back pending. Naming the others by hand would make this
+    test fail on each branch that adds a migration rather than on one that
+    breaks the runner -- and it is the runner's bookkeeping that is under
+    test here, not the contents of `migrations/`, which
+    `test_phase1a2_gates.py` pins by hand on purpose.
     """
     async with connection.transaction():
         report = await migration_status(connection, migrations_dir=MIGRATIONS_DIR)
 
     assert [item.version for item in report.applied] == ["001", "002"]
     assert [item.state for item in report.applied] == [CHECKSUM_OK, CHECKSUM_OK]
-    assert report.pending == ()
     assert report.has_mismatch is False
+
+    expected_pending = sorted(
+        path.name
+        for path in MIGRATIONS_DIR.glob("*.sql")
+        if path.name not in {MIGRATION_001.name, MIGRATION_002.name}
+    )
+
+    assert [path.name for path in report.pending] == expected_pending
 
 
 async def test_re_applying_002_executes_nothing_and_changes_nothing(applied):

@@ -39,6 +39,8 @@ type PageInfo {
 type Query {
   issue(id: UUID!): Issue
   issues(first: Int! = 50, after: String = null): IssueConnection!
+  myWorkspaces: [WorkspaceMembership!]!
+  myWorkspace(slug: String!): WorkspaceMembership!
 }
 
 scalar UUID
@@ -47,4 +49,22 @@ type ValidationErrorType {
   field: String!
   code: String!
   message: String!
+}
+
+type Workspace {
+  id: UUID!
+  slug: String!
+  name: String!
+}
+
+type WorkspaceMembership {
+  workspace: Workspace!
+  role: WorkspaceRole!
+  createdAt: DateTime!
+}
+
+enum WorkspaceRole {
+  MEMBER
+  ADMIN
+  OWNER
 }

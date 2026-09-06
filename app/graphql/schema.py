@@ -8,7 +8,8 @@ from strawberry.extensions.base_extension import SchemaExtension
 from app.config import Environment
 from app.graphql.limits import operation_limit_extensions
 from app.graphql.mutations.issues import Mutation
-from app.graphql.queries.issues import Query
+from app.graphql.queries.issues import Query as IssueQuery
+from app.graphql.queries.memberships import MembershipQuery
 
 
 # The public error vocabulary. An error reaches a client with its own
@@ -18,7 +19,17 @@ from app.graphql.queries.issues import Query
 # Adding a code here publishes every message that will ever be raised under
 # it, so a new entry is a decision about what clients may be told -- not a
 # convenience for surfacing a message that happens to be useful in a log.
-PUBLIC_ERROR_CODES = frozenset({"BAD_USER_INPUT"})
+#
+# UNAUTHENTICATED and NOT_FOUND are published because a client cannot act on
+# a masked error: "Internal server error" gives a browser no reason to send
+# the user to a login screen, and no reason to stop retrying. Both are safe
+# to publish because the messages raised under them are fixed strings that
+# describe the request rather than the server -- see
+# app.graphql.queries.memberships, which is the only module that raises
+# either, and note in particular that its NOT_FOUND message is deliberately
+# the same for a workspace that does not exist and one the viewer may not
+# see.
+PUBLIC_ERROR_CODES = frozenset({"BAD_USER_INPUT", "UNAUTHENTICATED", "NOT_FOUND"})
 
 # What a masked error says. Deliberately uninformative: an attacker must
 # not be able to tell a constraint violation from a connection failure from
@@ -104,6 +115,22 @@ class _MaskedSchema(strawberry.Schema):
 
     def execute_sync(self, *args, **kwargs):
         return _mask_result(super().execute_sync(*args, **kwargs))
+
+
+@strawberry.type
+class Query(IssueQuery, MembershipQuery):
+    """The schema's root query, composed of one class per domain.
+
+    Composed here rather than grown in one module, so that adding a domain
+    is a new file plus a base class instead of an edit to whichever query
+    module happened to be first. The bases contribute their fields through
+    the MRO; only this class is reachable from the schema, so only this one
+    is registered under the GraphQL name `Query`.
+
+    Base order is declaration order in the SDL and nothing more -- no two
+    bases may declare the same field name, which strawberry would resolve
+    silently in MRO order rather than report.
+    """
 
 
 def build_schema(environment: Environment) -> strawberry.Schema:

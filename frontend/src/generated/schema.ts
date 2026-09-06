@@ -72,6 +72,8 @@ export type Query = {
   __typename?: 'Query';
   issue?: Maybe<Issue>;
   issues: IssueConnection;
+  myWorkspace: WorkspaceMembership;
+  myWorkspaces: Array<WorkspaceMembership>;
 };
 
 
@@ -85,9 +87,33 @@ export type QueryIssuesArgs = {
   first?: Scalars['Int']['input'];
 };
 
+
+export type QueryMyWorkspaceArgs = {
+  slug: Scalars['String']['input'];
+};
+
 export type ValidationErrorType = {
   __typename?: 'ValidationErrorType';
   code: Scalars['String']['output'];
   field: Scalars['String']['output'];
   message: Scalars['String']['output'];
 };
+
+export type Workspace = {
+  __typename?: 'Workspace';
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  slug: Scalars['String']['output'];
+};
+
+export type WorkspaceMembership = {
+  __typename?: 'WorkspaceMembership';
+  createdAt: Scalars['DateTime']['output'];
+  role: WorkspaceRole;
+  workspace: Workspace;
+};
+
+export type WorkspaceRole =
+  | 'ADMIN'
+  | 'MEMBER'
+  | 'OWNER';

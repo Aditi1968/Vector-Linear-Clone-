@@ -55,7 +55,13 @@ TENANCY_MIGRATION = MIGRATIONS_DIR / "002_tenancy.sql"
 
 # Every migration in the repository, in ledger order. Asserted as an exact
 # list rather than a subset; see `test_no_second_migration_appeared`.
-EXPECTED_MIGRATIONS = ["001_issues.sql", "002_tenancy.sql"]
+#
+# 003 is absent on purpose rather than forgotten: it creates `users` and is
+# being written on another branch. 004 references `users (id)` and so cannot
+# be applied before it, which is a fact about the schema and not about this
+# list -- the constraint fails and the runner's transaction rolls the file
+# back. This list says which files are in *this* checkout.
+EXPECTED_MIGRATIONS = ["001_issues.sql", "002_tenancy.sql", "004_membership.sql"]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the
 # migration's text. 001 is applied in production, so this value is a fact
