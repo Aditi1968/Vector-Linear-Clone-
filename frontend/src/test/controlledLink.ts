@@ -72,6 +72,31 @@ export class ControlledLink extends ApolloLink {
 
   private readonly pending: PendingOperation[] = []
 
+  private readonly standing = new Map<string, ApolloLink.Result>()
+
+  /**
+   * Answer this operation immediately, every time it is sent.
+   *
+   * For the queries a test is not about. The application shell asks for
+   * `WorkspaceShell` and `ShellSidebar` before it will render any screen at
+   * all, so without this every test in the suite would have to answer two
+   * requests it does not care about before reaching the one it does -- and
+   * would then be asserting on the shell's loading sequence by accident.
+   *
+   * A standing answer is emitted synchronously on subscribe rather than
+   * queued as pending, which is the whole point: it never appears in
+   * `inFlightCount`, never has to be taken in order, and cannot make "how
+   * many requests were sent" ambiguous for the operation under test. The
+   * dispatch is still recorded in `operations`, so a test that wants to
+   * assert the shell asked with the right workspace still can.
+   *
+   * Operations with no standing answer behave exactly as before: nothing
+   * resolves until `resolve()` or `fail()` says so.
+   */
+  answerAlways(name: string, result: ApolloLink.Result): void {
+    this.standing.set(name, result)
+  }
+
   override request(operation: ApolloLink.Operation): Observable<ApolloLink.Result> {
     const name = operation.operationName ?? '<anonymous>'
     // Snapshotted rather than referenced: Apollo reuses the variables object
@@ -81,7 +106,16 @@ export class ControlledLink extends ApolloLink {
 
     this.operations.push({ name, variables })
 
+    const standing = this.standing.get(name)
+
     return new Observable<ApolloLink.Result>((subscriber) => {
+      if (standing !== undefined) {
+        subscriber.next(standing)
+        subscriber.complete()
+
+        return undefined
+      }
+
       const entry: PendingOperation = { name, variables, subscriber }
       this.pending.push(entry)
 

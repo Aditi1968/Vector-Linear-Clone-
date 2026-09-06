@@ -1,6 +1,13 @@
 import type { ReactNode } from 'react'
 
-import { IssuesIcon } from '../../components'
+import {
+  InboxIcon,
+  IssueIcon,
+  IssuesIcon,
+  ProjectIcon,
+  SettingsIcon,
+  TeamIcon,
+} from '../../components'
 import type { AppPaths } from '../../app/routes'
 
 export interface NavigationItem {
@@ -16,49 +23,78 @@ export interface NavigationItem {
    *
    * A function of `AppPaths` rather than a plain string, and that is the
    * whole design of this module. `useAppPaths()` is a hook, so it cannot be
-   * called at module scope where this array is defined; taking the path set
-   * as an argument lets the nav stay declarative data while still resolving
-   * its URLs through the one place that knows what a Vector URL looks like.
-   * When backend Phase 1b-5 puts a `/:workspaceSlug` in front of every route,
-   * this file does not change at all -- `paths.issues()` starts returning the
-   * scoped URL and the link follows.
-   *
-   * Writing `to: '/issues'` here would work today and silently break then.
+   * called at module scope where these arrays are defined; taking the path
+   * set as an argument lets the nav stay declarative data while still
+   * resolving its URLs through the one place that knows what a Vector URL
+   * looks like. Writing `to: '/issues'` here would work against a
+   * single-workspace development database and break in production.
    */
   to: (paths: AppPaths) => string
   /**
    * Match the destination exactly rather than as a prefix.
    *
-   * Left off for Issues on purpose: prefix matching is what keeps the Issues
-   * item marked as the current page while the user is reading
-   * `/issues/:issueId`. A detail view is somewhere *inside* Issues, and a
-   * sidebar that de-highlights when you open a row tells the user they have
-   * left the section they are still in.
+   * Prefix matching is the default and is usually right: it keeps All Issues
+   * marked as the current page while the user reads
+   * `/:slug/issues/:issueId`, because a detail view is somewhere *inside*
+   * that section, and a sidebar that de-highlights when you open a row tells
+   * the user they have left the section they are still in.
    */
   end?: boolean
 }
 
 /**
- * The sidebar's navigation.
+ * The workspace's primary surfaces.
  *
- * One item, and that is not an oversight.
+ * Every one is a real backend surface -- issues, notifications and projects
+ * all have root fields -- and every one has a route. Some of the screens
+ * behind them are not built yet and say so; `app/routes/Placeholder.tsx`
+ * records why that beats a dead entry.
  *
- * Issues is the only product surface the backend can serve. Inbox, Projects,
- * Cycles, Views, Teams, Members and Settings are all absent rather than
- * present-and-greyed, because a greyed row still makes a claim -- it says the
- * feature exists and is temporarily unavailable, which is a different and
- * false statement about a product where the schema, the resolvers and the
- * tables for those concepts do not exist. Listing them would also quietly
- * commit the backend to a roadmap the frontend has no standing to set.
- *
- * The array shape is the extension point: when a surface becomes real, it is
- * one entry here.
+ * Cycles is deliberately absent. `cycles(workspaceSlug:, teamId:)` is
+ * team-scoped, so a workspace-wide Cycles entry would have to pick one team
+ * to link to, and a link that silently chooses one team out of several is a
+ * lie about what the user is about to look at. Cycles appears under each team
+ * in ./TeamsSection.tsx, which is where the concept actually lives.
  */
 export const primaryNavigationItems: readonly NavigationItem[] = [
   {
+    id: 'my-issues',
+    label: 'My Issues',
+    icon: <IssueIcon />,
+    to: (paths) => paths.myIssues(),
+  },
+  {
+    id: 'inbox',
+    label: 'Inbox',
+    icon: <InboxIcon />,
+    to: (paths) => paths.inbox(),
+  },
+  {
     id: 'issues',
-    label: 'Issues',
+    label: 'All Issues',
     icon: <IssuesIcon />,
     to: (paths) => paths.issues(),
+  },
+  {
+    id: 'projects',
+    label: 'Projects',
+    icon: <ProjectIcon />,
+    to: (paths) => paths.projects(),
+  },
+]
+
+/** The workspace itself, rather than the work inside it. */
+export const workspaceNavigationItems: readonly NavigationItem[] = [
+  {
+    id: 'members',
+    label: 'Members',
+    icon: <TeamIcon />,
+    to: (paths) => paths.members(),
+  },
+  {
+    id: 'settings',
+    label: 'Settings',
+    icon: <SettingsIcon />,
+    to: (paths) => paths.settings(),
   },
 ]

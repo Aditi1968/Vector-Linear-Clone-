@@ -2,7 +2,7 @@ import { Navigate } from 'react-router-dom'
 import { useQuery } from '@apollo/client/react'
 
 import { WorkspaceEntryDocument } from '../../generated/operations'
-import { createAppPaths } from './paths'
+import { ONBOARDING_PATH, paths } from './paths'
 
 /**
  * What `/` resolves to now that every screen lives under a workspace.
@@ -26,8 +26,8 @@ import { createAppPaths } from './paths'
  *     glitch.
  *   * a membership: redirect, replacing history so `/` does not sit in the
  *     back stack and trap the button on a URL that only ever redirects.
- *   * no memberships: a real state -- an account that has been created but
- *     not invited anywhere -- so it says so rather than looking broken.
+ *   * no memberships: a real state -- an account created but not invited
+ *     anywhere -- so it goes to onboarding rather than looking broken.
  *   * an error: including UNAUTHENTICATED, which is what an unauthenticated
  *     visitor gets from `myWorkspaces`. There is no login screen to send
  *     them to yet, so this reports that it could not tell and stops.
@@ -54,19 +54,14 @@ export function WorkspaceEntry() {
 
   const first = data?.myWorkspaces[0]
 
+  // A signed-in account in no workspace has exactly one thing to do next,
+  // and `features/onboarding` owns the screen that does it.
   if (first === undefined) {
-    return (
-      <main>
-        <h1>No workspace yet</h1>
-        <p>This account is not a member of any workspace.</p>
-      </main>
-    )
+    return <Navigate to={ONBOARDING_PATH} replace />
   }
 
   // Through the path builder rather than a template literal, for the reason
   // ./paths.ts gives: this is the one place that turns a slug into a URL,
   // and a second spelling of the same URL is how the two drift.
-  return (
-    <Navigate to={createAppPaths(`/${first.workspace.slug}`).issues()} replace />
-  )
+  return <Navigate to={paths.issues(first.workspace.slug)} replace />
 }

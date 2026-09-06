@@ -9,7 +9,8 @@ import { AppProviders } from '../app/providers/AppProviders'
 import { routes } from '../app/routes'
 import { createTestClient } from './client'
 import { ControlledLink } from './controlledLink'
-import { WORKSPACE_SLUG } from './factories'
+import { WORKSPACE_SLUG, shellSidebarData, workspaceShellData } from './factories'
+import type { ShellSidebarQuery, WorkspaceShellQuery } from '../generated/operations'
 
 /**
  * Mount the real application against a controllable network.
@@ -50,6 +51,20 @@ export interface RenderAppOptions {
    * were sent" an ambiguous question, and most tests here ask exactly that.
    */
   strictMode?: boolean
+  /**
+   * The shell's own two queries, answered as a standing response.
+   *
+   * `AppLayout` will not render a screen until `WorkspaceShell` has told it
+   * the viewer belongs to the workspace in the URL, and the rail asks for
+   * `ShellSidebar` straight after. Neither is what most tests are about, so
+   * both are answered by default and never appear as pending requests -- see
+   * `ControlledLink.answerAlways`.
+   *
+   * `null` leaves one unanswered, which is how the shell's own tests drive
+   * its loading, error and not-found states.
+   */
+  shell?: WorkspaceShellQuery | null
+  sidebar?: ShellSidebarQuery | null
 }
 
 export interface RenderAppResult extends RenderResult {
@@ -64,8 +79,19 @@ export interface RenderAppResult extends RenderResult {
 export function renderApp({
   initialPath = `/${WORKSPACE_SLUG}/issues`,
   strictMode = false,
+  shell = workspaceShellData(),
+  sidebar = shellSidebarData(),
 }: RenderAppOptions = {}): RenderAppResult {
   const link = new ControlledLink()
+
+  if (shell !== null) {
+    link.answerAlways('WorkspaceShell', { data: shell })
+  }
+
+  if (sidebar !== null) {
+    link.answerAlways('ShellSidebar', { data: sidebar })
+  }
+
   const client = createTestClient(link)
 
   const router = createMemoryRouter(routes, { initialEntries: [initialPath] })

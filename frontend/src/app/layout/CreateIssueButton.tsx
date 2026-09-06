@@ -1,4 +1,4 @@
-import { Button, PlusIcon } from '../../components'
+import { Button, IconButton, PlusIcon } from '../../components'
 import { useCreateIssueAction } from './createIssueAction'
 
 /**
@@ -20,19 +20,30 @@ import { useCreateIssueAction } from './createIssueAction'
  * need to explain why; here there is nothing to explain beyond "not on this
  * screen", and leaving a dead primary action in the tab order on every page
  * is worse than leaving it out.
+ *
+ * Collapsed, it becomes an `IconButton` rather than a `Button` with its label
+ * clipped by CSS. The rest of the rail hides labels that way and keeps the
+ * accessible name in the text; a primary button cannot, because its padding
+ * and minimum width are sized for text and an 8px-wide filled rectangle is
+ * not a button anyone can hit. `IconButton` requires an `aria-label`, so the
+ * name survives the swap by construction.
  */
-export function CreateIssueButton() {
+export function CreateIssueButton({ collapsed = false }: { collapsed?: boolean }) {
   const createIssue = useCreateIssueAction()
 
+  const shared = {
+    variant: 'primary',
+    size: 'md',
+    disabled: createIssue === null,
+    onClick: createIssue ?? undefined,
+  } as const
+
+  if (collapsed) {
+    return <IconButton {...shared} icon={<PlusIcon />} aria-label="New issue" />
+  }
+
   return (
-    <Button
-      variant="primary"
-      size="md"
-      fullWidth
-      icon={<PlusIcon />}
-      disabled={createIssue === null}
-      onClick={createIssue ?? undefined}
-    >
+    <Button {...shared} fullWidth icon={<PlusIcon />}>
       New issue
     </Button>
   )
