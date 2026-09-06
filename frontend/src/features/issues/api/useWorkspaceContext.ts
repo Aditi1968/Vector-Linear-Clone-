@@ -1,0 +1,119 @@
+import { useMemo } from 'react'
+import { useQuery } from '@apollo/client/react'
+
+import { useWorkspaceSlug } from '../../../app/routes'
+import { IssueWorkspaceContextDocument } from './documents'
+import type {
+  WorkflowState,
+  WorkspaceMember,
+  WorkspaceProject,
+  WorkspaceTeam,
+} from './types'
+
+/** Stable identities for "nothing yet", so a first render does not churn memos. */
+const NO_TEAMS: readonly WorkspaceTeam[] = []
+const NO_MEMBERS: readonly WorkspaceMember[] = []
+const NO_PROJECTS: readonly WorkspaceProject[] = []
+
+export interface WorkspaceContext {
+  /** Teams, in the order the server returned them. */
+  teams: readonly WorkspaceTeam[]
+  /** Everyone in the workspace, for the assignee picker. */
+  members: readonly WorkspaceMember[]
+  /** Every project an issue can be placed in. */
+  projects: readonly WorkspaceProject[]
+
+  /** `Issue.workflowStateId` -> the state it names. */
+  stateById: ReadonlyMap<string, WorkflowState>
+  /** `Issue.assigneeId` -> the person it names. */
+  memberById: ReadonlyMap<string, WorkspaceMember>
+  /** `Issue.teamId` -> that team, whose `workflowStates` are its board. */
+  teamById: ReadonlyMap<string, WorkspaceTeam>
+
+  /** Whether the lookups are still empty because the answer has not arrived. */
+  isLoading: boolean
+}
+
+/**
+ * The lookups every issue row and every issue inspector reads.
+ *
+ * ## Why this exists at all
+ *
+ * `Issue.assigneeId` and `Issue.workflowStateId` are raw UUIDs. The schema
+ * exposes no `Issue.assignee` and no `Issue.workflowState`, so a row that
+ * wants to draw a status glyph or an avatar has to resolve the id itself --
+ * through `teams(workspaceSlug:)` for states and `workspaceMembers(
+ * workspaceSlug:)` for people.
+ *
+ * Doing that per row would be 25 requests per page, or (worse) 25 identical
+ * ones that Apollo happens to deduplicate today. This is one document for the
+ * whole screen, read from the cache by every consumer, with the maps built
+ * once per response rather than once per row.
+ *
+ * ## Why the maps are memoised on `data` and not on the arrays
+ *
+ * Apollo returns a structurally stable `data` object while nothing changes,
+ * so keying the memo on it rebuilds the maps exactly when a response
+ * genuinely differs. Keying on `data?.teams` would be equivalent and would
+ * need three dependencies to say the same thing.
+ *
+ * ## Empty is a state, not an error
+ *
+ * A workspace with no teams, no projects or one member is ordinary. Nothing
+ * here reports a failure: the pickers that read these render what there is,
+ * and the composer refuses to submit when there is no team to file into.
+ * A failed request leaves the maps empty, which degrades a row to its ids
+ * rather than replacing the whole list with an error panel about a lookup.
+ */
+export function useWorkspaceContext(): WorkspaceContext {
+  const workspaceSlug = useWorkspaceSlug()
+
+  const { data, loading } = useQuery(IssueWorkspaceContextDocument, {
+    variables: { workspaceSlug },
+  })
+
+  return useMemo(() => {
+    const teams = data?.teams ?? NO_TEAMS
+    const members = data?.workspaceMembers ?? NO_MEMBERS
+    const projects = data?.projects.nodes ?? NO_PROJECTS
+
+    const stateById = new Map<string, WorkflowState>()
+    const teamById = new Map<string, WorkspaceTeam>()
+
+    for (const team of teams) {
+      teamById.set(team.id, team)
+
+      for (const state of team.workflowStates) {
+        // Workflow state ids are unique across the workspace, not merely
+        // within a team, so one flat map answers `Issue.workflowStateId`
+        // without the caller having to know the issue's team first.
+        stateById.set(state.id, state)
+      }
+    }
+
+    const memberById = new Map(members.map((member) => [member.userId, member]))
+
+    return {
+      teams,
+      members,
+      projects,
+      stateById,
+      memberById,
+      teamById,
+      isLoading: loading,
+    }
+  }, [data, loading])
+}
+
+/**
+ * What to call someone.
+ *
+ * `WorkspaceMember.name` is nullable -- an invited account that has never set
+ * one -- and the email is the only other thing the schema gives, so it is
+ * what a nameless member is shown as. Never the raw UUID: an id is not a
+ * person's name, and showing one in an assignee column is how a list stops
+ * being readable.
+ */
+export function memberLabel(member: WorkspaceMember): string {
+  return member.name ?? member.email
+}

@@ -10,13 +10,8 @@
 # Edit here, never there.
 #
 # Nothing outside `./` imports a document, and no presentational component
-# imports one. Components consume the hooks in this directory
-# (./useIssueList, ./useIssueDetail, ./useCreateIssue), which consume the
-# generated document nodes through ./documents.ts. That is not layering for
-# its own sake: backend Phase 1b-5 makes issue operations workspace-aware,
-# which changes these documents' arguments and variables. Confining that to
-# this directory is what keeps the change from reaching every screen that
-# renders an issue.
+# imports one. Components consume the hooks in this directory, which consume
+# the generated document nodes through ./documents.ts.
 #
 # ================================================================
 # Why the page size is a literal and `first` is not a variable
@@ -29,7 +24,7 @@
 # during *validation* -- before a resolver runs, before the database is
 # touched. Complexity for a list field is
 #
-#     page size x (fields selected below it)
+#     page size x (complexity of the selections below it)
 #
 # and the page size comes from `_page_size`, which reads it in the order the
 # server itself resolves it: the value written in the document, then the
@@ -41,37 +36,12 @@
 # through to `ASSUMED_PAGE_SIZE`. So `first: $first` is charged at 100 no
 # matter that we would have sent 25.
 #
-# Measured against the real schema (the Lead re-ran these; they are not
-# estimates):
-#
-#     issues(first: $first, after: $after), all 7 node fields + pageInfo   900
-#     ...the same with __typename added throughout                        900
-#     two variable-page-size `issues` selections in one document          1800  REFUSED
-#     issues(first: 25, after: $after), all 7 node fields + pageInfo       225
-#
-# This document selects 6 node fields (no `description`) plus 2 on
-# `pageInfo`, so as a variable it would cost `100 x 8 = 800` and as written
-# it costs `25 x 8 = 200`.
-#
-# Being precise about the cliff, because someone will rely on this number:
-# the check is `measured.complexity > MAX_COMPLEXITY`, strictly greater. At
-# 900, one more scalar reaches exactly 1000 and still passes; it takes two to
-# be refused. The margin is thinner than it sounds all the same -- 900 of
-# 1000 to fetch a single page leaves nothing for a document to grow into.
-#
-# What makes this worth a literal rather than a comfortable margin is the
-# *shape* of the failure, not its distance. Exceeding the budget is a
-# top-level validation error with no resolver run, so it presents as the
-# entire query failing rather than as a short page or a slow one -- and it
-# would appear the moment someone put a second list field in one document.
-#
-# `__typename` is free: `is_introspection_key` in the limits rule skips any
-# field whose name starts with `__`, so the typenames Apollo adds to every
-# selection set cost nothing against this budget -- confirmed by the second
-# row of the table above.
-#
 # If you are here because you are writing another list query: do not reach
 # for `$first`. It is the obvious thing to do and it is priced at 100.
+#
+# A field with no page-size argument at all is charged once, which is what
+# makes `teams`, `workspaceMembers`, `cycles`, `labels` and `workflowStates`
+# below effectively free despite each returning a list.
 #
 # ----------------------------------------------------------------
 # The one thing a .graphql file cannot do, and what covers it
@@ -80,44 +50,79 @@
 # A GraphQL document has no way to interpolate a TypeScript constant, so the
 # `25` below is written out where `src/lib/graphql/pagination.ts` also
 # declares `DEFAULT_PAGE_SIZE = 25`. That is two places holding one number,
-# which is exactly the kind of thing that drifts -- so it is pinned by a
-# test rather than by a convention: `./documents.test.ts` reads the literal
-# out of the parsed document and asserts it equals `DEFAULT_PAGE_SIZE`.
-# Changing one without the other is a failing test, not a silent 4x
-# complexity increase in production.
+# so it is pinned by a test rather than by a convention: ./documents.test.ts
+# reads the literal out of the parsed document, asserts it equals
+# `DEFAULT_PAGE_SIZE`, and recomputes the backend's own cost formula over the
+# row selection so that a field added here fails a test rather than every
+# list request in production.
 #
 # The constraint on the value itself: `DEFAULT_PAGE_SIZE` must stay within
-# 1..100 (`app.services.issues.FIRST_MIN`/`FIRST_MAX`) or every list request
-# comes back as `BAD_USER_INPUT`, and low enough that `size x fields` stays
-# under 1000.
+# 1..100 (`app.services.issues.FIRST_MIN`/`FIRST_MAX`).
 
-# The row selection, as a fragment so that the list query and the create
-# mutation cannot drift apart.
+# The three-line shape every payload's failure channel has.
 #
-# That they cannot drift is load-bearing for the cache update in ./cache.ts.
-# After a create, the new issue is written into the cached list by reading
-# the list query out of the cache, prepending, and writing it back. If the
-# mutation's selection ever stopped covering a field the list selects, the
-# prepended entity would be incomplete, the *next* read of the list document
-# would return null for missing data, and the list would go blank -- silently,
-# and nowhere near the edit that caused it. A shared fragment makes that
-# impossible rather than merely unlikely.
+# A fragment so that adding a field to it reaches every mutation at once --
+# and so no mutation can quietly select fewer than the other five.
+fragment ValidationFields on ValidationErrorType {
+  field
+  code
+  message
+}
+
+# The row selection, as a fragment so that the list query and every mutation
+# that returns an issue cannot drift apart.
+#
+# That they cannot drift is load-bearing twice over. The cache update in
+# ./cache.ts prepends a created issue into the cached list; and every other
+# mutation relies on Apollo *normalising* its result over the same entity, so
+# a mutation selecting fewer fields than the list would leave the list holding
+# a partial `Issue:<uuid>` and reading back as null. A shared fragment makes
+# that impossible rather than merely unlikely.
+#
+# `identifier` rather than `id` is what a row shows: ENG-42 is the name the
+# issue is known by outside the product. `workflowStateId` and `assigneeId`
+# are raw UUIDs -- the schema exposes no `Issue.assignee` object and no
+# `Issue.workflowState` -- so a row resolves them through the lookups
+# `IssueWorkspaceContext` below builds once for the whole screen.
 fragment IssueRowFields on Issue {
   id
+  teamId
+  identifier
   title
   priority
+  workflowStateId
+  assigneeId
+  estimate
+  dueDate
   completedAt
   createdAt
   updatedAt
+  labels {
+    id
+    name
+    color
+  }
+  project {
+    id
+    name
+  }
+  cycle {
+    id
+    number
+    name
+  }
 }
 
-# The detail selection: every field the schema exposes on `Issue`.
+# The detail selection.
 #
 # A strict superset of `IssueRowFields`, by construction rather than by
-# repetition -- see the note above.
+# repetition. Only two fields more: the body, and who filed it. Everything
+# else a detail view shows is already on the row, which is what lets opening
+# an issue from the list paint instantly from the cache.
 fragment IssueDetailFields on Issue {
   ...IssueRowFields
   description
+  creatorId
 }
 
 # One page of issues, newest first.
@@ -127,19 +132,9 @@ fragment IssueDetailFields on Issue {
 # there is no page number or row count anywhere in this feature to compute an
 # offset from even if someone wanted to.
 #
-# Cost: 25 x (6 + 2) = 200 of 1000.
-# `workspaceSlug` is a variable and `first` deliberately is not. The two
-# arguments are charged differently: the complexity rule reads the page size
-# out of the document at validation time, where a variable has no value, but
-# it never reads the slug at all -- a scoping argument multiplies nothing.
-# So the slug costs the same as a variable or a literal, and only a variable
-# can carry a workspace the URL decides.
+# Cost: 25 x (20 per node + 2 on pageInfo) = 550 of 1000.
 query IssueList($workspaceSlug: String!, $after: String) {
-  # 25 is a LITERAL and must stay one. As $first it is charged at
-  # ASSUMED_PAGE_SIZE = 100 during validation, which prices this selection at
-  # 800 of 1000 instead of 200. It must equal `DEFAULT_PAGE_SIZE` in
-  # src/lib/graphql/pagination.ts; ./documents.test.ts asserts that it does.
-  # See the long note at the top of this file for the measurements.
+  # 25 is a LITERAL and must stay one -- see the long note at the top.
   issues(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
     nodes {
       ...IssueRowFields
@@ -154,10 +149,63 @@ query IssueList($workspaceSlug: String!, $after: String) {
 # One issue by id.
 #
 # `issue(id:)` returns `Issue` **nullable**, so a null result is an ordinary
-# answer meaning "no such issue" and not an error condition. Cost: 1 x 7 = 7.
+# answer meaning "no such issue" and not an error condition. Cost: 22.
 query IssueDetail($workspaceSlug: String!, $id: UUID!) {
   issue(workspaceSlug: $workspaceSlug, id: $id) {
     ...IssueDetailFields
+  }
+}
+
+# Everything a screen full of issues needs in order to render the UUIDs the
+# rows carry: workflow states, people, projects, and the teams to file into.
+#
+# One document rather than three because these are read together, change on
+# the same slow cadence, and are wanted before the first row is drawn. Cost:
+# teams 8 + workspaceMembers 3 + projects 50 x 3 = 161.
+#
+# `teams` also feeds the composer: `issueCreate` requires a `teamId` and the
+# server picks no default.
+query IssueWorkspaceContext($workspaceSlug: String!) {
+  teams(workspaceSlug: $workspaceSlug) {
+    id
+    key
+    name
+    # `category` is what the UI branches on. The name belongs to the team and
+    # may say anything; the category is the fixed meaning behind it.
+    workflowStates {
+      id
+      name
+      category
+      color
+      position
+    }
+  }
+  workspaceMembers(workspaceSlug: $workspaceSlug) {
+    userId
+    name
+    email
+  }
+  projects(workspaceSlug: $workspaceSlug, first: 50) {
+    nodes {
+      id
+      name
+      state
+    }
+  }
+}
+
+# The cycles an issue can be moved into.
+#
+# Separate from `IssueWorkspaceContext` because `cycles` requires a `teamId`
+# and the team is a property of the issue, which is not known until one is
+# open. Cost: 5.
+query TeamCycles($workspaceSlug: String!, $teamId: UUID!) {
+  cycles(workspaceSlug: $workspaceSlug, teamId: $teamId) {
+    id
+    number
+    name
+    startsAt
+    endsAt
   }
 }
 
@@ -166,52 +214,82 @@ query IssueDetail($workspaceSlug: String!, $id: UUID!) {
 # Both failure channels are selected, because the server uses both and they
 # mean different things:
 #
-#   - `errors` inside the payload is *expected user input* being rejected --
-#     a title that is empty or over 500 characters, a priority outside 0..4.
+#   - `errors` inside the payload is *expected user input* being rejected.
 #     It arrives in `data` with an HTTP 200 and no GraphQL `errors` array.
 #   - a top-level GraphQL error is anything else: an outage, a bug, a
 #     transport failure. It arrives as a rejected promise from `mutate`.
 #
 # A client that reads only one of the two either silently discards validation
-# feedback or reports a database outage as a bad title. ./useCreateIssue
-# reads both.
-#
-# The `issue` selection uses the detail fragment, which is what lets the
-# cache update in ./cache.ts write the new row into the list.
-#
-# `IssueCreateInput` now requires `workspaceSlug` and `teamId`. Neither is a
-# field of the form: the slug comes from the route and the team from
-# `WorkspaceTeams` below, and ./useCreateIssue adds both, so a caller passes
-# only what the person typed. A team picker is a product decision nobody has
-# made -- see that hook for what happens when a workspace has more than one.
+# feedback or reports a database outage as a bad title. ./outcome.ts reads
+# both, for this mutation and for the four below it.
 mutation IssueCreate($input: IssueCreateInput!) {
   issueCreate(input: $input) {
     issue {
       ...IssueDetailFields
     }
     errors {
-      field
-      code
-      message
+      ...ValidationFields
     }
   }
 }
 
-# The teams in the current workspace, for the one thing this feature needs a
-# team for: `issueCreate` requires a `teamId`, and the server no longer picks
-# one -- see `IssueCreateInput` in schema.graphql.
+# Edit an issue.
 #
-# Only `id` and `key` are selected. This is not the teams screen; it is the
-# lookup that turns "the workspace in the URL" into "a team to file against",
-# and `key` is here only so a future composer can say ENG-next rather than
-# nothing. Cost: 1 x 2 = 2.
+# The id is an argument and not part of the input, which is the schema's
+# choice and worth noticing at the call site: `IssueUpdateInput` carries the
+# workspace and the fields, and every field on it is optional because the
+# mutation is a patch -- an omitted field is left alone.
 #
-# It is a separate document rather than a field on IssueList because the two
-# have different lifetimes: the list is refetched and paged, and the team set
-# changes about once a quarter.
-query WorkspaceTeams($workspaceSlug: String!) {
-  teams(workspaceSlug: $workspaceSlug) {
-    id
-    key
+# Null is therefore not "omitted": sending `assigneeId: null` unassigns.
+# ./useIssueMutations.ts builds the patch so that the difference is explicit.
+mutation IssueUpdate($id: UUID!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) {
+    issue {
+      ...IssueDetailFields
+    }
+    errors {
+      ...ValidationFields
+    }
+  }
+}
+
+# Placement. Two mutations rather than fields on `issueUpdate`, because that
+# is how the schema exposes them -- `IssueUpdateInput` has no `projectId` and
+# no `cycleId`.
+mutation IssueSetProject($input: IssueSetProjectInput!) {
+  issueSetProject(input: $input) {
+    issue {
+      ...IssueDetailFields
+    }
+    errors {
+      ...ValidationFields
+    }
+  }
+}
+
+mutation IssueSetCycle($input: IssueSetCycleInput!) {
+  issueSetCycle(input: $input) {
+    issue {
+      ...IssueDetailFields
+    }
+    errors {
+      ...ValidationFields
+    }
+  }
+}
+
+# Take an issue off the board.
+#
+# Only `id` is selected from the returned issue: an archived issue is absent
+# from every query afterwards, so there is nothing to keep up to date -- what
+# the client does with this result is remove the row (./cache.ts).
+mutation IssueArchive($workspaceSlug: String!, $id: UUID!) {
+  issueArchive(workspaceSlug: $workspaceSlug, id: $id) {
+    issue {
+      id
+    }
+    errors {
+      ...ValidationFields
+    }
   }
 }
