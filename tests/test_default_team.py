@@ -269,6 +269,7 @@ async def wired(postgres_dsn):
                     # viewer.
                     auth_service=None,
                     membership_service=None,
+                    relation_service=None,
                     team_service=team_service,
                     workspace_service=workspace_service,
                     environment="test",

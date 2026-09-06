@@ -10,6 +10,7 @@ from app.config import Environment
 from app.graphql.limits import operation_limit_extensions
 from app.graphql.mutations.auth import AuthMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
+from app.graphql.mutations.relations import RelationMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.issues import Query as IssueQuery
 from app.graphql.queries.memberships import MembershipQuery
@@ -31,7 +32,7 @@ from app.graphql.queries.teams import TeamQuery
 # Tuple order is SDL field order, so it stays stable across exports and
 # `frontend/schema.graphql` does not churn.
 Query = merge_types("Query", (IssueQuery, AuthQuery, TeamQuery, MembershipQuery))
-Mutation = merge_types("Mutation", (IssueMutation, AuthMutation))
+Mutation = merge_types("Mutation", (IssueMutation, AuthMutation, RelationMutation))
 
 
 # The public error vocabulary. An error reaches a client with its own

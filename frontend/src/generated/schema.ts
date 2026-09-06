@@ -25,13 +25,32 @@ export type Scalars = {
 
 export type Issue = {
   __typename?: 'Issue';
+  children: IssueSummaryConnection;
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   createdAt: Scalars['DateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
+  parent?: Maybe<IssueSummary>;
   priority: Scalars['Int']['output'];
+  relations: IssueRelationConnection;
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
+};
+
+
+export type IssueChildrenArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
+
+export type IssueRelationsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
+export type IssueClearParentInput = {
+  issueId: Scalars['UUID']['input'];
 };
 
 export type IssueConnection = {
@@ -50,6 +69,76 @@ export type IssueCreatePayload = {
   __typename?: 'IssueCreatePayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
+};
+
+export type IssueParentPayload = {
+  __typename?: 'IssueParentPayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
+};
+
+export type IssueRelation = {
+  __typename?: 'IssueRelation';
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  issue: IssueSummary;
+  type: IssueRelationType;
+};
+
+export type IssueRelationConnection = {
+  __typename?: 'IssueRelationConnection';
+  nodes: Array<IssueRelation>;
+  pageInfo: PageInfo;
+};
+
+export type IssueRelationCreateInput = {
+  sourceIssueId: Scalars['UUID']['input'];
+  targetIssueId: Scalars['UUID']['input'];
+  type: IssueRelationType;
+};
+
+export type IssueRelationCreatePayload = {
+  __typename?: 'IssueRelationCreatePayload';
+  errors: Array<ValidationErrorType>;
+  relation?: Maybe<IssueRelation>;
+};
+
+export type IssueRelationDeleteInput = {
+  id: Scalars['UUID']['input'];
+};
+
+export type IssueRelationDeletePayload = {
+  __typename?: 'IssueRelationDeletePayload';
+  deletedRelationId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type IssueRelationType =
+  | 'BLOCKED_BY'
+  | 'BLOCKS'
+  | 'DUPLICATE'
+  | 'RELATED';
+
+export type IssueSetParentInput = {
+  issueId: Scalars['UUID']['input'];
+  parentId: Scalars['UUID']['input'];
+};
+
+export type IssueSummary = {
+  __typename?: 'IssueSummary';
+  completedAt?: Maybe<Scalars['DateTime']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  description?: Maybe<Scalars['String']['output']>;
+  id: Scalars['UUID']['output'];
+  priority: Scalars['Int']['output'];
+  title: Scalars['String']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type IssueSummaryConnection = {
+  __typename?: 'IssueSummaryConnection';
+  nodes: Array<IssueSummary>;
+  pageInfo: PageInfo;
 };
 
 export type LoginInput = {
@@ -71,15 +160,39 @@ export type LogoutPayload = {
 
 export type Mutation = {
   __typename?: 'Mutation';
+  issueClearParent: IssueParentPayload;
   issueCreate: IssueCreatePayload;
+  issueRelationCreate: IssueRelationCreatePayload;
+  issueRelationDelete: IssueRelationDeletePayload;
+  issueSetParent: IssueParentPayload;
   login: LoginPayload;
   logout: LogoutPayload;
   register: RegisterPayload;
 };
 
 
+export type MutationIssueClearParentArgs = {
+  input: IssueClearParentInput;
+};
+
+
 export type MutationIssueCreateArgs = {
   input: IssueCreateInput;
+};
+
+
+export type MutationIssueRelationCreateArgs = {
+  input: IssueRelationCreateInput;
+};
+
+
+export type MutationIssueRelationDeleteArgs = {
+  input: IssueRelationDeleteInput;
+};
+
+
+export type MutationIssueSetParentArgs = {
+  input: IssueSetParentInput;
 };
 
 

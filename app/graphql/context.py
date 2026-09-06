@@ -9,6 +9,7 @@ from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
 from app.repositories.issues import IssueRepository
 from app.repositories.memberships import MembershipRepository
+from app.repositories.relations import RelationRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.teams import TeamRepository
 from app.repositories.users import UserRepository
@@ -17,6 +18,7 @@ from app.services.auth import AuthService
 from app.services.issues import IssueService
 from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
+from app.services.relations import RelationService
 from app.services.teams import TeamService
 from app.services.workspaces import WorkspaceService
 
@@ -31,6 +33,7 @@ class VectorContext(BaseContext):
         team_service: TeamService,
         workspace_service: WorkspaceService,
         membership_service: MembershipService,
+        relation_service: RelationService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -46,6 +49,15 @@ class VectorContext(BaseContext):
         # not second copies: one request gets one of each.
         self.team_service = team_service
         self.workspace_service = workspace_service
+
+        # Required for the same reason `tenant` is, and worth saying
+        # separately because it is the one a caller is most likely to think
+        # optional: `Issue.parent`, `Issue.children` and `Issue.relations`
+        # hang off a type every issue query already selects, so a context
+        # built without this fails on an ordinary query rather than only on
+        # the relation mutations -- and it fails as an AttributeError inside
+        # a resolver, which the schema masks as "Internal server error".
+        self.relation_service = relation_service
 
         # Required, not defaulted. A context that could be built without a
         # tenant would let a resolver reach the services with no workspace
@@ -140,6 +152,10 @@ async def get_context() -> VectorContext:
         ),
         team_service=team_service,
         workspace_service=workspace_service,
+        relation_service=RelationService(
+            pool=pool,
+            repository=RelationRepository(),
+        ),
         # Built here rather than resolved here: nothing in this function
         # touches the database. Constructing a context is on the path of
         # every request, including the malformed ones a query never runs

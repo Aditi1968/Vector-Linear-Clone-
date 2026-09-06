@@ -9,6 +9,13 @@ type Issue {
   completedAt: DateTime
   createdAt: DateTime!
   updatedAt: DateTime!
+  parent: IssueSummary
+  children(first: Int! = 10, after: String = null): IssueSummaryConnection!
+  relations(first: Int! = 10, after: String = null): IssueRelationConnection!
+}
+
+input IssueClearParentInput {
+  issueId: UUID!
 }
 
 type IssueConnection {
@@ -25,6 +32,70 @@ input IssueCreateInput {
 type IssueCreatePayload {
   issue: Issue
   errors: [ValidationErrorType!]!
+}
+
+type IssueParentPayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
+}
+
+type IssueRelation {
+  id: UUID!
+  type: IssueRelationType!
+  issue: IssueSummary!
+  createdAt: DateTime!
+}
+
+type IssueRelationConnection {
+  nodes: [IssueRelation!]!
+  pageInfo: PageInfo!
+}
+
+input IssueRelationCreateInput {
+  sourceIssueId: UUID!
+  targetIssueId: UUID!
+  type: IssueRelationType!
+}
+
+type IssueRelationCreatePayload {
+  relation: IssueRelation
+  errors: [ValidationErrorType!]!
+}
+
+input IssueRelationDeleteInput {
+  id: UUID!
+}
+
+type IssueRelationDeletePayload {
+  deletedRelationId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+enum IssueRelationType {
+  BLOCKS
+  BLOCKED_BY
+  RELATED
+  DUPLICATE
+}
+
+input IssueSetParentInput {
+  issueId: UUID!
+  parentId: UUID!
+}
+
+type IssueSummary {
+  id: UUID!
+  title: String!
+  description: String
+  priority: Int!
+  completedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type IssueSummaryConnection {
+  nodes: [IssueSummary!]!
+  pageInfo: PageInfo!
 }
 
 input LoginInput {
@@ -47,6 +118,10 @@ type Mutation {
   register(input: RegisterInput!): RegisterPayload!
   login(input: LoginInput!): LoginPayload!
   logout: LogoutPayload!
+  issueSetParent(input: IssueSetParentInput!): IssueParentPayload!
+  issueClearParent(input: IssueClearParentInput!): IssueParentPayload!
+  issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
+  issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
 }
 
 type PageInfo {

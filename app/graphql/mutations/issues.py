@@ -9,6 +9,16 @@ from app.graphql.types.issue import IssueCreatePayload, IssueType
 
 @strawberry.type
 class Mutation:
+    """The issue feature's mutations -- not the root type.
+
+    `app.graphql.schema` merges this with every other feature's mutation
+    class into the root `Mutation`. Inheriting the others into this class
+    would also produce a working schema and would put this one file on the
+    path of every feature that adds a mutation; worse, `merge_types` counts
+    the fields it merges and warns on a collision, and a class that arrives
+    by inheritance is never counted.
+    """
+
     @strawberry.mutation
     async def issue_create(
         self,
