@@ -31,6 +31,30 @@ class IssueCreateInput:
     into a disagreement.
     """
 
+    # Every workspace-scoped mutation names its tenant, and every mutation
+    # that takes an `input` names it HERE rather than beside the input. One
+    # place per operation, so a client never has to remember which mutations
+    # spell it as an argument; the two that take no input at all
+    # (`issueArchive`, `cycleDelete`) carry it as a field argument, because
+    # inventing a one-field input object for them would be worse.
+    #
+    # A slug and not a workspace id, deliberately. CLAUDE.md forbids trusting
+    # a workspace id from the frontend: the slug is a public string that
+    # selects WHAT is being asked about, and `app.graphql.scope` decides
+    # whether the session behind the request may act there.
+    workspace_slug: str
+
+    # Required, and never resolved server-side. A workspace has many teams and
+    # every issue belongs to exactly one, so a server that picked a default
+    # would be choosing where another tenant's work lands by a rule invisible
+    # at the call site -- and the choice would be permanent, since the number
+    # in `ENG-42` comes off the team's own counter. The client that knows
+    # which team it means is the one that has to say so.
+    #
+    # A team from another workspace is refused by `issues_team_fk` against the
+    # authorized workspace, inside the insert, rather than by a check here.
+    team_id: UUID
+
     title: str
     description: str | None = None
     priority: int = 0
@@ -61,7 +85,14 @@ class IssueUpdateInput:
     NOT NULL violation the client cannot read.
 
     The other four are nullable because clearing them is an ordinary edit.
+
+    `workspaceSlug` is the one required field, and it is not part of the
+    patch: it says WHICH workspace's issue is being edited, not what to
+    change about it, so `to_patch` below does not carry it and an update that
+    sets nothing else is still empty.
     """
+
+    workspace_slug: str
 
     title: str | None = strawberry.UNSET
     description: str | None = strawberry.UNSET

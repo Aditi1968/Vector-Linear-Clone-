@@ -45,23 +45,23 @@ export interface IssueConnectionValue {
  * query is watching, and the list on screen would never grow no matter how
  * many times the user clicked. Apollo does not report that as an error.
  *
- * ## When `keyArgs: false` becomes wrong
+ * ## Why the key is a list and not `false`
  *
- * It is correct only while no argument to `issues` selects a different list.
- * That holds today -- the field takes `first` and `after` and nothing else.
- * It stops holding the moment the field gains a scoping or filtering
- * argument, which backend Phase 1b-5 (workspace tenancy) is expected to add.
- * With `keyArgs: false` still in place, pages from two different workspaces
- * would merge into one list and the UI would show another tenant's issues.
+ * `keyArgs: false` was correct while the field took only `first` and
+ * `after`. It is not correct now: `issues` takes `workspaceSlug` and
+ * `teamId`, and each of those DOES select a different list. Left as `false`,
+ * pages from two workspaces would merge into one cache field and the screen
+ * would show another tenant's issues -- a rendering of a cross-tenant leak
+ * that the server correctly refused to produce.
  *
- * So: whoever adds `workspaceId`, `filter` or `orderBy` to this query must
- * change this to an explicit allow-list at the same time, e.g.
- * `keyArgs: ['workspaceId']`. Naming the args positively rather than
- * excluding `first`/`after` keeps a newly added argument from defaulting
- * into the key and silently splitting the list again.
+ * Named positively rather than as an exclusion of `first`/`after`, so the
+ * next argument someone adds defaults to NOT splitting the list, and has to
+ * be considered here before it can. An argument that describes where in one
+ * list a page sits stays out of this array; one that describes which list is
+ * being read goes in.
  */
 const issuesFieldPolicy: FieldPolicy<IssueConnectionValue> = {
-  keyArgs: false,
+  keyArgs: ['workspaceSlug', 'teamId'],
 
   merge(existing, incoming, { args, readField }) {
     // `args` is typed as `Record<string, any> | null`; routing it through

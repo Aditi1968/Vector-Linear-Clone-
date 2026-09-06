@@ -12,8 +12,10 @@ from uuid import UUID, uuid4
 import asyncpg
 import pytest
 
+from app.domain.auth import UserEntity
+from app.domain.errors import WorkspaceAccessDeniedError
 from app.domain.issues import IssueEntity
-from app.domain.tenancy import WorkspaceScope
+from app.domain.tenancy import AuthorizedWorkspaceScope, WorkspaceScope
 from app.graphql.context import VectorContext
 from app.repositories.issues import IssueRepository
 from app.repositories.teams import TeamRepository
@@ -35,6 +37,21 @@ TEST_WORKSPACE_ID = UUID("00000000-0000-7000-8000-0000000000fa")
 TEST_TEAM_ID = UUID("00000000-0000-7000-8000-0000000000fb")
 
 TEST_SCOPE = WorkspaceScope(workspace_id=TEST_WORKSPACE_ID)
+
+# The slug a transport test addresses that workspace by, and the account it
+# is addressed as. Every workspace-scoped field now takes a `workspaceSlug`
+# and resolves it through a membership lookup, so a resolver test needs three
+# things where it used to need none: a slug in the document, a viewer behind
+# the request, and a membership row joining them. `FakeMembershipService`
+# below is that row.
+TEST_WORKSPACE_SLUG = "acme"
+TEST_USER_ID = UUID("00000000-0000-7000-8000-0000000000fd")
+
+TEST_AUTHORIZED_SCOPE = AuthorizedWorkspaceScope(
+    workspace_id=TEST_WORKSPACE_ID,
+    user_id=TEST_USER_ID,
+    role="member",
+)
 
 # The workflow state a fake row sits in, and the key its team renders under.
 # Neither reaches a database either, so they only have to be well-formed:
@@ -322,7 +339,6 @@ def graphql_context(**services) -> VectorContext:
         "activity_service",
     }
     environment = services.pop("environment", "test")
-    tenant = services.pop("tenant", None) or FakeTenant()
     unexpected = set(services) - slots
 
     assert not unexpected, (
@@ -330,13 +346,23 @@ def graphql_context(**services) -> VectorContext:
         "is out of date with app/graphql/context.py"
     )
 
+    # Two slots get working fakes rather than `UnusedService`, because every
+    # workspace-scoped resolver reaches both before it reaches the service
+    # under test: `auth_service` answers who is asking and `membership_service`
+    # answers whether they may be here. A test that wants the refusal path
+    # passes its own.
+    defaults = {
+        "auth_service": SignedInAuthService(),
+        "membership_service": FakeMembershipService(),
+    }
+
     return VectorContext(
-        **{name: services.get(name) or UnusedService(name) for name in slots},
-        # Not services, so not `UnusedService` slots. `tenant` gets a working
-        # fake because almost every resolver path needs a scope to run at
-        # all, and `environment` is a plain value whose default only decides
-        # whether a Set-Cookie would carry Secure.
-        tenant=tenant,
+        **{
+            name: services.get(name) or defaults.get(name) or UnusedService(name)
+            for name in slots
+        },
+        # Not a service, so not an `UnusedService` slot: a plain value whose
+        # default only decides whether a Set-Cookie would carry Secure.
         environment=environment,
     )
 
@@ -372,10 +398,13 @@ class FakeIssueRepository:
         self.rows = rows if rows is not None else []
         self.list_calls: list[dict] = []
 
-    async def list(self, connection, *, scope, limit, after_created_at, after_id):
+    async def list(
+        self, connection, *, scope, team_id, limit, after_created_at, after_id
+    ):
         self.list_calls.append(
             {
                 "scope": scope,
+                "team_id": team_id,
                 "limit": limit,
                 "after_created_at": after_created_at,
                 "after_id": after_id,
@@ -401,24 +430,56 @@ class AnonymousAuthService:
         return None
 
 
-class FakeTenant:
-    """The tenant seam the GraphQL layer reads, without a database.
+class SignedInAuthService:
+    """Authenticates every request as one fixed account.
 
-    Mirrors app/graphql/tenancy.RequestTenant. Kept in step with it by hand,
-    which is the cost of every fake -- the compensating test is
-    tests/test_issue_tenancy.py, which asserts the real resolvers pass what
-    they get from here straight through to the service.
+    The counterpart to `AnonymousAuthService`, and the default for a
+    transport test now that no workspace-scoped field resolves without a
+    viewer. It answers the same shape `AuthService.authenticate` does -- a
+    `UserEntity` or None -- so the resolver path under test is the real one
+    and only the session lookup is stubbed.
     """
 
-    def __init__(self, scope=TEST_SCOPE, team_id=TEST_TEAM_ID):
+    def __init__(self, user_id: UUID = TEST_USER_ID):
+        self.user = UserEntity(
+            id=user_id,
+            email="member@example.com",
+            name="Member",
+            created_at=BASE_TIME,
+            updated_at=BASE_TIME,
+        )
+
+    async def authenticate(self, token: str | None) -> UserEntity:
+        return self.user
+
+
+class FakeMembershipService:
+    """One membership row, without a database.
+
+    Mirrors `app.services.memberships.MembershipService` at the one method
+    `app.graphql.scope.authorized_scope` calls, and refuses every other slug
+    the way the real one does: a slug no workspace holds and a workspace this
+    user is not in are the same WorkspaceAccessDeniedError, because the real
+    lookup is a single statement that cannot tell them apart.
+
+    Records what it was asked, so a test can assert that the resolver passed
+    the slug from the DOCUMENT and the user from the SESSION -- which is the
+    pairing the whole check rests on, and the one a fake that only returned a
+    scope would let a resolver get wrong invisibly.
+    """
+
+    def __init__(self, slug: str = TEST_WORKSPACE_SLUG, scope=TEST_AUTHORIZED_SCOPE):
+        self._slug = slug
         self._scope = scope
-        self._team_id = team_id
+        self.calls: list[dict] = []
 
-    async def scope(self):
+    async def authorized_scope_for_slug(self, *, slug: str, user_id: UUID):
+        self.calls.append({"slug": slug, "user_id": user_id})
+
+        if slug != self._slug:
+            raise WorkspaceAccessDeniedError()
+
         return self._scope
-
-    async def team_id(self, scope):
-        return self._team_id
 
 
 def as_record(entity: IssueEntity) -> dict:

@@ -604,6 +604,7 @@ class IssueRepository:
         connection: asyncpg.Connection,
         *,
         scope: WorkspaceScope,
+        team_id: UUID | None,
         limit: int,
         after_created_at: datetime | None,
         after_id: UUID | None,
@@ -630,6 +631,15 @@ class IssueRepository:
         reads rather than fetched and discarded; without it the cost of a
         page would grow with every issue the workspace had ever created
         instead of with the ones still on its board.
+
+        `team_id` is an optional NARROWING and never a widening. It is ANDed
+        on alongside the workspace, in that order, so a team id belonging to
+        another workspace intersects with nothing rather than selecting that
+        workspace's rows -- the client-supplied id can only ever remove rows
+        the tenant predicate already admitted. It is bound as one parameter
+        with a NULL-means-all test rather than by building two statements,
+        because a filter that is absent must not change the plan the keyset
+        walk uses.
         """
         if after_created_at is None or after_id is None:
             rows = await connection.fetch(
@@ -637,11 +647,14 @@ class IssueRepository:
                 SELECT
 {ISSUE_COLUMNS}
                 FROM issues
-                WHERE workspace_id = $1 AND archived_at IS NULL
+                WHERE workspace_id = $1
+                    AND ($2::UUID IS NULL OR team_id = $2)
+                    AND archived_at IS NULL
                 ORDER BY created_at DESC, id DESC
-                LIMIT $2
+                LIMIT $3
                 """,
                 scope.workspace_id,
+                team_id,
                 limit,
             )
         else:
@@ -650,12 +663,15 @@ class IssueRepository:
                 SELECT
 {ISSUE_COLUMNS}
                 FROM issues
-                WHERE workspace_id = $1 AND (created_at, id) < ($2, $3)
+                WHERE workspace_id = $1
+                    AND ($2::UUID IS NULL OR team_id = $2)
+                    AND (created_at, id) < ($3, $4)
                     AND archived_at IS NULL
                 ORDER BY created_at DESC, id DESC
-                LIMIT $4
+                LIMIT $5
                 """,
                 scope.workspace_id,
+                team_id,
                 after_created_at,
                 after_id,
                 limit,

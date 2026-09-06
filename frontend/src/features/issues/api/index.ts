@@ -29,6 +29,7 @@ export {
   IssueCreateDocument,
   IssueDetailDocument,
   IssueListDocument,
+  WorkspaceTeamsDocument,
 } from './documents'
 
 export type {
@@ -40,9 +41,13 @@ export type {
   IssueDetailData,
   IssueDetailFields,
   IssueDetailVariables,
+  IssueDraft,
   IssueListData,
   IssueListVariables,
   IssuePageInfo,
   IssueRowFields,
   IssueValidationError,
+  WorkspaceTeam,
+  WorkspaceTeamsData,
+  WorkspaceTeamsVariables,
 } from './types'

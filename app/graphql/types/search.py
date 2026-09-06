@@ -1,6 +1,7 @@
 import strawberry
 
 from app.domain.search import SearchResults
+from app.domain.tenancy import WorkspaceScope
 from app.graphql.types.issue import IssueType
 from app.graphql.types.project import ProjectType
 
@@ -24,8 +25,19 @@ class SearchResultsType:
     projects: list[ProjectType]
 
     @classmethod
-    def from_domain(cls, results: SearchResults) -> "SearchResultsType":
+    def from_domain(
+        cls, results: SearchResults, scope: WorkspaceScope
+    ) -> "SearchResultsType":
+        """Build the result types, each carrying the workspace it was found in.
+
+        The scope is threaded through rather than left to a resolver to
+        rediscover: `Issue.labels`, `Issue.parent` and `Project.milestones`
+        resolve against the scope their parent object carries, so a hit built
+        without one would resolve its nested fields against nothing.
+        """
         return cls(
-            issues=[IssueType.from_entity(entity) for entity in results.issues],
-            projects=[ProjectType.from_entity(entity) for entity in results.projects],
+            issues=[IssueType.from_entity(entity, scope) for entity in results.issues],
+            projects=[
+                ProjectType.from_entity(entity, scope) for entity in results.projects
+            ],
         )

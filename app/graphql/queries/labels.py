@@ -5,6 +5,7 @@ from graphql import GraphQLError
 from strawberry.types import Info
 
 from app.domain.errors import ValidationError
+from app.graphql.scope import authorized_scope
 from app.graphql.types.label import LabelConnection, LabelType
 
 
@@ -22,13 +23,17 @@ class LabelQuery:
     """
 
     @strawberry.field
-    async def label(self, info: Info, id: UUID) -> LabelType | None:
-        # The workspace comes from the request, never from the document.
-        # app/graphql/tenancy.py holds where it comes from today and what
-        # replaces that. A label in another workspace resolves to null -- the
-        # same answer as an id that exists nowhere -- so the resolver cannot
-        # be used to ask whether someone else's label exists.
-        scope = await info.context.tenant.scope()
+    async def label(
+        self,
+        info: Info,
+        workspace_slug: str,
+        id: UUID,
+    ) -> LabelType | None:
+        # The slug is authorized before the id is used for anything. A label
+        # in another workspace then resolves to null -- the same answer as an
+        # id that exists nowhere -- so the resolver cannot be used to ask
+        # whether someone else's label exists.
+        scope = await authorized_scope(info, workspace_slug)
 
         entity = await info.context.label_service.get_by_id(scope=scope, label_id=id)
 
@@ -41,10 +46,11 @@ class LabelQuery:
     async def labels(
         self,
         info: Info,
+        workspace_slug: str,
         first: int = DEFAULT_FIRST,
         after: str | None = None,
     ) -> LabelConnection:
-        scope = await info.context.tenant.scope()
+        scope = await authorized_scope(info, workspace_slug)
 
         try:
             page = await info.context.label_service.list(

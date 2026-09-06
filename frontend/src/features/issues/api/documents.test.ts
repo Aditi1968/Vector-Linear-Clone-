@@ -158,13 +158,16 @@ describe('IssueList document', () => {
     )
   })
 
-  it('declares `after` as its only variable', () => {
+  it('declares the workspace and the cursor, and no page size', () => {
     const variables = (operation.variableDefinitions ?? []).map(
       (definition) => definition.variable.name.value,
     )
 
-    // No `$first`, and nothing that could be an offset.
-    expect(variables).toEqual(['after'])
+    // `$workspaceSlug` because the URL decides it and only a variable can
+    // carry that. No `$first`, because a variable page size is charged at
+    // ASSUMED_PAGE_SIZE = 100 during validation -- see ./operations.graphql.
+    // And nothing that could be an offset.
+    expect(variables).toEqual(['workspaceSlug', 'after'])
   })
 
   it('passes the cursor through the `after` argument', () => {
@@ -180,7 +183,7 @@ describe('IssueList document', () => {
     const argumentNames = (issues.arguments ?? []).map(
       (argument) => argument.name.value,
     )
-    expect(argumentNames.toSorted()).toEqual(['after', 'first'])
+    expect(argumentNames.toSorted()).toEqual(['after', 'first', 'workspaceSlug'])
   })
 
   it('stays inside the backend complexity budget', () => {
@@ -285,7 +288,7 @@ describe('IssueDetail document', () => {
       (operation.variableDefinitions ?? []).map(
         (definition) => definition.variable.name.value,
       ),
-    ).toEqual(['id'])
+    ).toEqual(['workspaceSlug', 'id'])
 
     expect(childFieldNames(root, 'issue', fragments)).toEqual([
       'completedAt',

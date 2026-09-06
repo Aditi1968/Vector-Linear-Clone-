@@ -5,6 +5,7 @@ from app.repositories.issues import IssueRepository
 
 from tests.conftest import (
     TEST_SCOPE,
+    TEST_TEAM_ID,
     TEST_WORKSPACE_ID,
     FakeConnection,
     as_record,
@@ -27,6 +28,7 @@ async def test_no_cursor_page_is_still_scoped_to_one_workspace():
     await repository.list(
         connection,
         scope=TEST_SCOPE,
+        team_id=None,
         limit=51,
         after_created_at=None,
         after_id=None,
@@ -36,11 +38,13 @@ async def test_no_cursor_page_is_still_scoped_to_one_workspace():
 
     assert "WHERE workspace_id = $1" in query
     assert "ORDER BY created_at DESC, id DESC" in query
-    assert "LIMIT $2" in query
+    assert "LIMIT $3" in query
     assert "OFFSET" not in query
 
-    # Values are bound as parameters, never interpolated into the SQL.
-    assert connection.queries[0]["args"] == (TEST_WORKSPACE_ID, 51)
+    # Values are bound as parameters, never interpolated into the SQL. The
+    # absent team filter is a bound NULL rather than a statement without the
+    # clause, so the plan does not change with the argument.
+    assert connection.queries[0]["args"] == (TEST_WORKSPACE_ID, None, 51)
     assert str(TEST_WORKSPACE_ID) not in query
 
 
@@ -58,6 +62,7 @@ async def test_cursor_path_uses_row_value_comparison_inside_the_workspace():
     await repository.list(
         connection,
         scope=TEST_SCOPE,
+        team_id=None,
         limit=11,
         after_created_at=entity.created_at,
         after_id=entity.id,
@@ -65,14 +70,16 @@ async def test_cursor_path_uses_row_value_comparison_inside_the_workspace():
 
     query = normalize(connection.queries[0]["query"])
 
-    assert "WHERE workspace_id = $1 AND (created_at, id) < ($2, $3)" in query
+    assert "WHERE workspace_id = $1" in query
+    assert "AND (created_at, id) < ($3, $4)" in query
     assert "ORDER BY created_at DESC, id DESC" in query
-    assert "LIMIT $4" in query
+    assert "LIMIT $5" in query
     assert "OFFSET" not in query
 
     # Values are bound as parameters, never interpolated into the SQL.
     assert connection.queries[0]["args"] == (
         TEST_WORKSPACE_ID,
+        None,
         entity.created_at,
         entity.id,
         11,
@@ -89,6 +96,7 @@ async def test_records_are_converted_to_entities():
     result = await repository.list(
         connection,
         scope=TEST_SCOPE,
+        team_id=None,
         limit=3,
         after_created_at=None,
         after_id=None,
@@ -105,9 +113,39 @@ async def test_limit_receives_first_plus_one_from_service():
     await IssueRepository().list(
         connection,
         scope=TEST_SCOPE,
+        team_id=None,
         limit=50 + 1,
         after_created_at=None,
         after_id=None,
     )
 
-    assert connection.queries[0]["args"] == (TEST_WORKSPACE_ID, 51)
+    assert connection.queries[0]["args"] == (TEST_WORKSPACE_ID, None, 51)
+
+
+async def test_a_team_filter_narrows_within_the_workspace_and_never_widens_it():
+    """The team is ANDed onto the tenant predicate, never substituted for it.
+
+    A team id arrives from a client, so the failure to refuse is the one that
+    matters: a statement selecting on `team_id` alone would hand back another
+    workspace's issues to anyone who could guess one of its team ids. The
+    workspace equality stays first and the team is an additional restriction,
+    so a foreign team intersects with nothing.
+    """
+    connection = FakeConnection(rows=[])
+
+    await IssueRepository().list(
+        connection,
+        scope=TEST_SCOPE,
+        team_id=TEST_TEAM_ID,
+        limit=51,
+        after_created_at=None,
+        after_id=None,
+    )
+
+    query = normalize(connection.queries[0]["query"])
+
+    assert "WHERE workspace_id = $1" in query
+    assert "AND ($2::UUID IS NULL OR team_id = $2)" in query
+
+    assert connection.queries[0]["args"] == (TEST_WORKSPACE_ID, TEST_TEAM_ID, 51)
+    assert str(TEST_TEAM_ID) not in query

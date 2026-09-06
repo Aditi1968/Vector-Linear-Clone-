@@ -6,13 +6,13 @@ from app.graphql.inputs.notification import (
     NotificationMarkAllReadInput,
     NotificationMarkReadInput,
 )
+from app.graphql.scope import authorized_scope
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.notification import (
     NotificationMarkAllReadPayload,
     NotificationMarkReadPayload,
     NotificationType,
 )
-from app.graphql.viewer import authorized_scope
 
 
 def _errors(exc: ValidationError) -> list[ValidationErrorType]:

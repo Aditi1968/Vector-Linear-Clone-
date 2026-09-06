@@ -128,13 +128,19 @@ fragment IssueDetailFields on Issue {
 # offset from even if someone wanted to.
 #
 # Cost: 25 x (6 + 2) = 200 of 1000.
-query IssueList($after: String) {
+# `workspaceSlug` is a variable and `first` deliberately is not. The two
+# arguments are charged differently: the complexity rule reads the page size
+# out of the document at validation time, where a variable has no value, but
+# it never reads the slug at all -- a scoping argument multiplies nothing.
+# So the slug costs the same as a variable or a literal, and only a variable
+# can carry a workspace the URL decides.
+query IssueList($workspaceSlug: String!, $after: String) {
   # 25 is a LITERAL and must stay one. As $first it is charged at
   # ASSUMED_PAGE_SIZE = 100 during validation, which prices this selection at
   # 800 of 1000 instead of 200. It must equal `DEFAULT_PAGE_SIZE` in
   # src/lib/graphql/pagination.ts; ./documents.test.ts asserts that it does.
   # See the long note at the top of this file for the measurements.
-  issues(first: 25, after: $after) {
+  issues(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
     nodes {
       ...IssueRowFields
     }
@@ -149,8 +155,8 @@ query IssueList($after: String) {
 #
 # `issue(id:)` returns `Issue` **nullable**, so a null result is an ordinary
 # answer meaning "no such issue" and not an error condition. Cost: 1 x 7 = 7.
-query IssueDetail($id: UUID!) {
-  issue(id: $id) {
+query IssueDetail($workspaceSlug: String!, $id: UUID!) {
+  issue(workspaceSlug: $workspaceSlug, id: $id) {
     ...IssueDetailFields
   }
 }
@@ -172,6 +178,12 @@ query IssueDetail($id: UUID!) {
 #
 # The `issue` selection uses the detail fragment, which is what lets the
 # cache update in ./cache.ts write the new row into the list.
+#
+# `IssueCreateInput` now requires `workspaceSlug` and `teamId`. Neither is a
+# field of the form: the slug comes from the route and the team from
+# `WorkspaceTeams` below, and ./useCreateIssue adds both, so a caller passes
+# only what the person typed. A team picker is a product decision nobody has
+# made -- see that hook for what happens when a workspace has more than one.
 mutation IssueCreate($input: IssueCreateInput!) {
   issueCreate(input: $input) {
     issue {
@@ -182,5 +194,24 @@ mutation IssueCreate($input: IssueCreateInput!) {
       code
       message
     }
+  }
+}
+
+# The teams in the current workspace, for the one thing this feature needs a
+# team for: `issueCreate` requires a `teamId`, and the server no longer picks
+# one -- see `IssueCreateInput` in schema.graphql.
+#
+# Only `id` and `key` are selected. This is not the teams screen; it is the
+# lookup that turns "the workspace in the URL" into "a team to file against",
+# and `key` is here only so a future composer can say ENG-next rather than
+# nothing. Cost: 1 x 2 = 2.
+#
+# It is a separate document rather than a field on IssueList because the two
+# have different lifetimes: the list is refetched and paged, and the team set
+# changes about once a quarter.
+query WorkspaceTeams($workspaceSlug: String!) {
+  teams(workspaceSlug: $workspaceSlug) {
+    id
+    key
   }
 }

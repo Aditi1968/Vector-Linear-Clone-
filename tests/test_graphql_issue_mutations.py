@@ -34,9 +34,8 @@ from app.services.issues import IssueService
 from app.services.teams import TeamService
 
 from tests.conftest import (
-    AnonymousAuthService,
+    TEST_WORKSPACE_SLUG,
     ExplodingPool,
-    FakeTenant,
     graphql_context,
     make_entity,
 )
@@ -64,8 +63,8 @@ mutation UpdateIssue($id: UUID!, $input: IssueUpdateInput!) {
 """
 
 ARCHIVE_MUTATION = """
-mutation ArchiveIssue($id: UUID!) {
-  issueArchive(id: $id) {
+mutation ArchiveIssue($slug: String!, $id: UUID!) {
+  issueArchive(workspaceSlug: $slug, id: $id) {
     issue {
       id
       identifier
@@ -112,17 +111,25 @@ class RecordingIssueService:
 
 
 def context(issue_service):
-    return graphql_context(
-        issue_service=issue_service,
-        auth_service=AnonymousAuthService(),
-        tenant=FakeTenant(),
-    )
+    """The real context, wired to one recording service.
+
+    The viewer and the membership come from `graphql_context`'s defaults.
+    Both are reached before the issue service now: `issueUpdate` authorizes
+    the slug on its input and `issueArchive` the one beside its id.
+    """
+    return graphql_context(issue_service=issue_service)
 
 
 async def _update(service, **input_fields):
     return await schema.execute(
         UPDATE_MUTATION,
-        variable_values={"id": str(ISSUE_ID), "input": input_fields},
+        variable_values={
+            "id": str(ISSUE_ID),
+            # The slug is merged in rather than written into every case,
+            # because it is a fact about the request and not about the patch
+            # -- and a patch carrying only a slug must still read as empty.
+            "input": {"workspaceSlug": TEST_WORKSPACE_SLUG} | input_fields,
+        },
         context_value=context(service),
     )
 
@@ -283,7 +290,7 @@ async def test_archive_returns_the_archived_issue():
 
     result = await schema.execute(
         ARCHIVE_MUTATION,
-        variable_values={"id": str(ISSUE_ID)},
+        variable_values={"slug": TEST_WORKSPACE_SLUG, "id": str(ISSUE_ID)},
         context_value=context(service),
     )
 
@@ -299,7 +306,7 @@ async def test_archiving_an_issue_that_is_not_there_reports_not_found():
 
     result = await schema.execute(
         ARCHIVE_MUTATION,
-        variable_values={"id": str(ISSUE_ID)},
+        variable_values={"slug": TEST_WORKSPACE_SLUG, "id": str(ISSUE_ID)},
         context_value=context(service),
     )
 

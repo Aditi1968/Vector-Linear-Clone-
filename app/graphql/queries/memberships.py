@@ -3,22 +3,16 @@ from graphql import GraphQLError
 from strawberry.types import Info
 
 from app.domain.errors import WorkspaceAccessDeniedError
-from app.domain.tenancy import AuthorizedWorkspaceScope
+from app.graphql.scope import WORKSPACE_NOT_FOUND_MESSAGE, authorized_scope
 from app.graphql.types.invitation import WorkspaceInvitationType
 from app.graphql.types.membership import WorkspaceMembershipType, WorkspaceMemberType
 from app.graphql.viewer import viewer_user_id
 
 
-# One message for a workspace that does not exist and for one the viewer does
-# not belong to. A constant because it is a contract rather than prose:
-# NOT_FOUND is in `app.graphql.schema.PUBLIC_ERROR_CODES`, so this string
-# reaches clients verbatim.
-#
-# Phrased as a miss rather than a refusal, because a refusal would confirm the
-# workspace is real. The server does not know which case it is in -- see
-# WorkspaceAccessDeniedError -- so this is the only answer it could give
-# truthfully anyway.
-WORKSPACE_NOT_FOUND_MESSAGE = "Workspace not found"
+# WORKSPACE_NOT_FOUND_MESSAGE is imported rather than declared here now that
+# every workspace-scoped resolver raises it. It moved to app/graphql/scope.py,
+# beside the helper that raises it everywhere else, so that this field and the
+# whole scoped API cannot answer a non-member two different ways.
 
 
 def workspace_not_found() -> GraphQLError:
@@ -128,7 +122,7 @@ class MembershipQuery:
         and declaring no page-size argument, so `app.graphql.limits` charges it
         once. Adding a `first` here means revisiting PAGE_SIZE_ARGUMENTS.
         """
-        scope = await self._scope(info, workspace_slug)
+        scope = await authorized_scope(info, workspace_slug)
 
         members = await info.context.membership_service.list_members(scope=scope)
 
@@ -150,40 +144,10 @@ class MembershipQuery:
         refuses an ordinary member -- with the same refusal a stranger gets,
         which is why both arrive here as one exception.
         """
-        scope = await self._scope(info, workspace_slug)
+        scope = await authorized_scope(info, workspace_slug)
 
         invitations = await info.context.membership_service.list_invitations(
             scope=scope
         )
 
         return [WorkspaceInvitationType.from_entity(entity) for entity in invitations]
-
-    @staticmethod
-    async def _scope(info: Info, workspace_slug: str) -> AuthorizedWorkspaceScope:
-        """Identify the viewer, then resolve the slug against their memberships.
-
-        The identity check runs first and unconditionally, so an
-        unauthenticated request performs no workspace lookup at all -- see
-        `viewer_user_id`. The slug reaches the service exactly as the client
-        wrote it, for the reason `my_workspace` gives.
-
-        A stand-in until `app/graphql/scope.py` lands, at which point this
-        becomes a call to the one helper every workspace-scoped field shares.
-        """
-        user_id = await viewer_user_id(info)
-
-        try:
-            # Annotated rather than returned inline: `info.context` is untyped
-            # here, so returning the call directly would satisfy any return
-            # type -- including a bare WorkspaceScope, which carries no
-            # evidence that anything was checked.
-            scope: AuthorizedWorkspaceScope = (
-                await info.context.membership_service.authorized_scope_for_slug(
-                    slug=workspace_slug,
-                    user_id=user_id,
-                )
-            )
-        except WorkspaceAccessDeniedError:
-            raise workspace_not_found() from None
-
-        return scope

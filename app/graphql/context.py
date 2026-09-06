@@ -14,7 +14,6 @@ from app.graphql.loaders.projects import (
     build_project_loader,
     build_project_milestones_loader,
 )
-from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
 from app.repositories.activity import ActivityRepository
 from app.repositories.comments import CommentRepository
@@ -69,7 +68,6 @@ class VectorContext(BaseContext):
         github_service: GithubService,
         slack_service: SlackService,
         activity_service: ActivityService,
-        tenant: RequestTenant,
         environment: Environment,
     ):
         super().__init__()
@@ -120,10 +118,9 @@ class VectorContext(BaseContext):
             project_service
         )
 
-        # The same two service objects `tenant` resolves through, exposed
-        # directly for the resolvers that ask about teams and workspaces as
-        # entities rather than as this request's scope. Shared instances,
-        # not second copies: one request gets one of each.
+        # Teams and workspaces as entities, for the resolvers that ask about
+        # them rather than about this request's scope. Shared instances, not
+        # second copies: one request gets one of each.
         self.team_service = team_service
         self.workspace_service = workspace_service
 
@@ -147,11 +144,16 @@ class VectorContext(BaseContext):
         # a resolver, which the schema masks as "Internal server error".
         self.relation_service = relation_service
 
-        # Required, not defaulted. A context that could be built without a
-        # tenant would let a resolver reach the services with no workspace
-        # to give them, and the first sign of it would be a TypeError in
-        # production rather than a failure to construct.
-        self.tenant = tenant
+        # There is deliberately no workspace on this object. A per-request
+        # "current tenant" is what `app/graphql/tenancy.py` used to hold, and
+        # the reason it is gone is not that the constant in it was temporary:
+        # a scope living on the context is a scope a resolver can reach
+        # without having been given one, so a resolver that forgot to
+        # authorize would still find a workspace to work in. The scope now
+        # arrives per FIELD, from `app.graphql.scope.authorized_scope`, which
+        # is the only thing that produces one -- and a document may legally
+        # name two workspaces in two root fields, which no single ambient
+        # value could have served.
 
         # Carried because the Set-Cookie policy depends on it: Secure is only
         # legal where the deployment speaks https. Passed in rather than read
@@ -230,7 +232,7 @@ async def get_context() -> VectorContext:
     settings = get_settings()
     environment = settings.environment
 
-    # Constructed once and handed to both the context and the tenant. Two
+    # Constructed once and shared by every resolver that needs one. Two
     # instances would be two objects answering the same question over the
     # same pool, and any caching either one grows later would then be per
     # copy rather than per request.
@@ -328,15 +330,6 @@ async def get_context() -> VectorContext:
             pool=pool,
             repository=ActivityRepository(),
             notifications=NotificationRepository(),
-        ),
-        # Built here rather than resolved here: nothing in this function
-        # touches the database. Constructing a context is on the path of
-        # every request, including the malformed ones a query never runs
-        # for, so the workspace lookup happens in the resolver that needs
-        # it and not once per HTTP request regardless.
-        tenant=RequestTenant(
-            workspace_service=workspace_service,
-            team_service=team_service,
         ),
         environment=environment,
     )

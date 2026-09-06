@@ -38,7 +38,7 @@ from app.graphql import limits
 from app.graphql.limits import operation_limit_extensions
 from app.graphql.schema import build_schema
 
-from tests.conftest import FakeTenant, make_entity
+from tests.conftest import graphql_context, make_entity
 
 
 ALL_ENVIRONMENTS: list[Environment] = ["development", "test", "production"]
@@ -73,10 +73,15 @@ FULL_PAGE_SELECTION = """
 """
 
 
-class Context:
-    def __init__(self, issue_service):
-        self.issue_service = issue_service
-        self.tenant = FakeTenant()
+def Context(issue_service):
+    """The real context, wired to one fake service.
+
+    Every `issues` document below names a workspace, because the field
+    requires one now, and the context therefore has to answer both the
+    "who is asking" and the "may they be here" questions before the issue
+    service is reached. `graphql_context` supplies working fakes for both.
+    """
+    return graphql_context(issue_service=issue_service)
 
 
 class RecordingIssueService:
@@ -86,7 +91,7 @@ class RecordingIssueService:
         self._page = page
         self.calls = 0
 
-    async def list(self, *, scope, first: int, after: str | None):
+    async def list(self, *, scope, team_id, first: int, after: str | None):
         self.calls += 1
 
         return self._page
@@ -291,7 +296,9 @@ def measure_both(document: str):
 
 def diamond(levels: int) -> str:
     """A document expanding to 2**levels selections; each fragment used twice."""
-    definitions = ["query Bomb { issues(first: 1) { nodes { ...F0 } } }"]
+    definitions = [
+        'query Bomb { issues(workspaceSlug: "acme", first: 1) { nodes { ...F0 } } }'
+    ]
 
     for level in range(levels):
         spreads = " ".join([f"...F{level + 1}"] * 2)
@@ -303,52 +310,52 @@ def diamond(levels: int) -> str:
 
 
 EQUIVALENT_DOCUMENTS = {
-    "plain": "query Q { issues(first: 5) { nodes { id title } } }",
-    "defaulted page": f"query Q {{ issues {{ {FULL_PAGE_SELECTION} }} }}",
+    "plain": 'query Q { issues(workspaceSlug: "acme", first: 5) { nodes { id title } } }',
+    "defaulted page": f'query Q {{ issues(workspaceSlug: "acme") {{ {FULL_PAGE_SELECTION} }} }}',
     "variable page": (
-        f"query Q($n: Int!) {{ issues(first: $n) {{ {FULL_PAGE_SELECTION} }} }}"
+        f'query Q($n: Int!) {{ issues(workspaceSlug: "acme", first: $n) {{ {FULL_PAGE_SELECTION} }} }}'
     ),
     "aliases": (
-        "query Q { a: issues { nodes { id } } b: issues { nodes { id title } } }"
+        'query Q { a: issues(workspaceSlug: "acme") { nodes { id } } b: issues(workspaceSlug: "acme") { nodes { id title } } }'
     ),
     "named fragment": (
-        "query Q { issues { ...P } }\n"
+        'query Q { issues(workspaceSlug: "acme") { ...P } }\n'
         "fragment P on IssueConnection { nodes { id title } "
         "pageInfo { hasNextPage } }"
     ),
     "nested fragments": (
-        "query Q { issues { ...P } }\n"
+        'query Q { issues(workspaceSlug: "acme") { ...P } }\n'
         "fragment P on IssueConnection { nodes { ...F } pageInfo { endCursor } }\n"
         "fragment F on Issue { id title description }"
     ),
     "one fragment spread repeatedly": (
-        "query Q { issues { nodes { ...F ...F ...F } } }\n"
+        'query Q { issues(workspaceSlug: "acme") { nodes { ...F ...F ...F } } }\n'
         "fragment F on Issue { id title }"
     ),
     "spread from two places": (
-        "query Q { a: issues { nodes { ...F } } b: issues { nodes { ...F } } }\n"
+        'query Q { a: issues(workspaceSlug: "acme") { nodes { ...F } } b: issues(workspaceSlug: "acme") { nodes { ...F } } }\n'
         "fragment F on Issue { id title priority }"
     ),
     "inline fragments": (
-        "query Q { issues { ... on IssueConnection { nodes { ... { id title } } } } }"
+        'query Q { issues(workspaceSlug: "acme") { ... on IssueConnection { nodes { ... { id title } } } } }'
     ),
     "inline inside named": (
-        "query Q { issues { ...P } }\n"
+        'query Q { issues(workspaceSlug: "acme") { ...P } }\n'
         "fragment P on IssueConnection { ... on IssueConnection { nodes { id } } }"
     ),
     "multiple operations": (
-        "query A { issues { nodes { ...F } } }\n"
-        "query B { issues(first: 3) { nodes { ...F ...F } } }\n"
+        'query A { issues(workspaceSlug: "acme") { nodes { ...F } } }\n'
+        'query B { issues(workspaceSlug: "acme", first: 3) { nodes { ...F ...F } } }\n'
         "fragment F on Issue { id title }"
     ),
     "mutation": (
-        'mutation M { issueCreate(input: {title: "t"}) '
+        'mutation M { issueCreate(input: {workspaceSlug: "acme", teamId: "00000000-0000-7000-8000-0000000000fb", title: "t"}) '
         "{ issue { id title } errors { field code message } } }"
     ),
     "introspection": get_introspection_query(),
-    "unknown field": "query Q { issues { nodes { titel } } }",
-    "unknown fragment": "query Q { issues { nodes { ...Nope } } }",
-    "unknown type condition": "query Q { issues { ... on Nope { nodes { id } } } }",
+    "unknown field": 'query Q { issues(workspaceSlug: "acme") { nodes { titel } } }',
+    "unknown fragment": 'query Q { issues(workspaceSlug: "acme") { nodes { ...Nope } } }',
+    "unknown type condition": 'query Q { issues(workspaceSlug: "acme") { ... on Nope { nodes { id } } } }',
     "diamond, 4 levels": diamond(4),
     "diamond, 12 levels": diamond(12),
 }
@@ -483,7 +490,9 @@ async def test_refusing_a_fragment_bomb_costs_less_than_executing_one():
     seconds to minutes, not milliseconds, so a slow machine cannot make
     this flaky without also being broken.
     """
-    definitions = ["query Bomb { issues(first: 1) { nodes { ...F0 } } }"]
+    definitions = [
+        'query Bomb { issues(workspaceSlug: "acme", first: 1) { nodes { ...F0 } } }'
+    ]
 
     for level in range(FRAGMENT_BOMB_LEVELS):
         spreads = " ".join([f"...F{level + 1}"] * 2)
@@ -524,7 +533,7 @@ async def test_an_undefined_fragment_is_named_in_the_error():
 
 async def test_a_query_at_the_alias_limit_is_accepted():
     aliases = " ".join(
-        f"a{index}: issues(first: 1) {{ nodes {{ id }} }}"
+        f'a{index}: issues(workspaceSlug: "acme", first: 1) {{ nodes {{ id }} }}'
         for index in range(ALIAS_LIMIT)
     )
 
@@ -539,7 +548,7 @@ async def test_a_query_at_the_alias_limit_is_accepted():
 async def test_a_query_over_the_alias_limit_is_rejected():
     """Aliases are how one document asks for one expensive field many times."""
     aliases = " ".join(
-        f"a{index}: issues(first: 1) {{ nodes {{ id }} }}"
+        f'a{index}: issues(workspaceSlug: "acme", first: 1) {{ nodes {{ id }} }}'
         for index in range(ALIAS_LIMIT + 1)
     )
 
@@ -554,7 +563,7 @@ async def test_a_query_over_the_alias_limit_is_rejected():
 
 async def test_aliases_hidden_in_a_fragment_are_still_rejected():
     document = (
-        "query Issues { issues(first: 1) { ...Amplified } }\n"
+        'query Issues { issues(workspaceSlug: "acme", first: 1) { ...Amplified } }\n'
         "fragment Amplified on IssueConnection { "
         + " ".join(f"n{index}: nodes {{ id }}" for index in range(ALIAS_LIMIT + 1))
         + " }"
@@ -570,7 +579,9 @@ async def test_a_query_over_the_selection_limit_is_rejected():
     repeated = " ".join(["id"] * (SELECTION_LIMIT + 1))
 
     result = await build_schema("test").execute(
-        issues_query(f"issues(first: 1) {{ nodes {{ {repeated} }} }}"),
+        issues_query(
+            f'issues(workspaceSlug: "acme", first: 1) {{ nodes {{ {repeated} }} }}'
+        ),
         context_value=context(),
     )
 
@@ -585,7 +596,7 @@ async def test_selections_hidden_in_repeated_fragment_spreads_are_counted():
     fields; the server would still be asked for 2,500.
     """
     document = (
-        "query Issues { issues(first: 1) { nodes { "
+        'query Issues { issues(workspaceSlug: "acme", first: 1) { nodes { '
         + " ".join(["...Wide"] * 25)
         + " } } }\n"
         "fragment Wide on Issue { " + " ".join(["id"] * 100) + " }"
@@ -603,7 +614,7 @@ async def test_a_query_over_the_complexity_budget_is_rejected():
     two aliases and twenty-four fields -- which is the point of weighting
     a list field by the cardinality it asked for.
     """
-    page = f"issues(first: 100) {{ {FULL_PAGE_SELECTION} }}"
+    page = f'issues(workspaceSlug: "acme", first: 100) {{ {FULL_PAGE_SELECTION} }}'
 
     result = await build_schema("test").execute(
         issues_query(f"a: {page}", f"b: {page}"),
@@ -617,8 +628,8 @@ async def test_a_query_over_the_complexity_budget_is_rejected():
 async def test_complexity_hidden_in_fragments_is_still_rejected():
     """The same two pages, folded into named and nested fragments."""
     document = (
-        "query Issues { a: issues(first: 100) { ...Page } "
-        "b: issues(first: 100) { ...Page } }\n"
+        'query Issues { a: issues(workspaceSlug: "acme", first: 100) { ...Page } '
+        'b: issues(workspaceSlug: "acme", first: 100) { ...Page } }\n'
         "fragment Page on IssueConnection { nodes { ...Fields } "
         "pageInfo { hasNextPage endCursor } }\n"
         "fragment Fields on Issue { id title description priority "
@@ -639,7 +650,7 @@ async def test_omitting_the_page_size_is_not_a_bypass():
     and 5,632 scalars, eight times the rows of the widest page the budget
     is supposed to permit. The page size is not the client's to withhold.
     """
-    page = f"issues {{ {FULL_PAGE_SELECTION} }}"
+    page = f'issues(workspaceSlug: "acme") {{ {FULL_PAGE_SELECTION} }}'
     aliased = " ".join(f"a{index}: {page}" for index in range(ALIAS_LIMIT))
     service = RecordingIssueService(
         IssuePage(nodes=[make_entity(1)], has_next_page=False, end_cursor=None)
@@ -664,7 +675,7 @@ async def test_the_widest_defaulted_page_is_accepted(environment: Environment):
     still fits, and so do two of them.
     """
     result = await build_schema(environment).execute(
-        issues_query(f"issues {{ {FULL_PAGE_SELECTION} }}"),
+        issues_query(f'issues(workspaceSlug: "acme") {{ {FULL_PAGE_SELECTION} }}'),
         context_value=context(),
     )
 
@@ -679,7 +690,7 @@ async def test_two_defaulted_pages_fit_and_three_do_not():
     and `pageInfo` declare no page-size argument, and if they inherited one
     a single page would cost 50 x 50 x 9 and nothing would ever pass.
     """
-    page = f"issues {{ {FULL_PAGE_SELECTION} }}"
+    page = f'issues(workspaceSlug: "acme") {{ {FULL_PAGE_SELECTION} }}'
 
     accepted = await build_schema("test").execute(
         issues_query(f"a: {page}", f"b: {page}"),
@@ -704,7 +715,7 @@ async def test_a_defaulted_page_inside_a_fragment_is_charged_the_same():
     field has no declared default to read and the omitted page size is back
     to costing 1 -- the bypass again, one fragment deeper.
     """
-    page = f"issues {{ {FULL_PAGE_SELECTION} }}"
+    page = f'issues(workspaceSlug: "acme") {{ {FULL_PAGE_SELECTION} }}'
     named = (
         "query Issues { ...Pages }\n"
         "fragment Pages on Query { "
@@ -732,7 +743,9 @@ async def test_a_defaulted_page_inside_a_fragment_is_charged_the_same():
 async def test_an_ordinary_defaulted_query_still_succeeds():
     """The smallest useful real query must stay far inside the budget."""
     result = await build_schema("test").execute(
-        issues_query("issues { nodes { id title } pageInfo { hasNextPage } }"),
+        issues_query(
+            'issues(workspaceSlug: "acme") { nodes { id title } pageInfo { hasNextPage } }'
+        ),
         context_value=context(),
     )
 
@@ -747,7 +760,7 @@ async def test_a_page_size_passed_as_a_variable_is_not_a_discount():
     rule can see. Charging an unreadable one as 1 would make `first: $n`
     the cheapest way to buy a large page.
     """
-    page = f"issues(first: $size) {{ {FULL_PAGE_SELECTION} }}"
+    page = f'issues(workspaceSlug: "acme", first: $size) {{ {FULL_PAGE_SELECTION} }}'
 
     result = await build_schema("test").execute(
         "query Issues($size: Int!) {" + f"a: {page} b: {page}" + "}",
@@ -764,7 +777,7 @@ async def test_a_rejected_query_never_reaches_the_service():
         IssuePage(nodes=[make_entity(1)], has_next_page=False, end_cursor=None)
     )
 
-    page = f"issues(first: 100) {{ {FULL_PAGE_SELECTION} }}"
+    page = f'issues(workspaceSlug: "acme", first: 100) {{ {FULL_PAGE_SELECTION} }}'
 
     rejected = await build_schema("test").execute(
         issues_query(f"a: {page}", f"b: {page}"),
@@ -817,7 +830,9 @@ async def test_the_widest_legitimate_page_is_accepted(
     until it is deployed.
     """
     result = await build_schema(environment).execute(
-        issues_query(f"issues(first: 100) {{ {FULL_PAGE_SELECTION} }}"),
+        issues_query(
+            f'issues(workspaceSlug: "acme", first: 100) {{ {FULL_PAGE_SELECTION} }}'
+        ),
         context_value=context(),
     )
 

@@ -1,35 +1,52 @@
-import { appPaths } from './paths'
+import { useMemo } from 'react'
+import { useParams } from 'react-router-dom'
+
+import { createAppPaths, WORKSPACE_SLUG_PARAM } from './paths'
 import type { AppPaths } from './paths'
+
+/**
+ * The workspace the URL is currently addressing.
+ *
+ * The one place a slug enters the application. Every field the API exposes
+ * now names a workspace, so this is what turns "which URL is open" into
+ * "which tenant is being asked about" -- and the URL is deliberately the
+ * only source. A slug held in state or in storage would be a second answer
+ * to that question, and the one that disagrees with the address bar is the
+ * one a shared link produces.
+ *
+ * `''` when there is no param, which happens only outside the workspace
+ * routes. It is not a slug any workspace holds, so a request made with it is
+ * refused as a workspace the viewer cannot see -- the same answer any other
+ * wrong slug gets. That is the right failure: a caller with no workspace has
+ * nothing to ask about, and inventing a default here is exactly what
+ * `BOOTSTRAP_WORKSPACE_SLUG` used to do on the server.
+ */
+export function useWorkspaceSlug(): string {
+  const params = useParams()
+
+  return params[WORKSPACE_SLUG_PARAM] ?? ''
+}
 
 /**
  * The path set for the currently active scope.
  *
  * Components build every internal URL through this hook -- `useAppPaths()
  * .issue(id)` -- and never through a string literal or through `appPaths`
- * directly.
+ * directly. That rule is what made adding `/:workspaceSlug` a change to this
+ * function rather than to every screen that renders a link: a call site only
+ * ever asked for "the path to this issue", never for "the path to this issue
+ * in this workspace".
  *
- * Today it returns the unscoped paths, and the indirection looks redundant.
- * It is not: it is the whole mechanism by which backend Phase 1b-5 avoids
- * touching feature components. When routes gain a `/:workspaceSlug` segment,
- * this function becomes
- *
- *     export function useAppPaths(): AppPaths {
- *       const { workspaceSlug } = useParams()
- *       return useMemo(
- *         () => createAppPaths(workspaceSlug ? `/${workspaceSlug}` : ''),
- *         [workspaceSlug],
- *       )
- *     }
- *
- * and every call site keeps working unchanged, because a call site only ever
- * asked for "the path to this issue" and never for "the path to this issue
- * in this workspace". A component that had reached for `appPaths` directly,
- * or written a template literal, would have had to change.
- *
- * Which is also why this is a hook rather than a plain function today: the
- * scoped version must read route params, and only a hook can. Making it a
- * hook now means the signature does not change later.
+ * A hook and not a plain function because it reads a route param, and only a
+ * hook can. Memoised on the slug so the returned object is stable across
+ * renders, which is what keeps a memoised child taking a path builder as a
+ * prop from re-rendering on every parent render.
  */
 export function useAppPaths(): AppPaths {
-  return appPaths
+  const workspaceSlug = useWorkspaceSlug()
+
+  return useMemo(
+    () => createAppPaths(workspaceSlug === '' ? '' : `/${workspaceSlug}`),
+    [workspaceSlug],
+  )
 }

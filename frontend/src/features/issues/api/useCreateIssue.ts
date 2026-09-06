@@ -1,11 +1,12 @@
 import { useCallback } from 'react'
-import { useMutation } from '@apollo/client/react'
+import { useMutation, useQuery } from '@apollo/client/react'
 
+import { useWorkspaceSlug } from '../../../app/routes'
 import { describeError } from '../lib/errors'
 import { prependCreatedIssue } from './cache'
-import { IssueCreateDocument } from './documents'
+import { IssueCreateDocument, WorkspaceTeamsDocument } from './documents'
 import type {
-  IssueCreateInput,
+  IssueDraft,
   IssueDetailFields,
   IssueValidationError,
 } from './types'
@@ -17,6 +18,18 @@ import type {
  */
 const UNEXPECTED_RESPONSE =
   'The issue could not be created. Please try again.'
+
+/**
+ * There is no team to file against.
+ *
+ * A real state and not a transport failure: `issueCreate` requires a
+ * `teamId` and the server no longer picks one, so a workspace with no teams
+ * -- or a teams query that has not answered yet -- has nothing to file
+ * into. Reported as a `failed` outcome because it is a fact about the
+ * workspace and not about anything the person typed, so no field owns it.
+ */
+const NO_TEAM =
+  'This workspace has no team to file issues in.'
 
 /**
  * What creating an issue can do, as three cases that cannot be confused.
@@ -41,7 +54,7 @@ export type CreateIssueOutcome =
   | { status: 'failed'; message: string }
 
 export interface UseCreateIssueResult {
-  createIssue: (input: IssueCreateInput) => Promise<CreateIssueOutcome>
+  createIssue: (draft: IssueDraft) => Promise<CreateIssueOutcome>
   isSubmitting: boolean
 }
 
@@ -53,8 +66,35 @@ export interface UseCreateIssueResult {
  * `update` runs inside the mutation's cache transaction, so the new row and
  * the mutation's own normalised result land in one broadcast and the list
  * re-renders once. Doing it afterwards would work and would flicker.
+ *
+ * ## Where the workspace and the team come from
+ *
+ * `IssueCreateInput` requires both, and neither is something the person
+ * filling in the form is asked. The workspace is the one in the URL. The
+ * team is the FIRST the workspace has, which is a placeholder and is
+ * marked as one: a workspace with several teams has a product decision
+ * behind it that nobody has made -- a picker, a per-user default, a
+ * remembered last choice -- and picking the first is the smallest thing
+ * that files an issue correctly for the single-team case every workspace
+ * starts in.
+ *
+ * The teams query runs while the composer is mounted rather than at submit
+ * time. It is two fields on one row and it is what decides whether the form
+ * can be submitted at all, so having the answer before the button is pressed
+ * is what lets the failure be a disabled state rather than a rejected
+ * submission.
  */
 export function useCreateIssue(): UseCreateIssueResult {
+  const workspaceSlug = useWorkspaceSlug()
+
+  const { data: teams } = useQuery(WorkspaceTeamsDocument, {
+    variables: { workspaceSlug },
+  })
+
+  // ponytail: first team wins. Replace with a picker (or a remembered
+  // default) when a workspace in this product routinely has more than one.
+  const teamId = teams?.teams[0]?.id
+
   const [mutate, { loading }] = useMutation(IssueCreateDocument, {
     update(cache, result) {
       const created = result.data?.issueCreate.issue
@@ -65,14 +105,20 @@ export function useCreateIssue(): UseCreateIssueResult {
         return
       }
 
-      prependCreatedIssue(cache, created)
+      prependCreatedIssue(cache, created, workspaceSlug)
     },
   })
 
   const createIssue = useCallback(
-    async (input: IssueCreateInput): Promise<CreateIssueOutcome> => {
+    async (draft: IssueDraft): Promise<CreateIssueOutcome> => {
+      if (teamId === undefined) {
+        return { status: 'failed', message: NO_TEAM }
+      }
+
       try {
-        const result = await mutate({ variables: { input } })
+        const result = await mutate({
+          variables: { input: { ...draft, workspaceSlug, teamId } },
+        })
         const payload = result.data?.issueCreate
 
         if (payload === undefined) {
@@ -100,7 +146,7 @@ export function useCreateIssue(): UseCreateIssueResult {
         return { status: 'failed', message: describeError(reason) }
       }
     },
-    [mutate],
+    [mutate, teamId, workspaceSlug],
   )
 
   return { createIssue, isSubmitting: loading }

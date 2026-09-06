@@ -5,6 +5,7 @@ from strawberry.types import Info
 
 from app.domain.errors import ValidationError, ValidationIssue
 from app.graphql.inputs.issue import IssueCreateInput, IssueUpdateInput
+from app.graphql.scope import authorized_scope
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import (
     IssueArchivePayload,
@@ -12,7 +13,6 @@ from app.graphql.types.issue import (
     IssueType,
     IssueUpdatePayload,
 )
-from app.graphql.viewer import actor_user_id
 
 
 # The one answer every operation on an issue that is not there must give.
@@ -55,30 +55,26 @@ class Mutation:
         info: Info,
         input: IssueCreateInput,
     ) -> IssueCreatePayload:
-        # Resolved before the try, and outside it. Neither call raises
-        # ValidationError -- a missing workspace or an unprovisioned tenant
-        # is not something the client's input can be corrected to fix -- so
-        # catching them here would report a server-side gap as a field
-        # error on the input the client sent.
-        scope = await info.context.tenant.scope()
-        team_id = await info.context.tenant.team_id(scope)
+        # Resolved before the try, and outside it. An unauthenticated caller
+        # and one who may not see this workspace are not things the client's
+        # INPUT can be corrected to fix, so catching them here would report an
+        # authorization refusal as a field error on the input the client sent.
+        scope = await authorized_scope(info, input.workspace_slug)
 
-        # Authorship comes from whoever authenticated the request, and there
-        # is no input field for it: a client able to name a creator could
-        # forge one. None for an anonymous caller, which is a state
-        # `issues.creator_id` already allows -- whether anonymous callers may
-        # file at all is a question for authorisation, not for this column.
-        viewer = await info.context.viewer()
-
+        # Authorship comes from the membership row that authorized this call,
+        # and there is no input field for it: a client able to name a creator
+        # could forge one. It is never None now -- an issue cannot be filed
+        # without an identity -- though `issues.creator_id` stays nullable for
+        # the rows that predate accounts.
         try:
             entity = await info.context.issue_service.create(
                 scope=scope,
-                team_id=team_id,
+                team_id=input.team_id,
                 title=input.title,
                 description=input.description,
                 priority=input.priority,
                 assignee_id=input.assignee_id,
-                creator_id=viewer.id if viewer is not None else None,
+                creator_id=scope.user_id,
                 estimate=input.estimate,
                 due_date=input.due_date,
             )
@@ -89,7 +85,7 @@ class Mutation:
             return IssueCreatePayload(issue=None, errors=_errors(exc))
 
         return IssueCreatePayload(
-            issue=IssueType.from_entity(entity),
+            issue=IssueType.from_entity(entity, scope),
             errors=[],
         )
 
@@ -102,12 +98,13 @@ class Mutation:
     ) -> IssueUpdatePayload:
         """Change some of one issue's fields, leaving the rest alone.
 
-        The workspace comes from the request, never from the document, so
-        an id belonging to another tenant reaches a statement scoped to
-        this one and matches no row.
+        The workspace is the authorized one named on the input, so an id
+        belonging to another tenant reaches a statement scoped to this one
+        and matches no row -- reported as the same NOT_FOUND an id that
+        exists nowhere gets.
         """
-        scope = await info.context.tenant.scope()
-        actor_id = await actor_user_id(info)
+        scope = await authorized_scope(info, input.workspace_slug)
+        actor_id = scope.user_id
 
         try:
             entity = await info.context.issue_service.update(
@@ -126,7 +123,7 @@ class Mutation:
             )
 
         return IssueUpdatePayload(
-            issue=IssueType.from_entity(entity),
+            issue=IssueType.from_entity(entity, scope),
             errors=[],
         )
 
@@ -134,9 +131,15 @@ class Mutation:
     async def issue_archive(
         self,
         info: Info,
+        workspace_slug: str,
         id: UUID,
     ) -> IssueArchivePayload:
         """Take an issue off the board, reversibly and without discarding it.
+
+        One of the two mutations that spell `workspaceSlug` as a field
+        argument rather than on an input, because it takes no input object at
+        all -- inventing a one-field one to carry a slug would be worse than
+        the inconsistency.
 
         Named for what it does. This product archives rather than deletes,
         because migration 005 never reissues an issue number and the
@@ -149,8 +152,8 @@ class Mutation:
         from this result. It is the last time any query here will hand that
         row back.
         """
-        scope = await info.context.tenant.scope()
-        actor_id = await actor_user_id(info)
+        scope = await authorized_scope(info, workspace_slug)
+        actor_id = scope.user_id
 
         entity = await info.context.issue_service.archive(
             scope=scope,
@@ -165,6 +168,6 @@ class Mutation:
             )
 
         return IssueArchivePayload(
-            issue=IssueType.from_entity(entity),
+            issue=IssueType.from_entity(entity, scope),
             errors=[],
         )

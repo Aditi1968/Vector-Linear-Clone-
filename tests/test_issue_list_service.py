@@ -81,6 +81,7 @@ async def test_first_page_without_extra_row():
 
     assert repository.list_calls[0] == {
         "scope": TEST_SCOPE,
+        "team_id": None,
         "limit": 3,
         "after_created_at": None,
         "after_id": None,
@@ -134,6 +135,7 @@ async def test_after_cursor_is_decoded_and_passed_to_repository():
 
     assert repository.list_calls[0] == {
         "scope": TEST_SCOPE,
+        "team_id": None,
         "limit": 11,
         "after_created_at": entity.created_at,
         "after_id": entity.id,

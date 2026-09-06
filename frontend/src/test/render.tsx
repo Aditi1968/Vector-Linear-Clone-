@@ -9,6 +9,7 @@ import { AppProviders } from '../app/providers/AppProviders'
 import { routes } from '../app/routes'
 import { createTestClient } from './client'
 import { ControlledLink } from './controlledLink'
+import { WORKSPACE_SLUG } from './factories'
 
 /**
  * Mount the real application against a controllable network.
@@ -30,7 +31,14 @@ import { ControlledLink } from './controlledLink'
  */
 
 export interface RenderAppOptions {
-  /** Where the router starts. Defaults to the issue list. */
+  /**
+   * Where the router starts. Defaults to the issue list of `WORKSPACE_SLUG`.
+   *
+   * Every screen is addressed as `/:workspaceSlug/...`, because every field
+   * the API exposes takes a workspace and the frontend reads it from the
+   * URL. A path without the segment is not an unscoped screen -- it is a
+   * request for a workspace whose slug happens to be `issues`.
+   */
   initialPath?: string
   /**
    * Mount inside `<StrictMode>`, as `src/main.tsx` does.
@@ -54,7 +62,7 @@ export interface RenderAppResult extends RenderResult {
 }
 
 export function renderApp({
-  initialPath = '/issues',
+  initialPath = `/${WORKSPACE_SLUG}/issues`,
   strictMode = false,
 }: RenderAppOptions = {}): RenderAppResult {
   const link = new ControlledLink()

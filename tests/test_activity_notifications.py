@@ -26,12 +26,10 @@ from app.domain.activity import ActivityKind, IssueSnapshot, changes
 from app.domain.errors import WorkspaceAccessDeniedError
 from app.domain.notifications import NotificationKind
 from app.graphql.schema import build_schema
+from app.graphql.scope import WORKSPACE_NOT_FOUND_MESSAGE
 from app.graphql.types.activity import ActivityKindEnum
 from app.graphql.types.notification import NotificationKindEnum
-from app.graphql.viewer import (
-    UNAUTHENTICATED_MESSAGE,
-    WORKSPACE_NOT_FOUND_MESSAGE,
-)
+from app.graphql.viewer import UNAUTHENTICATED_MESSAGE
 
 from tests.conftest import graphql_context
 

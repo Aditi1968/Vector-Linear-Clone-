@@ -3,11 +3,11 @@ from strawberry.types import Info
 
 from app.domain.errors import ValidationError
 from app.graphql.errors import bad_user_input
+from app.graphql.scope import authorized_scope
 from app.graphql.types.notification import (
     DEFAULT_NOTIFICATION_FIRST,
     NotificationConnection,
 )
-from app.graphql.viewer import authorized_scope
 
 
 @strawberry.type

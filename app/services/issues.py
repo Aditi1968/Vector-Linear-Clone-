@@ -620,6 +620,7 @@ class IssueService:
         scope: WorkspaceScope,
         first: int,
         after: str | None,
+        team_id: UUID | None = None,
     ) -> IssuePage:
         """Forward keyset page of one workspace's live issues, newest first.
 
@@ -631,6 +632,13 @@ class IssueService:
         holding it. The scope comes from this call, so a cursor minted in
         one workspace and replayed against another selects nothing rather
         than resuming someone else's page.
+
+        `team_id` narrows within the workspace and is not validated against
+        it here. The repository ANDs it onto the tenant predicate, so a team
+        from another workspace selects nothing -- which is the same empty
+        page an id naming no team gets, and deliberately so: a service that
+        checked the team first and raised would report that another tenant's
+        team is real.
         """
         cursor = self._validate_list(first=first, after=after)
 
@@ -639,6 +647,7 @@ class IssueService:
             rows = await self._repository.list(
                 connection,
                 scope=scope,
+                team_id=team_id,
                 limit=first + 1,
                 after_created_at=cursor.created_at if cursor is not None else None,
                 after_id=cursor.id if cursor is not None else None,

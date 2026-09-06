@@ -92,4 +92,4 @@ class SearchQuery:
                 },
             ) from None
 
-        return SearchResultsType.from_domain(results)
+        return SearchResultsType.from_domain(results, scope)
