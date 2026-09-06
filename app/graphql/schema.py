@@ -45,30 +45,32 @@ from app.graphql.queries.teams import TeamQuery
 # fields of every feature not named in that class vanish from the API with the
 # whole suite still green. This has happened here once already. Add a feature
 # by extending the tuples, never by declaring another root.
-Query = merge_types(
-    "Query",
-    (
-        IssueQuery,
-        AuthQuery,
-        TeamQuery,
-        MembershipQuery,
-        LabelQuery,
-        CycleQuery,
-        ProjectQuery,
-    ),
+# Named rather than passed inline so that a test can ask the question this
+# file's comment can only assert: does every field of every type below still
+# reach the root the schema is built from. See
+# tests/test_root_composition.py.
+QUERY_TYPES = (
+    IssueQuery,
+    AuthQuery,
+    TeamQuery,
+    MembershipQuery,
+    LabelQuery,
+    CycleQuery,
+    ProjectQuery,
 )
-Mutation = merge_types(
-    "Mutation",
-    (
-        IssueMutation,
-        AuthMutation,
-        LabelMutation,
-        CommentMutation,
-        CycleMutation,
-        ProjectMutation,
-        RelationMutation,
-    ),
+
+Query = merge_types("Query", QUERY_TYPES)
+MUTATION_TYPES = (
+    IssueMutation,
+    AuthMutation,
+    LabelMutation,
+    CommentMutation,
+    CycleMutation,
+    ProjectMutation,
+    RelationMutation,
 )
+
+Mutation = merge_types("Mutation", MUTATION_TYPES)
 
 
 # The public error vocabulary. An error reaches a client with its own
