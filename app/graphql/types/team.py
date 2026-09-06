@@ -8,6 +8,7 @@ from app.domain.teams import (
     WorkflowStateCategory,
     WorkflowStateEntity,
 )
+from app.graphql.types.errors import ValidationErrorType
 
 
 # The domain enum, published as a GraphQL enum rather than restated as one.
@@ -90,3 +91,18 @@ class TeamType:
 # CLAUDE.md forbids: the server must never trust a workspace id supplied by the
 # frontend. A client addresses a workspace by slug and the server resolves it;
 # nothing downstream needs the id to have made the round trip.
+
+
+@strawberry.type
+class TeamPayload:
+    """The result of creating a team.
+
+    The team comes back with its `workflowStates` already populated, because
+    a team without them cannot hold an issue and a client that created one is
+    about to draw its board. See `TeamService.create`: both are written in one
+    transaction, so there is no moment at which this payload could honestly
+    report a team with an empty board.
+    """
+
+    team: TeamType | None
+    errors: list[ValidationErrorType]

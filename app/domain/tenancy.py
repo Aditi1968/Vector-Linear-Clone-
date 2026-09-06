@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import Final
 from uuid import UUID
 
+from app.domain.errors import WorkspaceAccessDeniedError
+
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceScope:
@@ -37,6 +39,22 @@ class WorkspaceScope:
 # it -- SQL's `IN` has no order, and what a role permits is a decision made
 # where the permission is checked, not here.
 WORKSPACE_ROLES: Final = ("member", "admin", "owner")
+
+# The roles that may change who else is in the workspace.
+#
+# A set rather than a slice of the tuple above, because that tuple is
+# deliberately not a privilege ordering -- see its note. What a role permits is
+# the application's decision, and this is that decision written down once, so
+# that "may this caller invite someone" has one answer wherever it is asked.
+WORKSPACE_ADMIN_ROLES: Final = frozenset({"admin", "owner"})
+
+# The role a workspace must always have at least one of.
+#
+# Not merely the most privileged name in WORKSPACE_ROLES: it is the role that
+# can grant every other one, so a workspace with none is a tenant nobody can
+# ever administer again -- unreachable through the API and recoverable only by
+# a hand-written UPDATE. Every removal and demotion is checked against it.
+WORKSPACE_OWNER_ROLE: Final = "owner"
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,3 +99,22 @@ class AuthorizedWorkspaceScope(WorkspaceScope):
     # vocabulary. The GraphQL enum is that transport's copy; it converts at
     # the boundary and raises on a role it does not know.
     role: str
+
+
+def require_workspace_admin(scope: AuthorizedWorkspaceScope) -> None:
+    """Refuse a caller who may act in the workspace but not administer it.
+
+    One function rather than a comparison written out in each service, for the
+    reason `app.graphql.viewer.viewer_user_id` gives about identity: two copies
+    of a permission check are two things that can drift, and the one that
+    drifts is the one nobody re-read.
+
+    Raises WorkspaceAccessDeniedError, the same exception a non-member gets,
+    so the transport has one refusal to translate and answers both with the
+    same NOT_FOUND. That costs an ordinary member a precise message and buys
+    a property worth more: the response to "list this workspace's invitations"
+    does not distinguish a workspace the caller cannot administer from one
+    they cannot see at all.
+    """
+    if scope.role not in WORKSPACE_ADMIN_ROLES:
+        raise WorkspaceAccessDeniedError()

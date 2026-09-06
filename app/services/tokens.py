@@ -62,3 +62,35 @@ def hash_session_token(token: str) -> bytes:
     (upper- and lowercase hex) being stored as different rows.
     """
     return hashlib.sha256(token.encode("utf-8")).digest()
+
+
+def generate_invitation_token() -> str:
+    """A fresh invitation token.
+
+    The same mint as a session token, and deliberately not a shorter one: an
+    invitation token is a bearer credential for a whole workspace, guessable
+    from outside, and it sits in an inbox for days rather than in a
+    HttpOnly cookie for the length of a session.
+
+    A separate function from `generate_session_token` rather than a call to
+    it, because the two are different credentials with different lifetimes,
+    and a shared helper is what makes "shorten the session token" quietly also
+    shorten this one.
+    """
+    return secrets.token_urlsafe(TOKEN_ENTROPY_BYTES)
+
+
+def hash_invitation_token(token: str) -> str:
+    """The digest stored in `workspace_invitations.token_hash` for `token`.
+
+    SHA-256 for the reasons `hash_session_token` sets out in full: the input
+    is 256 bits of CSPRNG output, so there is no dictionary to attack, and the
+    digest has to be looked up by equality rather than recomputed per row.
+
+    Lowercase hex rather than raw bytes, which is the one difference from the
+    session path and is not a preference: `workspace_invitations.token_hash`
+    is TEXT with `workspace_invitations_token_hash_format` requiring
+    `^[a-f0-9]{64}$`. `hexdigest()` is lowercase, so the constraint and this
+    function agree by construction.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()

@@ -295,6 +295,8 @@ def _domain_module(entity_name: str) -> str:
         "UserEntity": "auth",
         "SessionEntity": "auth",
         "WorkspaceMembershipEntity": "memberships",
+        "WorkspaceMemberEntity": "memberships",
+        "WorkspaceInvitationEntity": "memberships",
         "TeamEntity": "teams",
         "WorkflowStateEntity": "teams",
     }

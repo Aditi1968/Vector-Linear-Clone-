@@ -74,6 +74,37 @@ scalar Date
 """Date with time (isoformat)"""
 scalar DateTime
 
+input InvitationAcceptInput {
+  token: String!
+}
+
+type InvitationAcceptPayload {
+  workspace: Workspace
+  errors: [ValidationErrorType!]!
+}
+
+input InvitationCreateInput {
+  workspaceSlug: String!
+  email: String!
+  role: WorkspaceRole!
+}
+
+type InvitationCreatePayload {
+  invitation: WorkspaceInvitation
+  token: String
+  errors: [ValidationErrorType!]!
+}
+
+input InvitationRevokeInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type InvitationRevokePayload {
+  revokedInvitationId: UUID
+  errors: [ValidationErrorType!]!
+}
+
 type Issue {
   id: UUID!
   teamId: UUID!
@@ -317,6 +348,22 @@ type LogoutPayload {
   errors: [ValidationErrorType!]!
 }
 
+input MemberRemoveInput {
+  workspaceSlug: String!
+  userId: UUID!
+}
+
+type MemberRemovePayload {
+  removedUserId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+input MemberRoleUpdateInput {
+  workspaceSlug: String!
+  userId: UUID!
+  role: WorkspaceRole!
+}
+
 type Mutation {
   issueCreate(input: IssueCreateInput!): IssueCreatePayload!
   issueUpdate(id: UUID!, input: IssueUpdateInput!): IssueUpdatePayload!
@@ -324,6 +371,33 @@ type Mutation {
   register(input: RegisterInput!): RegisterPayload!
   login(input: LoginInput!): LoginPayload!
   logout: LogoutPayload!
+
+  """Create a workspace. The authenticated caller becomes its owner."""
+  workspaceCreate(input: WorkspaceCreateInput!): WorkspacePayload!
+
+  """
+  Create a team, seeded with the default workflow states. Requires the admin or owner role.
+  """
+  teamCreate(input: TeamCreateInput!): TeamPayload!
+
+  """Change a member's role. Requires the admin or owner role."""
+  memberRoleUpdate(input: MemberRoleUpdateInput!): WorkspaceMemberPayload!
+
+  """
+  Remove someone from the workspace. Requires the admin or owner role, and cannot remove the last owner.
+  """
+  memberRemove(input: MemberRemoveInput!): MemberRemovePayload!
+
+  """
+  Invite an email address to the workspace. Returns the raw invitation token once and never again.
+  """
+  invitationCreate(input: InvitationCreateInput!): InvitationCreatePayload!
+
+  """Withdraw an invitation. Requires the admin or owner role."""
+  invitationRevoke(input: InvitationRevokeInput!): InvitationRevokePayload!
+
+  """Redeem an invitation token as the authenticated caller."""
+  invitationAccept(input: InvitationAcceptInput!): InvitationAcceptPayload!
   labelCreate(input: LabelCreateInput!): LabelPayload!
   labelUpdate(input: LabelUpdateInput!): LabelPayload!
   labelDelete(input: LabelDeleteInput!): LabelDeletePayload!
@@ -465,6 +539,14 @@ type Query {
   teams(workspaceSlug: String!): [Team!]!
   myWorkspaces: [WorkspaceMembership!]!
   myWorkspace(slug: String!): WorkspaceMembership!
+
+  """Everyone in a workspace, with the role each holds. Members only."""
+  workspaceMembers(workspaceSlug: String!): [WorkspaceMember!]!
+
+  """
+  Invitations to this workspace that have not been accepted or expired. Admins and owners only.
+  """
+  invitations(workspaceSlug: String!): [WorkspaceInvitation!]!
   label(id: UUID!): Label
   labels(first: Int! = 50, after: String = null): LabelConnection!
   cycle(id: UUID!): Cycle
@@ -494,6 +576,21 @@ type Team {
   name: String!
   createdAt: DateTime!
   workflowStates: [WorkflowState!]!
+}
+
+input TeamCreateInput {
+  workspaceSlug: String!
+  name: String!
+
+  """
+  The prefix of this team's issue identifiers -- the ENG in ENG-42. 1-10 uppercase letters and digits, starting with a letter. Unique within the workspace.
+  """
+  key: String!
+}
+
+type TeamPayload {
+  team: Team
+  errors: [ValidationErrorType!]!
 }
 
 scalar UUID
@@ -540,10 +637,47 @@ type Workspace {
   name: String!
 }
 
+input WorkspaceCreateInput {
+  name: String!
+
+  """
+  The workspace's URL segment. Lowercase letters, digits and hyphens; must start and end with a letter or digit.
+  """
+  slug: String!
+}
+
+"""An outstanding invitation to join a workspace."""
+type WorkspaceInvitation {
+  id: UUID!
+  email: String!
+  role: WorkspaceRole!
+  expiresAt: DateTime!
+  createdAt: DateTime!
+}
+
+"""One person in a workspace, and the role they hold there."""
+type WorkspaceMember {
+  userId: UUID!
+  email: String!
+  name: String
+  role: WorkspaceRole!
+  createdAt: DateTime!
+}
+
+type WorkspaceMemberPayload {
+  member: WorkspaceMember
+  errors: [ValidationErrorType!]!
+}
+
 type WorkspaceMembership {
   workspace: Workspace!
   role: WorkspaceRole!
   createdAt: DateTime!
+}
+
+type WorkspacePayload {
+  workspace: Workspace
+  errors: [ValidationErrorType!]!
 }
 
 enum WorkspaceRole {

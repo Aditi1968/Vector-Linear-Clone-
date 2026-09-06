@@ -3,7 +3,12 @@ from uuid import UUID
 
 import asyncpg
 
-from app.domain.teams import TeamEntity, WorkflowStateCategory, WorkflowStateEntity
+from app.domain.teams import (
+    DEFAULT_WORKFLOW_STATES,
+    TeamEntity,
+    WorkflowStateCategory,
+    WorkflowStateEntity,
+)
 from app.domain.tenancy import WorkspaceScope
 
 
@@ -289,6 +294,90 @@ class TeamRepository:
         allocated: int = number
 
         return allocated
+
+    async def create(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        workspace_id: UUID,
+        name: str,
+        key: str,
+    ) -> TeamEntity:
+        """Insert a team, or let `teams_workspace_key_unique` refuse it.
+
+        No SELECT-then-INSERT to check the key first: that check has a window
+        in which another create can commit, so under concurrency it either
+        produces the unique violation anyway or reports success for a row it
+        did not write. The constraint is the only thing that can decide this
+        atomically, and the service turns its refusal into a field error.
+
+        `issue_counter` is left to its DEFAULT 0, which is the one tenancy
+        default 005 argues *for*: a team that has never had an issue has
+        allocated nothing, and the first allocation must return 1.
+
+        The team has no board yet when this returns. It cannot hold an issue
+        until it does -- `issues.workflow_state_id` is NOT NULL and resolved
+        from the team's own states -- so `seed_default_workflow_states` below
+        must run in the same transaction. See `TeamService.create`.
+        """
+        row = await connection.fetchrow(
+            """
+            INSERT INTO teams (workspace_id, name, key)
+            VALUES ($1, $2, $3)
+            RETURNING
+                id,
+                workspace_id,
+                key,
+                name,
+                created_at
+            """,
+            workspace_id,
+            name,
+            key,
+        )
+
+        return self._to_team(row)
+
+    async def seed_default_workflow_states(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        workspace_id: UUID,
+        team_id: UUID,
+    ) -> None:
+        """Give a new team the board 005 gave every team that predates it.
+
+        The rows come from `app.domain.teams.DEFAULT_WORKFLOW_STATES`, which
+        is the same five that migration seeds. A migration can only reach the
+        teams that exist when it runs, so a team created afterwards has to be
+        seeded by the code that creates it or it has no board at all -- and a
+        team with no board is a team no issue can be filed against.
+
+        `executemany` rather than five statements: one round trip, and all
+        five land or none do, since the caller is inside a transaction.
+
+        `workspace_id` is written as well as `team_id` because
+        `workflow_states_team_fk` is the composite pair -- the database, not
+        this code, is then what refuses a state attached to a team in another
+        workspace.
+        """
+        await connection.executemany(
+            """
+            INSERT INTO workflow_states (
+                workspace_id,
+                team_id,
+                name,
+                type,
+                position,
+                color
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            [
+                (workspace_id, team_id, name, category, position, color)
+                for name, category, position, color in DEFAULT_WORKFLOW_STATES
+            ],
+        )
 
     @staticmethod
     def _to_team(row: asyncpg.Record) -> TeamEntity:
