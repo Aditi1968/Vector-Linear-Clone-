@@ -45,22 +45,25 @@ export interface CollaborationPanelProps {
   workspaceSlug: string
 }
 
+/**
+ * A panel, typed by what it accepts rather than by what these stubs use.
+ *
+ * The stubs take no argument at all -- a parameter they ignore is an
+ * unused-variable error, and naming it `_props` only moves the argument to
+ * the lint config -- but the *type* still declares the two props, so a call
+ * site that passes the wrong thing fails here rather than when the real
+ * panels land.
+ */
+type CollaborationPanel = (props: CollaborationPanelProps) => null
+
 /** Labels attached to this issue, and the control to attach more. */
-export function LabelsPanel(_props: CollaborationPanelProps) {
-  return null
-}
+export const LabelsPanel: CollaborationPanel = () => null
 
 /** This issue's children, and the control to add one. */
-export function SubIssuesPanel(_props: CollaborationPanelProps) {
-  return null
-}
+export const SubIssuesPanel: CollaborationPanel = () => null
 
 /** Blocks / blocked by / related / duplicate. */
-export function RelationsPanel(_props: CollaborationPanelProps) {
-  return null
-}
+export const RelationsPanel: CollaborationPanel = () => null
 
 /** The comment thread. */
-export function CommentsPanel(_props: CollaborationPanelProps) {
-  return null
-}
+export const CommentsPanel: CollaborationPanel = () => null

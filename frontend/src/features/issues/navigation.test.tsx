@@ -10,7 +10,7 @@ import {
   workspaceContextData,
   WORKSPACE_SLUG,
 } from '../../test/factories'
-import { issueRows, main, renderApp } from '../../test/render'
+import { issueRows, renderApp } from '../../test/render'
 
 /**
  * Getting from the list to one issue, and back.

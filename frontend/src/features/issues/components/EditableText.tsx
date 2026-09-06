@@ -95,6 +95,12 @@ export function EditableText({
     if (event.key === 'Escape') {
       // Revert and leave. Restoring the DOM value before blurring is what
       // makes the blur handler above see "unchanged" and send nothing.
+      //
+      // `preventDefault` is what stops the screen's own Escape handler from
+      // also closing the inspector -- it bails on `defaultPrevented`, which
+      // is the "nearest handler wins" convention this feature already uses.
+      // Without it, abandoning an edit would throw the whole panel away.
+      event.preventDefault()
       event.currentTarget.value = value
       event.currentTarget.blur()
       return
