@@ -9,6 +9,7 @@ from strawberry.types import Info
 from app.domain.errors import ValidationError
 from app.domain.issues import IssueEntity
 from app.domain.pagination import IssuePage
+from app.graphql.errors import bad_user_input
 from app.graphql.types.comment import (
     DEFAULT_COMMENT_FIRST,
     CommentConnection,
@@ -17,6 +18,12 @@ from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.label import LabelType
 from app.graphql.types.pagination import PageInfo
 from app.graphql.types.project import ProjectType
+from app.graphql.types.relations import (
+    DEFAULT_RELATED_FIRST,
+    IssueRelationConnection,
+    IssueSummaryConnection,
+    IssueSummaryType,
+)
 
 
 if TYPE_CHECKING:
@@ -176,6 +183,89 @@ class IssueType:
             return None
 
         return ProjectType.from_entity(entity)
+
+    @strawberry.field
+    async def parent(self, info: Info) -> IssueSummaryType | None:
+        """The issue this one is a sub-issue of, if any.
+
+        Null covers three cases a client cannot tell apart: no parent, no
+        such issue, and a parent in another workspace. The last is the
+        point -- an id that resolves to null says nothing about whether it
+        exists somewhere the caller cannot see.
+        """
+        scope = await info.context.tenant.scope()
+
+        entity = await info.context.relation_service.find_parent(
+            scope=scope,
+            issue_id=self.id,
+        )
+
+        if entity is None:
+            return None
+
+        return IssueSummaryType.from_entity(entity)
+
+    @strawberry.field
+    async def children(
+        self,
+        info: Info,
+        first: int = DEFAULT_RELATED_FIRST,
+        after: str | None = None,
+    ) -> IssueSummaryConnection:
+        """This issue's sub-issues, newest first.
+
+        A connection rather than a plain list, so that the page size is a
+        number the operation-limit rule can read and charge for. An
+        unbounded `[IssueSummary!]!` would be priced at one however many
+        rows it returned, which is how a single field ends up handing back
+        every sub-issue of a thousand-child parent inside a document that
+        measured as cheap.
+
+        Sub-issues in other TEAMS of this workspace are included: that is
+        the product rule migration 010's `issues_parent_fk` is shaped for,
+        and a team filter here would quietly take it back.
+        """
+        scope = await info.context.tenant.scope()
+
+        try:
+            page = await info.context.relation_service.list_children(
+                scope=scope,
+                parent_id=self.id,
+                first=first,
+                after=after,
+            )
+        except ValidationError as exc:
+            raise bad_user_input("Invalid pagination arguments", exc) from None
+
+        return IssueSummaryConnection.from_domain(page)
+
+    @strawberry.field
+    async def relations(
+        self,
+        info: Info,
+        first: int = DEFAULT_RELATED_FIRST,
+        after: str | None = None,
+    ) -> IssueRelationConnection:
+        """Every relation this issue has, in both directions, newest first.
+
+        One list, not two. A relation is stored once and read from either
+        end, so this issue's `BLOCKS` rows and its `BLOCKED_BY` rows come
+        out of one page in one order; a client wanting only one kind filters
+        on `type`.
+        """
+        scope = await info.context.tenant.scope()
+
+        try:
+            page = await info.context.relation_service.list_relations(
+                scope=scope,
+                issue_id=self.id,
+                first=first,
+                after=after,
+            )
+        except ValidationError as exc:
+            raise bad_user_input("Invalid pagination arguments", exc) from None
+
+        return IssueRelationConnection.from_domain(page)
 
     @classmethod
     def from_entity(cls, entity: IssueEntity) -> "IssueType":

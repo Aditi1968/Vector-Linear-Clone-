@@ -119,6 +119,9 @@ type Issue {
   updatedAt: DateTime!
   cycle: Cycle
   project: Project
+  parent: IssueSummary
+  children(first: Int! = 10, after: String = null): IssueSummaryConnection!
+  relations(first: Int! = 10, after: String = null): IssueRelationConnection!
   labels: [Label!]!
   comments(first: Int! = 20, after: String = null): CommentConnection!
 }
@@ -126,6 +129,10 @@ type Issue {
 type IssueArchivePayload {
   issue: Issue
   errors: [ValidationErrorType!]!
+}
+
+input IssueClearParentInput {
+  issueId: UUID!
 }
 
 type IssueConnection {
@@ -157,6 +164,50 @@ type IssueLabelPayload {
   errors: [ValidationErrorType!]!
 }
 
+type IssueParentPayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
+}
+
+type IssueRelation {
+  id: UUID!
+  type: IssueRelationType!
+  issue: IssueSummary!
+  createdAt: DateTime!
+}
+
+type IssueRelationConnection {
+  nodes: [IssueRelation!]!
+  pageInfo: PageInfo!
+}
+
+input IssueRelationCreateInput {
+  sourceIssueId: UUID!
+  targetIssueId: UUID!
+  type: IssueRelationType!
+}
+
+type IssueRelationCreatePayload {
+  relation: IssueRelation
+  errors: [ValidationErrorType!]!
+}
+
+input IssueRelationDeleteInput {
+  id: UUID!
+}
+
+type IssueRelationDeletePayload {
+  deletedRelationId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+enum IssueRelationType {
+  BLOCKS
+  BLOCKED_BY
+  RELATED
+  DUPLICATE
+}
+
 input IssueSetCycleInput {
   issueId: UUID!
   cycleId: UUID = null
@@ -165,6 +216,11 @@ input IssueSetCycleInput {
 type IssueSetCyclePayload {
   issue: Issue
   errors: [ValidationErrorType!]!
+}
+
+input IssueSetParentInput {
+  issueId: UUID!
+  parentId: UUID!
 }
 
 input IssueSetProjectInput {
@@ -176,6 +232,21 @@ input IssueSetProjectInput {
 type IssueSetProjectPayload {
   issue: Issue
   errors: [ValidationErrorType!]!
+}
+
+type IssueSummary {
+  id: UUID!
+  title: String!
+  description: String
+  priority: Int!
+  completedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type IssueSummaryConnection {
+  nodes: [IssueSummary!]!
+  pageInfo: PageInfo!
 }
 
 input IssueUpdateInput {
@@ -273,6 +344,10 @@ type Mutation {
   projectMilestoneUpdate(input: ProjectMilestoneUpdateInput!): ProjectMilestonePayload!
   projectMilestoneDelete(input: ProjectMilestoneDeleteInput!): ProjectMilestoneDeletePayload!
   issueSetProject(input: IssueSetProjectInput!): IssueSetProjectPayload!
+  issueSetParent(input: IssueSetParentInput!): IssueParentPayload!
+  issueClearParent(input: IssueClearParentInput!): IssueParentPayload!
+  issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
+  issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
 }
 
 type PageInfo {

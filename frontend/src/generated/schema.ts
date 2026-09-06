@@ -107,6 +107,7 @@ export type Issue = {
   /** When the issue was taken off the board. Always null here, because archived issues are absent from every query -- only the archive mutation's own result carries a value. */
   archivedAt?: Maybe<Scalars['DateTime']['output']>;
   assigneeId?: Maybe<Scalars['UUID']['output']>;
+  children: IssueSummaryConnection;
   comments: CommentConnection;
   /** When the issue stopped being worked on. Derived from the workflow state's category and not settable directly: it is non-null exactly while the issue sits in a completed or canceled state. */
   completedAt?: Maybe<Scalars['DateTime']['output']>;
@@ -125,13 +126,21 @@ export type Issue = {
   milestoneId?: Maybe<Scalars['UUID']['output']>;
   /** Sequential within the team and never reused. Unique only alongside the team; two teams both have a number 42. */
   number: Scalars['Int']['output'];
+  parent?: Maybe<IssueSummary>;
   priority: Scalars['Int']['output'];
   project?: Maybe<Project>;
   projectId?: Maybe<Scalars['UUID']['output']>;
+  relations: IssueRelationConnection;
   teamId: Scalars['UUID']['output'];
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
   workflowStateId: Scalars['UUID']['output'];
+};
+
+
+export type IssueChildrenArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
 };
 
 
@@ -140,10 +149,20 @@ export type IssueCommentsArgs = {
   first?: Scalars['Int']['input'];
 };
 
+
+export type IssueRelationsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
 export type IssueArchivePayload = {
   __typename?: 'IssueArchivePayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
+};
+
+export type IssueClearParentInput = {
+  issueId: Scalars['UUID']['input'];
 };
 
 export type IssueConnection = {
@@ -178,6 +197,54 @@ export type IssueLabelPayload = {
   issue?: Maybe<Issue>;
 };
 
+export type IssueParentPayload = {
+  __typename?: 'IssueParentPayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
+};
+
+export type IssueRelation = {
+  __typename?: 'IssueRelation';
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  issue: IssueSummary;
+  type: IssueRelationType;
+};
+
+export type IssueRelationConnection = {
+  __typename?: 'IssueRelationConnection';
+  nodes: Array<IssueRelation>;
+  pageInfo: PageInfo;
+};
+
+export type IssueRelationCreateInput = {
+  sourceIssueId: Scalars['UUID']['input'];
+  targetIssueId: Scalars['UUID']['input'];
+  type: IssueRelationType;
+};
+
+export type IssueRelationCreatePayload = {
+  __typename?: 'IssueRelationCreatePayload';
+  errors: Array<ValidationErrorType>;
+  relation?: Maybe<IssueRelation>;
+};
+
+export type IssueRelationDeleteInput = {
+  id: Scalars['UUID']['input'];
+};
+
+export type IssueRelationDeletePayload = {
+  __typename?: 'IssueRelationDeletePayload';
+  deletedRelationId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type IssueRelationType =
+  | 'BLOCKED_BY'
+  | 'BLOCKS'
+  | 'DUPLICATE'
+  | 'RELATED';
+
 export type IssueSetCycleInput = {
   cycleId?: InputMaybe<Scalars['UUID']['input']>;
   issueId: Scalars['UUID']['input'];
@@ -187,6 +254,11 @@ export type IssueSetCyclePayload = {
   __typename?: 'IssueSetCyclePayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
+};
+
+export type IssueSetParentInput = {
+  issueId: Scalars['UUID']['input'];
+  parentId: Scalars['UUID']['input'];
 };
 
 export type IssueSetProjectInput = {
@@ -199,6 +271,23 @@ export type IssueSetProjectPayload = {
   __typename?: 'IssueSetProjectPayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
+};
+
+export type IssueSummary = {
+  __typename?: 'IssueSummary';
+  completedAt?: Maybe<Scalars['DateTime']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  description?: Maybe<Scalars['String']['output']>;
+  id: Scalars['UUID']['output'];
+  priority: Scalars['Int']['output'];
+  title: Scalars['String']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type IssueSummaryConnection = {
+  __typename?: 'IssueSummaryConnection';
+  nodes: Array<IssueSummary>;
+  pageInfo: PageInfo;
 };
 
 export type IssueUpdateInput = {
@@ -284,10 +373,14 @@ export type Mutation = {
   cycleDelete: CycleDeletePayload;
   cycleUpdate: CyclePayload;
   issueArchive: IssueArchivePayload;
+  issueClearParent: IssueParentPayload;
   issueCreate: IssueCreatePayload;
   issueLabelAttach: IssueLabelPayload;
   issueLabelDetach: IssueLabelPayload;
+  issueRelationCreate: IssueRelationCreatePayload;
+  issueRelationDelete: IssueRelationDeletePayload;
   issueSetCycle: IssueSetCyclePayload;
+  issueSetParent: IssueParentPayload;
   issueSetProject: IssueSetProjectPayload;
   issueUpdate: IssueUpdatePayload;
   labelCreate: LabelPayload;
@@ -337,6 +430,11 @@ export type MutationIssueArchiveArgs = {
 };
 
 
+export type MutationIssueClearParentArgs = {
+  input: IssueClearParentInput;
+};
+
+
 export type MutationIssueCreateArgs = {
   input: IssueCreateInput;
 };
@@ -352,8 +450,23 @@ export type MutationIssueLabelDetachArgs = {
 };
 
 
+export type MutationIssueRelationCreateArgs = {
+  input: IssueRelationCreateInput;
+};
+
+
+export type MutationIssueRelationDeleteArgs = {
+  input: IssueRelationDeleteInput;
+};
+
+
 export type MutationIssueSetCycleArgs = {
   input: IssueSetCycleInput;
+};
+
+
+export type MutationIssueSetParentArgs = {
+  input: IssueSetParentInput;
 };
 
 

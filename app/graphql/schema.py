@@ -14,6 +14,7 @@ from app.graphql.mutations.cycles import CycleMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
 from app.graphql.mutations.labels import LabelMutation
 from app.graphql.mutations.projects import ProjectMutation
+from app.graphql.mutations.relations import RelationMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.cycles import CycleQuery
 from app.graphql.queries.issues import Query as IssueQuery
@@ -65,6 +66,7 @@ Mutation = merge_types(
         CommentMutation,
         CycleMutation,
         ProjectMutation,
+        RelationMutation,
     ),
 )
 
