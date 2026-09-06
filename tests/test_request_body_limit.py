@@ -129,7 +129,10 @@ async def client(monkeypatch, tmp_path, recording_service):
 
     application = create_app()
     application.dependency_overrides[get_context] = lambda: VectorContext(
-        issue_service=recording_service, tenant=FakeTenant()
+        issue_service=recording_service,
+        auth_service=None,
+        tenant=FakeTenant(),
+        environment="test",
     )
 
     async with httpx.AsyncClient(

@@ -52,10 +52,11 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS_DIR = REPO_ROOT / "migrations"
 INITIAL_MIGRATION = MIGRATIONS_DIR / "001_issues.sql"
 TENANCY_MIGRATION = MIGRATIONS_DIR / "002_tenancy.sql"
+AUTH_MIGRATION = MIGRATIONS_DIR / "003_auth.sql"
 
 # Every migration in the repository, in ledger order. Asserted as an exact
 # list rather than a subset; see `test_no_second_migration_appeared`.
-EXPECTED_MIGRATIONS = ["001_issues.sql", "002_tenancy.sql"]
+EXPECTED_MIGRATIONS = ["001_issues.sql", "002_tenancy.sql", "003_auth.sql"]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the
 # migration's text. 001 is applied in production, so this value is a fact
@@ -82,6 +83,18 @@ INITIAL_MIGRATION_CHECKSUM = (
 # to stop being editable at all.
 TENANCY_MIGRATION_CHECKSUM = (
     "a84e0de9607bdb3c4d1ad6903dbe527007fd8944c4efa527b1d466be14bfdc71"
+)
+
+# And the same pin for 003, on the same terms as 002: unapplied, pinned while
+# pinning it is still free.
+#
+# Worth restating what these constants are not. They are not a claim that the
+# file is correct -- the lint suite and `test_auth_db.py` argue that. They are
+# a claim that the file has not changed since somebody said it was, which is
+# the only thing a checksum can ever mean and the exact thing the ledger will
+# rely on the moment 003 is applied anywhere.
+AUTH_MIGRATION_CHECKSUM = (
+    "47e5631615660b4401ae58bb19d959c52dac284fb8182a58bfe6e9a0c2efab02"
 )
 
 PYPROJECT = REPO_ROOT / "pyproject.toml"
@@ -223,6 +236,17 @@ def test_the_tenancy_migration_still_hashes_to_what_was_reviewed():
     assert compute_checksum(read_migration(TENANCY_MIGRATION)) == (
         TENANCY_MIGRATION_CHECKSUM
     )
+
+
+def test_the_auth_migration_still_hashes_to_what_was_reviewed():
+    """003, pinned on the same terms as 002.
+
+    Unapplied, so this is the repository's discipline rather than a fact
+    about any database -- which is precisely why it goes in now, while 003 is
+    still editable and while changing this constant is still a decision
+    somebody makes on purpose.
+    """
+    assert compute_checksum(read_migration(AUTH_MIGRATION)) == AUTH_MIGRATION_CHECKSUM
 
 
 def test_no_second_migration_appeared():

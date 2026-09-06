@@ -251,6 +251,11 @@ async def wired(postgres_dsn):
             yield (
                 VectorContext(
                     issue_service=IssueService(pool=pool, repository=IssueRepository()),
+                    # This fixture predates authentication and exercises the
+                    # tenancy path only; no resolver it reaches resolves a
+                    # viewer.
+                    auth_service=None,
+                    environment="test",
                     tenant=RequestTenant(
                         workspace_service=WorkspaceService(
                             pool=pool,

@@ -1691,20 +1691,33 @@ async def test_the_ledger_timestamps_are_timezone_aware_and_from_the_server_cloc
         assert server_now - applied_at < timedelta(minutes=5), row["version"]
 
 
-async def test_migration_status_reports_both_versions_applied_and_nothing_pending(
+async def test_migration_status_reports_both_versions_applied_and_the_rest_pending(
     connection,
 ):
     """The runner's own view of the database it has just changed.
 
     `migration_status` writes -- the ledger prologue creates the table and can
     adopt 001 -- so it needs a transaction as much as applying does.
+
+    The pending set is derived from the directory rather than written out.
+    This fixture applies 001 and 002 and nothing else, so every other file in
+    migrations/ is outstanding by definition -- a stronger statement than the
+    empty tuple this used to assert, because it also says the runner *notices*
+    a migration it has not applied. Derived so that the next migration to land
+    does not have to edit this test to keep it true.
     """
     async with connection.transaction():
         report = await migration_status(connection, migrations_dir=MIGRATIONS_DIR)
 
+    unapplied = tuple(
+        path
+        for path in sorted(MIGRATIONS_DIR.glob("*.sql"))
+        if path not in {MIGRATION_001, MIGRATION_002}
+    )
+
     assert [item.version for item in report.applied] == ["001", "002"]
     assert [item.state for item in report.applied] == [CHECKSUM_OK, CHECKSUM_OK]
-    assert report.pending == ()
+    assert report.pending == unapplied
     assert report.has_mismatch is False
 
 

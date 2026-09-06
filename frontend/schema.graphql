@@ -27,8 +27,26 @@ type IssueCreatePayload {
   errors: [ValidationErrorType!]!
 }
 
+input LoginInput {
+  email: String!
+  password: String!
+}
+
+type LoginPayload {
+  user: User
+  errors: [ValidationErrorType!]!
+}
+
+type LogoutPayload {
+  signedOut: Boolean!
+  errors: [ValidationErrorType!]!
+}
+
 type Mutation {
   issueCreate(input: IssueCreateInput!): IssueCreatePayload!
+  register(input: RegisterInput!): RegisterPayload!
+  login(input: LoginInput!): LoginPayload!
+  logout: LogoutPayload!
 }
 
 type PageInfo {
@@ -39,9 +57,29 @@ type PageInfo {
 type Query {
   issue(id: UUID!): Issue
   issues(first: Int! = 50, after: String = null): IssueConnection!
+  me: User
+}
+
+input RegisterInput {
+  email: String!
+  password: String!
+  name: String = null
+}
+
+type RegisterPayload {
+  user: User
+  errors: [ValidationErrorType!]!
 }
 
 scalar UUID
+
+type User {
+  id: UUID!
+  email: String!
+  name: String
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
 
 type ValidationErrorType {
   field: String!

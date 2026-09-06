@@ -30,3 +30,12 @@ pydantic-settings
 strawberry-graphql[fastapi]==0.326.0
 
 structlog
+
+# Argon2id password hashing, used by app/services/passwords.py.
+#
+# The reference implementation of the algorithm (libargon2) with a thin
+# Python binding, rather than a pure-Python one: the cost parameters are
+# the entire security argument for a password hash, and a pure-Python
+# implementation cannot make them expensive for an attacker without making
+# them ruinous for the server.
+argon2-cffi

@@ -52,14 +52,44 @@ export type IssueCreatePayload = {
   issue?: Maybe<Issue>;
 };
 
+export type LoginInput = {
+  email: Scalars['String']['input'];
+  password: Scalars['String']['input'];
+};
+
+export type LoginPayload = {
+  __typename?: 'LoginPayload';
+  errors: Array<ValidationErrorType>;
+  user?: Maybe<User>;
+};
+
+export type LogoutPayload = {
+  __typename?: 'LogoutPayload';
+  errors: Array<ValidationErrorType>;
+  signedOut: Scalars['Boolean']['output'];
+};
+
 export type Mutation = {
   __typename?: 'Mutation';
   issueCreate: IssueCreatePayload;
+  login: LoginPayload;
+  logout: LogoutPayload;
+  register: RegisterPayload;
 };
 
 
 export type MutationIssueCreateArgs = {
   input: IssueCreateInput;
+};
+
+
+export type MutationLoginArgs = {
+  input: LoginInput;
+};
+
+
+export type MutationRegisterArgs = {
+  input: RegisterInput;
 };
 
 export type PageInfo = {
@@ -72,6 +102,7 @@ export type Query = {
   __typename?: 'Query';
   issue?: Maybe<Issue>;
   issues: IssueConnection;
+  me?: Maybe<User>;
 };
 
 
@@ -83,6 +114,27 @@ export type QueryIssueArgs = {
 export type QueryIssuesArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
+};
+
+export type RegisterInput = {
+  email: Scalars['String']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  password: Scalars['String']['input'];
+};
+
+export type RegisterPayload = {
+  __typename?: 'RegisterPayload';
+  errors: Array<ValidationErrorType>;
+  user?: Maybe<User>;
+};
+
+export type User = {
+  __typename?: 'User';
+  createdAt: Scalars['DateTime']['output'];
+  email: Scalars['String']['output'];
+  id: Scalars['UUID']['output'];
+  name?: Maybe<Scalars['String']['output']>;
+  updatedAt: Scalars['DateTime']['output'];
 };
 
 export type ValidationErrorType = {
