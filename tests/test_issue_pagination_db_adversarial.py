@@ -63,6 +63,9 @@ BOOTSTRAP_TEAM_ID = UUID("00000000-0000-7000-8000-000000000002")
 
 SCOPE = WorkspaceScope(workspace_id=BOOTSTRAP_WORKSPACE_ID)
 
+# `number` and `workflow_state_id` are supplied because 005 made both NOT
+# NULL; see the same note in the sibling file. Neither participates in the
+# ordering this file forces plans over.
 INSERT = """
     INSERT INTO issues (
         id,

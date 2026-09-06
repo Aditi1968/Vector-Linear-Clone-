@@ -103,6 +103,8 @@ type Issue {
   A calendar day, not an instant: the same day for every viewer, in every timezone.
   """
   dueDate: Date
+  projectId: UUID
+  milestoneId: UUID
 
   """
   When the issue stopped being worked on. Derived from the workflow state's category and not settable directly: it is non-null exactly while the issue sits in a completed or canceled state.
@@ -116,6 +118,7 @@ type Issue {
   createdAt: DateTime!
   updatedAt: DateTime!
   cycle: Cycle
+  project: Project
   labels: [Label!]!
   comments(first: Int! = 20, after: String = null): CommentConnection!
 }
@@ -160,6 +163,17 @@ input IssueSetCycleInput {
 }
 
 type IssueSetCyclePayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
+}
+
+input IssueSetProjectInput {
+  issueId: UUID!
+  projectId: UUID = null
+  milestoneId: UUID = null
+}
+
+type IssueSetProjectPayload {
   issue: Issue
   errors: [ValidationErrorType!]!
 }
@@ -250,11 +264,119 @@ type Mutation {
   cycleUpdate(input: CycleUpdateInput!): CyclePayload!
   cycleDelete(id: UUID!): CycleDeletePayload!
   issueSetCycle(input: IssueSetCycleInput!): IssueSetCyclePayload!
+  projectCreate(input: ProjectCreateInput!): ProjectPayload!
+  projectUpdate(input: ProjectUpdateInput!): ProjectPayload!
+  projectDelete(input: ProjectDeleteInput!): ProjectDeletePayload!
+  projectTeamAdd(input: ProjectTeamInput!): ProjectPayload!
+  projectTeamRemove(input: ProjectTeamInput!): ProjectPayload!
+  projectMilestoneCreate(input: ProjectMilestoneCreateInput!): ProjectMilestonePayload!
+  projectMilestoneUpdate(input: ProjectMilestoneUpdateInput!): ProjectMilestonePayload!
+  projectMilestoneDelete(input: ProjectMilestoneDeleteInput!): ProjectMilestoneDeletePayload!
+  issueSetProject(input: IssueSetProjectInput!): IssueSetProjectPayload!
 }
 
 type PageInfo {
   hasNextPage: Boolean!
   endCursor: String
+}
+
+type Project {
+  id: UUID!
+  name: String!
+  description: String
+  state: ProjectState!
+  targetDate: Date
+  leadId: UUID
+  teamIds: [UUID!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  milestones: [ProjectMilestone!]!
+}
+
+type ProjectConnection {
+  nodes: [Project!]!
+  pageInfo: PageInfo!
+}
+
+input ProjectCreateInput {
+  name: String!
+  description: String = null
+  state: ProjectState! = PLANNED
+  targetDate: Date = null
+  leadId: UUID = null
+}
+
+input ProjectDeleteInput {
+  id: UUID!
+}
+
+type ProjectDeletePayload {
+  deletedProjectId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type ProjectMilestone {
+  id: UUID!
+  projectId: UUID!
+  name: String!
+  targetDate: Date
+  position: Int!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input ProjectMilestoneCreateInput {
+  projectId: UUID!
+  name: String!
+  targetDate: Date = null
+}
+
+input ProjectMilestoneDeleteInput {
+  id: UUID!
+}
+
+type ProjectMilestoneDeletePayload {
+  deletedMilestoneId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type ProjectMilestonePayload {
+  milestone: ProjectMilestone
+  errors: [ValidationErrorType!]!
+}
+
+input ProjectMilestoneUpdateInput {
+  id: UUID!
+  name: String
+  targetDate: Date
+  position: Int
+}
+
+type ProjectPayload {
+  project: Project
+  errors: [ValidationErrorType!]!
+}
+
+enum ProjectState {
+  PLANNED
+  STARTED
+  PAUSED
+  COMPLETED
+  CANCELED
+}
+
+input ProjectTeamInput {
+  projectId: UUID!
+  teamId: UUID!
+}
+
+input ProjectUpdateInput {
+  id: UUID!
+  name: String
+  description: String
+  state: ProjectState
+  targetDate: Date
+  leadId: UUID
 }
 
 type Query {
@@ -272,6 +394,8 @@ type Query {
   labels(first: Int! = 50, after: String = null): LabelConnection!
   cycle(id: UUID!): Cycle
   cycles(teamId: UUID!): [Cycle!]!
+  project(id: UUID!): Project
+  projects(first: Int! = 50, after: String = null): ProjectConnection!
 }
 
 input RegisterInput {

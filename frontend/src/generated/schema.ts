@@ -122,9 +122,12 @@ export type Issue = {
   /** The name this issue is known by outside the product -- ENG-42. Its team's key, a hyphen, and the issue's number. */
   identifier: Scalars['String']['output'];
   labels: Array<Label>;
+  milestoneId?: Maybe<Scalars['UUID']['output']>;
   /** Sequential within the team and never reused. Unique only alongside the team; two teams both have a number 42. */
   number: Scalars['Int']['output'];
   priority: Scalars['Int']['output'];
+  project?: Maybe<Project>;
+  projectId?: Maybe<Scalars['UUID']['output']>;
   teamId: Scalars['UUID']['output'];
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
@@ -182,6 +185,18 @@ export type IssueSetCycleInput = {
 
 export type IssueSetCyclePayload = {
   __typename?: 'IssueSetCyclePayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
+};
+
+export type IssueSetProjectInput = {
+  issueId: Scalars['UUID']['input'];
+  milestoneId?: InputMaybe<Scalars['UUID']['input']>;
+  projectId?: InputMaybe<Scalars['UUID']['input']>;
+};
+
+export type IssueSetProjectPayload = {
+  __typename?: 'IssueSetProjectPayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
 };
@@ -273,12 +288,21 @@ export type Mutation = {
   issueLabelAttach: IssueLabelPayload;
   issueLabelDetach: IssueLabelPayload;
   issueSetCycle: IssueSetCyclePayload;
+  issueSetProject: IssueSetProjectPayload;
   issueUpdate: IssueUpdatePayload;
   labelCreate: LabelPayload;
   labelDelete: LabelDeletePayload;
   labelUpdate: LabelPayload;
   login: LoginPayload;
   logout: LogoutPayload;
+  projectCreate: ProjectPayload;
+  projectDelete: ProjectDeletePayload;
+  projectMilestoneCreate: ProjectMilestonePayload;
+  projectMilestoneDelete: ProjectMilestoneDeletePayload;
+  projectMilestoneUpdate: ProjectMilestonePayload;
+  projectTeamAdd: ProjectPayload;
+  projectTeamRemove: ProjectPayload;
+  projectUpdate: ProjectPayload;
   register: RegisterPayload;
 };
 
@@ -333,6 +357,11 @@ export type MutationIssueSetCycleArgs = {
 };
 
 
+export type MutationIssueSetProjectArgs = {
+  input: IssueSetProjectInput;
+};
+
+
 export type MutationIssueUpdateArgs = {
   id: Scalars['UUID']['input'];
   input: IssueUpdateInput;
@@ -359,6 +388,46 @@ export type MutationLoginArgs = {
 };
 
 
+export type MutationProjectCreateArgs = {
+  input: ProjectCreateInput;
+};
+
+
+export type MutationProjectDeleteArgs = {
+  input: ProjectDeleteInput;
+};
+
+
+export type MutationProjectMilestoneCreateArgs = {
+  input: ProjectMilestoneCreateInput;
+};
+
+
+export type MutationProjectMilestoneDeleteArgs = {
+  input: ProjectMilestoneDeleteInput;
+};
+
+
+export type MutationProjectMilestoneUpdateArgs = {
+  input: ProjectMilestoneUpdateInput;
+};
+
+
+export type MutationProjectTeamAddArgs = {
+  input: ProjectTeamInput;
+};
+
+
+export type MutationProjectTeamRemoveArgs = {
+  input: ProjectTeamInput;
+};
+
+
+export type MutationProjectUpdateArgs = {
+  input: ProjectUpdateInput;
+};
+
+
 export type MutationRegisterArgs = {
   input: RegisterInput;
 };
@@ -367,6 +436,111 @@ export type PageInfo = {
   __typename?: 'PageInfo';
   endCursor?: Maybe<Scalars['String']['output']>;
   hasNextPage: Scalars['Boolean']['output'];
+};
+
+export type Project = {
+  __typename?: 'Project';
+  createdAt: Scalars['DateTime']['output'];
+  description?: Maybe<Scalars['String']['output']>;
+  id: Scalars['UUID']['output'];
+  leadId?: Maybe<Scalars['UUID']['output']>;
+  milestones: Array<ProjectMilestone>;
+  name: Scalars['String']['output'];
+  state: ProjectState;
+  targetDate?: Maybe<Scalars['Date']['output']>;
+  teamIds: Array<Scalars['UUID']['output']>;
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type ProjectConnection = {
+  __typename?: 'ProjectConnection';
+  nodes: Array<Project>;
+  pageInfo: PageInfo;
+};
+
+export type ProjectCreateInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  leadId?: InputMaybe<Scalars['UUID']['input']>;
+  name: Scalars['String']['input'];
+  state?: ProjectState;
+  targetDate?: InputMaybe<Scalars['Date']['input']>;
+};
+
+export type ProjectDeleteInput = {
+  id: Scalars['UUID']['input'];
+};
+
+export type ProjectDeletePayload = {
+  __typename?: 'ProjectDeletePayload';
+  deletedProjectId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type ProjectMilestone = {
+  __typename?: 'ProjectMilestone';
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  position: Scalars['Int']['output'];
+  projectId: Scalars['UUID']['output'];
+  targetDate?: Maybe<Scalars['Date']['output']>;
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type ProjectMilestoneCreateInput = {
+  name: Scalars['String']['input'];
+  projectId: Scalars['UUID']['input'];
+  targetDate?: InputMaybe<Scalars['Date']['input']>;
+};
+
+export type ProjectMilestoneDeleteInput = {
+  id: Scalars['UUID']['input'];
+};
+
+export type ProjectMilestoneDeletePayload = {
+  __typename?: 'ProjectMilestoneDeletePayload';
+  deletedMilestoneId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type ProjectMilestonePayload = {
+  __typename?: 'ProjectMilestonePayload';
+  errors: Array<ValidationErrorType>;
+  milestone?: Maybe<ProjectMilestone>;
+};
+
+export type ProjectMilestoneUpdateInput = {
+  id: Scalars['UUID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  position?: InputMaybe<Scalars['Int']['input']>;
+  targetDate?: InputMaybe<Scalars['Date']['input']>;
+};
+
+export type ProjectPayload = {
+  __typename?: 'ProjectPayload';
+  errors: Array<ValidationErrorType>;
+  project?: Maybe<Project>;
+};
+
+export type ProjectState =
+  | 'CANCELED'
+  | 'COMPLETED'
+  | 'PAUSED'
+  | 'PLANNED'
+  | 'STARTED';
+
+export type ProjectTeamInput = {
+  projectId: Scalars['UUID']['input'];
+  teamId: Scalars['UUID']['input'];
+};
+
+export type ProjectUpdateInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  id: Scalars['UUID']['input'];
+  leadId?: InputMaybe<Scalars['UUID']['input']>;
+  name?: InputMaybe<Scalars['String']['input']>;
+  state?: InputMaybe<ProjectState>;
+  targetDate?: InputMaybe<Scalars['Date']['input']>;
 };
 
 export type Query = {
@@ -380,6 +554,8 @@ export type Query = {
   me?: Maybe<User>;
   myWorkspace: WorkspaceMembership;
   myWorkspaces: Array<WorkspaceMembership>;
+  project?: Maybe<Project>;
+  projects: ProjectConnection;
   /** The teams in a workspace, each with the workflow states its issues can occupy. */
   teams: Array<Team>;
 };
@@ -419,6 +595,17 @@ export type QueryLabelsArgs = {
 
 export type QueryMyWorkspaceArgs = {
   slug: Scalars['String']['input'];
+};
+
+
+export type QueryProjectArgs = {
+  id: Scalars['UUID']['input'];
+};
+
+
+export type QueryProjectsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
 };
 
 

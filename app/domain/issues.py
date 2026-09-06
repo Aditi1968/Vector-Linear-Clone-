@@ -77,6 +77,18 @@ class IssueEntity:
     # read would then pay for a join whether or not the caller wanted it.
     cycle_id: UUID | None
 
+    # Where this issue sits in the workspace's project plan, if anywhere.
+    # Both are None for the great majority of issues, and that is a real
+    # state rather than missing data.
+    #
+    # `milestone_id` is never set while `project_id` is None:
+    # `issues_milestone_requires_project` refuses that row, because a
+    # milestone only means anything inside the project that owns it. A
+    # reader can therefore take a non-None milestone as implying a project
+    # without checking for it.
+    project_id: UUID | None
+    milestone_id: UUID | None
+
     # Derived from the workflow state on every write; never set directly.
     # See IssueService.complete_rule for the rule and why it lives there.
     completed_at: datetime | None

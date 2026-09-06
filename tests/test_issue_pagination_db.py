@@ -59,6 +59,18 @@ BOOTSTRAP_TEAM_ID = UUID("00000000-0000-7000-8000-000000000002")
 
 SCOPE = WorkspaceScope(workspace_id=BOOTSTRAP_WORKSPACE_ID)
 
+# `number` and `workflow_state_id` are supplied because 005 made both NOT
+# NULL. The state is looked up per fixture rather than named as a literal --
+# 005 generates the ids -- and the same one is used for every row: this file
+# is about ordering by `created_at`, so a varying state would be a column the
+# assertions do not read.
+#
+# `number` counts up from 1 with the seed's own order, which
+# `issues_team_number_key` requires to be distinct within the team and
+# `issues_number_positive` requires to be above zero. It deliberately does NOT
+# agree with `created_at`: SEED is not in chronological order, so a query that
+# resumed on the wrong column would be caught by the ordering assertions
+# rather than accidentally reproduced.
 INSERT = """
     INSERT INTO issues (
         id,

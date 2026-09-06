@@ -53,11 +53,19 @@ const SHARED = {
   /*
    * The three custom scalars this schema declares, mapped to what the
    * transport actually delivers: a hyphenated UUID string, an ISO-8601
-   * datetime string, and -- for `Issue.dueDate` -- an ISO-8601 *date*
-   * string, `YYYY-MM-DD`.
+   * datetime string, and -- since projects -- an ISO-8601 calendar date,
+   * `YYYY-MM-DD`.
    *
-   * None is parsed into a richer type at this boundary on purpose. Apollo
-   * stores what it is given, and a `Date` in the cache would be
+   * `Date` and `DateTime` are different scalars carrying different strings,
+   * and the backend chose the distinction deliberately: a project's target
+   * date is a day people in several timezones agree on, so it is a `DATE`
+   * column rather than an instant. Both map to `string` here, so the
+   * difference is documentation on this side rather than a type -- a
+   * date-only string handed to `new Date()` is parsed as UTC midnight, which
+   * is the one place it matters.
+   *
+   * None of them is parsed into a richer type at this boundary on purpose.
+   * Apollo stores what it is given, and a `Date` object in the cache would be
    * reconstructed on every read and defeat the cache's structural equality
    * checks. Parsing happens where a date is formatted
    * (`src/features/issues/lib/dates.ts`).

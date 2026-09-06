@@ -66,6 +66,8 @@ ISSUE_COLUMNS = """
                 issues.estimate,
                 issues.due_date,
                 issues.cycle_id,
+                issues.project_id,
+                issues.milestone_id,
                 issues.completed_at,
                 issues.archived_at,
                 issues.created_at,
@@ -535,6 +537,107 @@ class IssueRepository:
 
         return self._to_entity(row)
 
+    async def set_project(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+        project_id: UUID | None,
+        milestone_id: UUID | None,
+    ) -> IssueEntity | None:
+        """Place one issue in a project and milestone, or take it out of both.
+
+        Both columns are written together on purpose. They are not two
+        independent settings: `issues_milestone_requires_project` refuses a
+        milestone without a project, and `issues_milestone_fk` refuses a
+        milestone belonging to a different project than the one on the same
+        row. A method that set them one at a time would have to pass through a
+        state the schema forbids in order to reach a state it allows, so the
+        write is a single statement that moves the issue from one legal pair
+        to another.
+
+        Nothing is checked before the UPDATE. The three ways this can be
+        wrong -- a project from another workspace, a milestone from another
+        project, a milestone with no project -- are the three constraints
+        migrations/009_projects.sql declares, and each surfaces as a
+        PostgresError naming the constraint it broke. IssueService translates
+        exactly those names and nothing else.
+
+        Returning None means no row in this workspace has that id, which is
+        the same answer another tenant's issue produces.
+        """
+        row = await connection.fetchrow(
+            """
+            UPDATE issues
+            SET
+                project_id = $3,
+                milestone_id = $4,
+                updated_at = now()
+            WHERE workspace_id = $1 AND id = $2
+            RETURNING
+{ISSUE_COLUMNS}
+            """,
+            scope.workspace_id,
+            issue_id,
+            project_id,
+            milestone_id,
+        )
+
+        if row is None:
+            return None
+
+        return self._to_entity(row)
+
+    async def clear_project(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+    ) -> None:
+        """Detach every issue from one project, milestones included.
+
+        Called on the way to deleting the project. `milestone_id` is cleared
+        in the same statement because every milestone of that project is about
+        to go too, and an issue left pointing at one would make
+        `issues_milestone_requires_project` false the instant `project_id`
+        became NULL -- so clearing only the project is a state the server
+        would refuse, not merely one that would look odd.
+        """
+        await connection.execute(
+            """
+            UPDATE issues
+            SET project_id = NULL, milestone_id = NULL, updated_at = now()
+            WHERE workspace_id = $1 AND project_id = $2
+            """,
+            scope.workspace_id,
+            project_id,
+        )
+
+    async def clear_milestone(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        milestone_id: UUID,
+    ) -> None:
+        """Detach every issue from one milestone, leaving them in the project.
+
+        The mirror image of `clear_project`, and deliberately not symmetrical
+        with it: deleting a milestone is a change to the plan inside a
+        project, not a removal of the work from it.
+        """
+        await connection.execute(
+            """
+            UPDATE issues
+            SET milestone_id = NULL, updated_at = now()
+            WHERE workspace_id = $1 AND milestone_id = $2
+            """,
+            scope.workspace_id,
+            milestone_id,
+        )
+
     @staticmethod
     def _to_entity(row: asyncpg.Record) -> IssueEntity:
         return IssueEntity(
@@ -551,6 +654,8 @@ class IssueRepository:
             estimate=row["estimate"],
             due_date=row["due_date"],
             cycle_id=row["cycle_id"],
+            project_id=row["project_id"],
+            milestone_id=row["milestone_id"],
             completed_at=row["completed_at"],
             archived_at=row["archived_at"],
             created_at=row["created_at"],

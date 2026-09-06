@@ -187,3 +187,20 @@ def decode_label_cursor(cursor: str) -> LabelCursor:
         raise InvalidCursorError() from None
 
     return LabelCursor(name=name, id=label_id)
+
+
+# The same three names, said without the word "issue" in them.
+#
+# Nothing above is issue-specific: the payload is a keyset position over
+# `(created_at, id)`, which is the ordering every table in this schema is
+# listed by. `projects` is the second list to need it, and importing
+# `encode_issue_cursor` to page projects would read as a mistake at every call
+# site -- while a second, identical implementation would be two encodings that
+# have to stay byte-compatible by attention alone.
+#
+# Aliases rather than a rename, so that no existing caller or test changes in
+# the same commit that adds a feature. Renaming the definitions and aliasing
+# the old names is the tidier end state and belongs to whoever owns pagination.
+KeysetCursor = IssueCursor
+encode_keyset_cursor = encode_issue_cursor
+decode_keyset_cursor = decode_issue_cursor

@@ -10,6 +10,10 @@ from app.domain.auth import UserEntity
 from app.domain.labels import LabelEntity
 from app.graphql.loaders.cycles import CycleLoader
 from app.graphql.loaders.labels import IssueLabelKey, issue_label_loader
+from app.graphql.loaders.projects import (
+    build_project_loader,
+    build_project_milestones_loader,
+)
 from app.graphql.tenancy import RequestTenant
 from app.http_cookies import read_session_token
 from app.repositories.comments import CommentRepository
@@ -18,6 +22,7 @@ from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.labels import LabelRepository
 from app.repositories.memberships import MembershipRepository
+from app.repositories.projects import ProjectRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.teams import TeamRepository
 from app.repositories.users import UserRepository
@@ -29,6 +34,7 @@ from app.services.issues import IssueService
 from app.services.labels import LabelService
 from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
+from app.services.projects import ProjectService
 from app.services.teams import TeamService
 from app.services.workspaces import WorkspaceService
 
@@ -46,6 +52,7 @@ class VectorContext(BaseContext):
         label_service: LabelService,
         comment_service: CommentService,
         cycle_service: CycleService,
+        project_service: ProjectService,
         tenant: RequestTenant,
         environment: Environment,
     ):
@@ -57,6 +64,21 @@ class VectorContext(BaseContext):
         self.label_service = label_service
         self.comment_service = comment_service
         self.cycle_service = cycle_service
+        self.project_service = project_service
+
+        # Built here rather than in `get_context` so that a context assembled
+        # by hand -- a test, a worker -- gets working loaders from the service
+        # it was given, instead of two slots it has to remember to fill in
+        # agreement with each other.
+        #
+        # One pair per request, which is the whole contract of a DataLoader:
+        # it batches the keys resolved in the same tick and caches within its
+        # own lifetime. A loader that outlived the request would be a cache
+        # with no invalidation, serving one request's projects to the next.
+        self.project_loader = build_project_loader(project_service)
+        self.project_milestones_loader = build_project_milestones_loader(
+            project_service
+        )
 
         # The same two service objects `tenant` resolves through, exposed
         # directly for the resolvers that ask about teams and workspaces as
@@ -179,6 +201,15 @@ async def get_context() -> VectorContext:
         membership_service=MembershipService(
             pool=pool,
             repository=MembershipRepository(),
+        ),
+        project_service=ProjectService(
+            pool=pool,
+            repository=ProjectRepository(),
+            # Deleting a project detaches the issues pointing at it, in the
+            # same transaction. SQL against `issues` belongs to the repository
+            # that owns that table, so the service reaches across to it rather
+            # than the project repository growing statements about issues.
+            issue_repository=IssueRepository(),
         ),
         auth_service=AuthService(
             pool=pool,

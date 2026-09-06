@@ -314,6 +314,7 @@ def graphql_context(**services) -> VectorContext:
         "label_service",
         "comment_service",
         "cycle_service",
+        "project_service",
     }
     environment = services.pop("environment", "test")
     tenant = services.pop("tenant", None) or FakeTenant()
@@ -438,6 +439,8 @@ def as_record(entity: IssueEntity) -> dict:
         "estimate": entity.estimate,
         "due_date": entity.due_date,
         "cycle_id": entity.cycle_id,
+        "project_id": entity.project_id,
+        "milestone_id": entity.milestone_id,
         "completed_at": entity.completed_at,
         "archived_at": entity.archived_at,
         "created_at": entity.created_at,
@@ -479,6 +482,12 @@ def make_entity(index: int, **overrides) -> IssueEntity:
         # In no cycle unless a test says otherwise -- the ordinary state of
         # an issue. Reachable through **overrides like every other field.
         "cycle_id": None,
+        # In no project. That is what the great majority of issues are, so it
+        # is what the default fixture should be; a test about projects sets
+        # them through **overrides rather than every unrelated suite carrying
+        # a project it does not use.
+        "project_id": None,
+        "milestone_id": None,
         "completed_at": None,
         "archived_at": None,
         "created_at": created_at,
