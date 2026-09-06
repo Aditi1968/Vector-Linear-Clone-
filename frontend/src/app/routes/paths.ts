@@ -39,12 +39,31 @@ export const ROUTE_SEGMENTS = {
   issueDetail: `${ISSUES_SEGMENT}/:${ISSUE_ID_PARAM}`,
 } as const
 
+/**
+ * The routes a signed-out visitor may reach, spelled once.
+ *
+ * Declared apart from `ROUTE_SEGMENTS` because they are absolute where those
+ * are relative, and that difference is the point: signing in is what produces
+ * a workspace scope, so a sign-in page underneath one would be reachable only
+ * by people who no longer need it.
+ */
+export const PUBLIC_SEGMENTS = {
+  login: 'login',
+  register: 'register',
+} as const
+
 /** Every URL a component is allowed to navigate to. */
 export interface AppPaths {
   /** The issue list. */
   issues: () => string
   /** One issue's detail view. */
   issue: (issueId: string) => string
+  /** The public marketing page at the root. */
+  landing: () => string
+  /** Sign in. */
+  login: () => string
+  /** Create an account. */
+  register: () => string
 }
 
 /**
@@ -65,6 +84,13 @@ export function createAppPaths(scopePrefix = ''): AppPaths {
     // rule, and it will not be revisited when ids stop being UUIDs.
     issue: (issueId: string) =>
       `${scopePrefix}/${ISSUES_SEGMENT}/${encodeURIComponent(issueId)}`,
+
+    // `scopePrefix` is deliberately not applied to the three below. They are
+    // the URLs a visitor with no session can reach, and a visitor with no
+    // session has no workspace to be scoped by.
+    landing: () => '/',
+    login: () => `/${PUBLIC_SEGMENTS.login}`,
+    register: () => `/${PUBLIC_SEGMENTS.register}`,
   }
 }
 
