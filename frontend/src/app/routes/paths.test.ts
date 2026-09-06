@@ -60,8 +60,6 @@ describe('paths', () => {
     expect(paths.teamIssues('acme', 'ENG')).toBe(
       `/acme/${ROUTE_SEGMENTS.teamIssues.replace(':teamKey', 'ENG')}`,
     )
-    expect(paths.cycles('acme', 'ENG')).toBe(
-      `/acme/${ROUTE_SEGMENTS.cycles.replace(':teamKey', 'ENG')}`,
-    )
+    expect(paths.cycles('acme')).toBe(`/acme/${ROUTE_SEGMENTS.cycles}`)
   })
 })

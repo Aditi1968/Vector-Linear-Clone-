@@ -1,8 +1,10 @@
 import type { RouteObject } from 'react-router-dom'
 
-import { IssueDetailPage, IssueListPage } from '../../features/issues'
 import { RequireAuth, authRoutes } from '../../features/auth'
+import { CycleDetailPage, CycleListPage } from '../../features/cycles'
+import { IssueDetailPage, IssueListPage } from '../../features/issues'
 import { onboardingRoutes } from '../../features/onboarding'
+import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
 import { AppLayout } from '../layout'
 import { NotFound } from './NotFound'
 import { Placeholder } from './Placeholder'
@@ -97,24 +99,6 @@ export const routes: RouteObject[] = [
         ),
       },
       {
-        path: ROUTE_SEGMENTS.projects,
-        element: (
-          <Placeholder
-            title="Projects"
-            description="Every project in this workspace, with its milestones and progress."
-          />
-        ),
-      },
-      {
-        path: ROUTE_SEGMENTS.projectDetail,
-        element: (
-          <Placeholder
-            title="Project"
-            description="One project: its milestones, its teams, and the issues placed in it."
-          />
-        ),
-      },
-      {
         path: ROUTE_SEGMENTS.team,
         element: (
           <Placeholder
@@ -129,24 +113,6 @@ export const routes: RouteObject[] = [
           <Placeholder
             title="Team issues"
             description="One team's issues, grouped by workflow state."
-          />
-        ),
-      },
-      {
-        path: ROUTE_SEGMENTS.cycles,
-        element: (
-          <Placeholder
-            title="Cycles"
-            description="This team's time-boxed iterations, past and planned."
-          />
-        ),
-      },
-      {
-        path: ROUTE_SEGMENTS.cycleDetail,
-        element: (
-          <Placeholder
-            title="Cycle"
-            description="One cycle: its dates, its scope, and the issues in it."
           />
         ),
       },
@@ -176,6 +142,22 @@ export const routes: RouteObject[] = [
             description="Search this workspace's issues and projects."
           />
         ),
+      },
+      {
+        path: ROUTE_SEGMENTS.projects,
+        element: <ProjectListPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.projectDetail,
+        element: <ProjectDetailPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.cycles,
+        element: <CycleListPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.cycleDetail,
+        element: <CycleDetailPage />,
       },
       {
         // Inside the parent, so an unknown URL still renders the shell.

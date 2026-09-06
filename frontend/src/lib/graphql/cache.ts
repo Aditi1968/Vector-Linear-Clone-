@@ -139,6 +139,21 @@ export function createCache(): InMemoryCache {
         fields: {
           issues: cursorConnectionPolicy(['workspaceSlug', 'teamId']),
           labels: cursorConnectionPolicy(['workspaceSlug']),
+
+          /*
+           * `projects` is the same connection, paged the same way, and it
+           * needs the same merge for the same reason: without a policy,
+           * `fetchMore` writes page two under a different cache key (the
+           * default keys on every argument, `after` included), no active
+           * query watches that key, and "Load more" becomes a button that
+           * sends a request and changes nothing. Apollo does not report it.
+           *
+           * The key list differs from `issues` in one way, and it is the
+           * schema talking: there is no `teamId` argument, because a project
+           * spans teams (`Project.teamIds` is a list). The workspace is the
+           * only argument that selects a different list.
+           */
+          projects: cursorConnectionPolicy(['workspaceSlug']),
         },
       },
       Issue: {

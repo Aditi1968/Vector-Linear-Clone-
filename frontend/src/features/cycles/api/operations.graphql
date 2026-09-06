@@ -1,0 +1,139 @@
+# Every GraphQL document the cycles feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it. The page-size rule that
+# governs `CycleIssues` below is documented in
+# `src/features/issues/api/operations.graphql`: `first` must be a literal,
+# because a variable is charged at `ASSUMED_PAGE_SIZE = 100` by the backend's
+# complexity rule during validation and the failure is the whole document
+# being refused.
+#
+# Operation names are unique across every `.graphql` file in `src/`, since
+# codegen emits one module -- hence `CycleTeams`, which selects the same
+# fields as the projects feature's `ProjectTeams` and reads the same cache
+# entry (`Query.teams` keyed by `workspaceSlug`), so the second of the two to
+# mount answers from cache rather than from the network.
+
+# Everything `Cycle` exposes bar its timestamps.
+#
+# Note what is *not* here, because two screens are shaped by its absence:
+# `Cycle` has no `teamId`, although `cycles(teamId:)` requires one to list
+# them. A cycle id is therefore addressable on its own but its team is not
+# recoverable from it -- which is why ../pages/CycleDetailPage.tsx filters
+# workspace-wide issues rather than that team's.
+fragment CycleFields on Cycle {
+  id
+  number
+  name
+  startsAt
+  endsAt
+}
+
+# One team's cycles, in `number` order (`app/repositories/cycles.py`).
+#
+# `teamId` is required by the schema: cycles belong to a team, and there is
+# no workspace-wide cycle list to ask for. The screen carries a team picker
+# for exactly that reason. Not a connection and not paginated -- `cycles`
+# takes no `first`, so the backend's complexity rule charges it once.
+query CycleList($workspaceSlug: String!, $teamId: UUID!) {
+  cycles(workspaceSlug: $workspaceSlug, teamId: $teamId) {
+    ...CycleFields
+  }
+}
+
+# One cycle by id. Nullable: null is "no such cycle", not a failure.
+query CycleDetail($workspaceSlug: String!, $id: UUID!) {
+  cycle(workspaceSlug: $workspaceSlug, id: $id) {
+    ...CycleFields
+  }
+}
+
+# The workspace's teams, for the picker that chooses whose cycles to show.
+query CycleTeams($workspaceSlug: String!) {
+  teams(workspaceSlug: $workspaceSlug) {
+    id
+    key
+    name
+  }
+}
+
+# The issues a cycle's screen filters, and the constraint behind it.
+#
+# There is no `cycle.issues` field and no `issues(cycleId:)` argument, so
+# "the issues in this cycle" cannot be asked for; this asks for a page of the
+# workspace's issues and ../lib/grouping.ts keeps the ones whose `cycle.id`
+# matches.
+#
+# `teamId` is not sent even though a cycle belongs to exactly one team, and
+# that is not an oversight: `Cycle` exposes no `teamId`, so a screen holding
+# only a cycle id has no team to scope by. Passing the team the *picker*
+# happened to be on would be worse than not scoping -- it would silently show
+# nothing for a cycle reached by a direct link.
+#
+# `priority` is not selected: the integer-to-name convention lives in the
+# issues feature and is that feature's to own.
+#
+# Cost: 25 x (5 + 2) = 175 of 1000.
+query CycleIssues($workspaceSlug: String!, $after: String) {
+  issues(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+    nodes {
+      id
+      identifier
+      title
+      completedAt
+      cycle {
+        id
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# Create a cycle.
+#
+# `errors` and the top-level GraphQL error channel are different things and
+# both are read: a cycle whose dates overlap another of the team's is an
+# `ExclusionViolation` the service turns into a structured validation error
+# inside `data`, while an outage is a rejected promise.
+mutation CycleCreate($input: CycleCreateInput!) {
+  cycleCreate(input: $input) {
+    cycle {
+      ...CycleFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation CycleUpdate($input: CycleUpdateInput!) {
+  cycleUpdate(input: $input) {
+    cycle {
+      ...CycleFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# The one mutation in this schema that takes loose arguments rather than an
+# input object. Written as the schema declares it rather than wrapped to look
+# like its neighbours.
+mutation CycleDelete($workspaceSlug: String!, $id: UUID!) {
+  cycleDelete(workspaceSlug: $workspaceSlug, id: $id) {
+    deletedCycleId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+

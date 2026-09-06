@@ -258,9 +258,12 @@ describe('application shell', () => {
         'href',
         `/${WORKSPACE_SLUG}/team/ENG/issues`,
       )
+      // Workspace-level, unlike Issues beside it: `Cycle` carries no team in
+      // the API, so the cycles screen picks its own team rather than reading
+      // one from a URL it could never rebuild from a cycle.
       expect(within(teams).getByRole('link', { name: 'Cycles' })).toHaveAttribute(
         'href',
-        `/${WORKSPACE_SLUG}/team/ENG/cycles`,
+        `/${WORKSPACE_SLUG}/cycles`,
       )
     })
 

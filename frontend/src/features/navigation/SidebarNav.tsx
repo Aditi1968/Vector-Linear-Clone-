@@ -218,7 +218,12 @@ function TeamsSection({ paths, teams, loading, failed, collapsed }: TeamsSection
                     <NavRow nested to={paths.teamIssues(team.key)} label="Issues" />
                   </li>
                   <li>
-                    <NavRow nested to={paths.cycles(team.key)} label="Cycles" />
+                    {/*
+                      Not scoped to `team.key`: `Cycle` carries no team in the
+                      API, so the cycles screen picks its team itself rather
+                      than reading one from the URL it could never rebuild.
+                    */}
+                    <NavRow nested to={paths.cycles()} label="Cycles" />
                   </li>
                 </ul>
               </li>

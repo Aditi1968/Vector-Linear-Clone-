@@ -97,7 +97,7 @@ export const ROUTE_SEGMENTS = {
   projectDetail: `projects/:${PROJECT_ID_PARAM}`,
   team: `team/:${TEAM_KEY_PARAM}`,
   teamIssues: `team/:${TEAM_KEY_PARAM}/issues`,
-  cycles: `team/:${TEAM_KEY_PARAM}/cycles`,
+  cycles: 'cycles',
   cycleDetail: `cycles/:${CYCLE_ID_PARAM}`,
   members: 'members',
   settings: 'settings',
@@ -148,9 +148,15 @@ export const paths = {
   teamIssues: (slug: string, teamKey: string) =>
     `/${seg(slug)}/team/${seg(teamKey)}/issues`,
 
-  /** One team's cycles. Cycles are team-scoped; there is no workspace-wide list. */
-  cycles: (slug: string, teamKey: string) =>
-    `/${seg(slug)}/team/${seg(teamKey)}/cycles`,
+  /**
+   * The workspace's cycles, with the team chosen on the screen.
+   *
+   * Not `team/:teamKey/cycles`, though cycles ARE team-scoped in the API.
+   * `Cycle` exposes no `teamId`, so a cycle detail page cannot build a URL
+   * that names its own team -- "back to cycles" would be unbuildable from
+   * the one screen that most needs it. The team is a picker instead.
+   */
+  cycles: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.cycles}`,
 
   /** One cycle, by id. */
   cycle: (slug: string, cycleId: string) =>
