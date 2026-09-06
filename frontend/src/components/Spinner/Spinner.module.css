@@ -1,0 +1,34 @@
+.spinner {
+  width: 1em;
+  height: 1em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  animation: spin var(--duration-spin, 640ms) linear infinite;
+}
+
+.track {
+  opacity: 0.22;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/**
+ * The one exception to the global reduced-motion rule in src/styles/base.css.
+ *
+ * That rule collapses every animation to 0.01ms, which for a spinner does not
+ * remove motion -- it freezes a lopsided arc on screen that reads as a broken
+ * image, and the user loses the only signal that work is still happening. So
+ * the rotation is slowed rather than stopped. `!important` is required to beat
+ * the global rule's own `!important`; the class selector out-specifies its `*`.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
+  }
+}

@@ -1,0 +1,141 @@
+/**
+ * The meaning-bearing glyphs: status, priority, progress, relation.
+ *
+ * One stylesheet for all four because they share a contract, not just a look:
+ * a fixed-width glyph box so that whatever follows it in a dense row starts on
+ * the same x down the whole list, an optional label, and a colour that arrives
+ * through `--indicator-color` rather than being set per-element.
+ *
+ * The indirection through `--indicator-color` is what lets the label stay
+ * `--color-text-secondary` while the glyph takes the status hue, without
+ * either of them needing a descendant selector per category.
+ */
+
+.indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  /* Never shrink: these are the fixed left edge of a row, and a glyph that
+   * squashes when the title is long defeats the point of the column. */
+  flex: none;
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+
+.glyph {
+  width: var(--glyph-size);
+  height: var(--glyph-size);
+  flex: none;
+  color: var(--indicator-color, currentColor);
+  /* Overrides the global `svg { fill: none }` per-element where a shape is
+   * solid; declared here so each glyph file states only its geometry. */
+  fill: none;
+  stroke: currentColor;
+}
+
+/* The translucent wash inside a status glyph. `currentColor` at low alpha
+ * rather than a second token: it tints to whatever the category colour is and
+ * composites correctly over any surface, including the dark theme, which a
+ * fixed light-grey fill would not. */
+.wash {
+  fill: currentColor;
+  fill-opacity: 0.16;
+  stroke: none;
+}
+
+.solid {
+  fill: currentColor;
+  stroke: none;
+}
+
+.label {
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---------------------------------------------------------------- */
+/* Status                                                            */
+/* ---------------------------------------------------------------- */
+
+.status[data-category='backlog'] {
+  --indicator-color: var(--color-status-backlog);
+}
+.status[data-category='unstarted'] {
+  --indicator-color: var(--color-status-unstarted);
+}
+.status[data-category='started'] {
+  --indicator-color: var(--color-status-started);
+}
+.status[data-category='completed'] {
+  --indicator-color: var(--color-status-completed);
+}
+.status[data-category='canceled'] {
+  --indicator-color: var(--color-status-canceled);
+}
+
+/* ---------------------------------------------------------------- */
+/* Priority                                                          */
+/* ---------------------------------------------------------------- */
+
+.priority[data-level='none'] {
+  --indicator-color: var(--color-priority-none);
+}
+.priority[data-level='low'] {
+  --indicator-color: var(--color-priority-low);
+}
+.priority[data-level='medium'] {
+  --indicator-color: var(--color-priority-medium);
+}
+.priority[data-level='high'] {
+  --indicator-color: var(--color-priority-high);
+}
+.priority[data-level='urgent'] {
+  --indicator-color: var(--color-priority-urgent);
+}
+
+/* ---------------------------------------------------------------- */
+/* Progress                                                          */
+/* ---------------------------------------------------------------- */
+
+.progress {
+  --indicator-color: var(--color-accent-glyph);
+}
+
+/* The unfilled remainder. Drawn at the border weight so an empty cycle still
+ * shows the shape of what it will become. */
+.progressTrack {
+  stroke: var(--color-border-strong);
+}
+
+.progressValue {
+  /* Animating `stroke-dasharray` is cheap and stays on the compositor; the
+   * global reduced-motion rule in base.css collapses it. */
+  transition: stroke-dasharray var(--duration-moderate) var(--ease-out);
+}
+
+/* ---------------------------------------------------------------- */
+/* Relation                                                          */
+/* ---------------------------------------------------------------- */
+
+.relation[data-kind='blockedBy'] {
+  --indicator-color: var(--color-danger);
+}
+.relation[data-kind='blocks'] {
+  --indicator-color: var(--color-warning);
+}
+.relation[data-kind='related'],
+.relation[data-kind='duplicate'],
+.relation[data-kind='subIssue'],
+.relation[data-kind='parent'] {
+  --indicator-color: var(--color-text-muted);
+}
+
+/* `parent` is `subIssue` read upwards. Mirroring the drawn glyph is exact and
+ * costs no second path; the rounded square at the end is symmetric, so only
+ * the branch flips. */
+.flipY {
+  transform: scaleY(-1);
+}

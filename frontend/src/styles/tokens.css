@@ -10,38 +10,51 @@
  *      and point at a primitive.
  *
  * Components consume semantics only. A component that reaches for
- * `--vector-indigo-600` has hardcoded a colour just as surely as if it had
+ * `--vector-cyan-600` has hardcoded a colour just as surely as if it had
  * written the hex, because it has recorded *which* colour rather than *what
- * the colour is for*. `--color-accent` survives a rebrand; `--vector-indigo-600`
- * does not.
+ * the colour is for*. `--color-accent` survives a rebrand and a theme switch;
+ * `--vector-cyan-600` survives neither.
  *
- * Light mode only, deliberately. Every token lives on `:root` rather than
- * inside a `.theme-light` class, so adding dark mode later means adding one
- * `@media (prefers-color-scheme: dark)` block that re-points the *semantic*
- * layer at different primitives -- no component and no primitive changes. That
- * is architecture for a theme system, not a theme system; this phase does not
- * ship one.
+ * ## Theming
  *
- * Contrast: every foreground/background pair used for text below was checked
- * against WCAG AA (4.5:1 for body text, 3:1 for large text and for the focus
- * ring against its adjacent surface). The ratios are recorded next to the
- * tokens so a future edit that breaks one is visible in review rather than in
- * an audit.
+ * Three blocks define the semantic layer, in this order:
+ *
+ *   :root                                       -- light, the complete set
+ *   @media (prefers-color-scheme: dark)         -- OS preference, guarded so
+ *     :root:not([data-theme='light'])              an explicit light choice wins
+ *   :root[data-theme='dark']                    -- explicit choice, wins over OS
+ *
+ * No colour is defined *only* inside a media query. Light is the base and is
+ * always complete, so a token that a later dark override forgets degrades to a
+ * light value -- wrong, but visible and debuggable -- rather than to `unset`,
+ * which resolves to transparent or black and takes the text with it.
+ *
+ * A toggle sets or clears `data-theme` on `<html>` and wins in both
+ * directions: `[data-theme='light']` defeats the OS's dark preference via the
+ * `:not()` guard, and `[data-theme='dark']` defeats the OS's light default by
+ * source order.
+ *
+ * ## Contrast
+ *
+ * Every foreground/background pair below was measured, not eyeballed: WCAG AA
+ * (4.5:1) for text, 3:1 for glyphs, focus rings and the boundaries of form
+ * controls. Ratios are recorded beside the tokens so an edit that breaks one
+ * is caught in review rather than in an audit.
  */
 
 :root {
-  /* Tells the UA to render form controls, scrollbars and the canvas in light
-   * treatments. Without it a browser in dark mode paints native controls dark
-   * inside our light surfaces. */
-  color-scheme: light;
-
   /* ================================================================== */
   /* PRIMITIVES -- raw values, referenced only by the semantic layer     */
   /* ================================================================== */
 
   /* Neutrals. A slightly cool ramp: pure grey reads as dirty next to the
-   * indigo accent, and a faint blue cast is what makes a dense monochrome
-   * interface look intentional rather than unfinished. */
+   * cyan accent, and a faint blue cast is what makes a dense monochrome
+   * interface look intentional rather than unfinished.
+   *
+   * The ramp is denser at the dark end (750/850/950/1000) than a 100-step
+   * scale would be. Dark UI needs steps that a light UI does not: the
+   * difference between a page background and a panel sitting on it is a few
+   * points of luminance down there, where at the light end it is tens. */
   --vector-gray-0: #ffffff;
   --vector-gray-25: #fcfcfd;
   --vector-gray-50: #f7f8fa;
@@ -49,31 +62,70 @@
   --vector-gray-200: #e4e7ec;
   --vector-gray-300: #d3d8e0;
   --vector-gray-400: #a6aeba;
-  --vector-gray-500: #69717f; /* 4.9:1 on gray-0 -- the lightest text neutral */
+  --vector-gray-450: #868fa0; /* 3.3:1 on gray-0 -- control boundaries */
+  --vector-gray-500: #69717f; /* 4.9:1 on gray-0 -- lightest light-mode text */
   --vector-gray-600: #5c6573; /* 5.9:1 on gray-0 */
+  --vector-gray-650: #4c5563;
   --vector-gray-700: #3f4754;
+  --vector-gray-750: #333a46;
   --vector-gray-800: #272d38;
-  --vector-gray-900: #151922; /* 16.4:1 on gray-0 */
+  --vector-gray-850: #1d222b;
+  --vector-gray-900: #151922; /* 17.6:1 on gray-0 */
+  --vector-gray-950: #0e1118;
+  --vector-gray-1000: #080a0e;
+  /* Dark-mode-only neutrals: a light-mode ramp read upside down gives text
+   * that is either glaring white or muddy, because perceived lightness is not
+   * symmetric about the middle of the scale. */
+  --vector-gray-dim: #626c7d; /* 3.3:1 on gray-900 -- dark control boundaries */
+  --vector-gray-mute: #8d96a4; /* 5.9:1 on gray-900 -- dark muted text */
 
-  /* Accent. Indigo rather than blue: blue is what an unvisited link is, and a
-   * product accent that collides with link colour makes "is this clickable?"
-   * ambiguous in exactly the dense lists this UI is built out of. */
-  --vector-indigo-50: #eef0fe;
-  --vector-indigo-100: #dfe2fc;
-  --vector-indigo-200: #c4c9f7;
-  --vector-indigo-500: #5b5bd6; /* 5.4:1 on gray-0 */
-  --vector-indigo-600: #4f4fc4;
-  --vector-indigo-700: #4141a8;
+  /* Accent. Cyan, and specifically not indigo: indigo is the house colour of
+   * this entire product category, and an accent you have already seen in four
+   * other trackers is not an identity. Cyan reads as instrumentation -- which
+   * is the right register for a tool named after a quantity -- and it is far
+   * enough from the status hues (amber started, green completed, red urgent)
+   * to stay legible inside a 14px glyph sitting next to them. */
+  --vector-cyan-50: #eaf9fc;
+  --vector-cyan-100: #cdeff6;
+  --vector-cyan-200: #9fdfec;
+  --vector-cyan-300: #5cc5db; /* 9.4:1 on gray-950 -- dark-mode accent text */
+  --vector-cyan-400: #23a5c0;
+  --vector-cyan-500: #0b87a3; /* 4.2:1 on gray-0 -- focus ring, glyphs */
+  --vector-cyan-600: #0a7189; /* 5.6:1 on gray-0 -- accent text and fills */
+  --vector-cyan-700: #0a5c70; /* 7.6:1 on gray-0 */
+  --vector-cyan-800: #0b4a5a;
+  --vector-cyan-900: #0a3b48;
+  --vector-cyan-950: #082c36;
 
   --vector-red-50: #fef1f1;
   --vector-red-200: #f6cccb;
+  --vector-red-300: #f09a98; /* 8.8:1 on gray-950 */
+  --vector-red-400: #e4645f; /* 5.7:1 on gray-950 */
+  --vector-red-500: #d94540;
   --vector-red-600: #c8322f; /* 5.3:1 on gray-0 */
   --vector-red-700: #a72724;
+  --vector-red-900: #4a1211;
+  --vector-red-950: #2b0d0d;
 
   --vector-green-50: #edf9f2;
   --vector-green-200: #bfe5d0;
+  --vector-green-300: #7fd0a5; /* 10.3:1 on gray-950 */
+  --vector-green-400: #41b57f;
+  --vector-green-500: #229a63; /* 3.6:1 on gray-0 -- glyphs */
   --vector-green-600: #1a7f4b; /* 5.0:1 on gray-0 */
-  --vector-green-700: #14653c;
+  --vector-green-700: #14653c; /* 7.1:1 on gray-0 */
+  --vector-green-900: #0a2e1d;
+  --vector-green-950: #082115;
+
+  --vector-amber-50: #fdf6e8;
+  --vector-amber-200: #f6dfa8;
+  --vector-amber-300: #efc768; /* 11.7:1 on gray-950 */
+  --vector-amber-400: #e0a72c;
+  --vector-amber-500: #c78a10;
+  --vector-amber-600: #a5710c; /* 4.2:1 on gray-0 -- glyphs */
+  --vector-amber-700: #835a0b; /* 6.1:1 on gray-0 -- text */
+  --vector-amber-900: #382706;
+  --vector-amber-950: #241a06;
 
   /* Type. System stacks: a webfont is a network dependency and a layout-shift
    * source, and neither is worth paying for chrome the user reads past. */
@@ -87,10 +139,17 @@
   /* Shadows. Tinted with the neutral hue rather than pure black -- black
    * shadows on a cool grey surface read as grime. */
   --vector-shadow-color: 218deg 25% 18%;
+  --vector-shadow-alpha-sm: 0.06;
+  --vector-shadow-alpha-md: 0.08;
+  --vector-shadow-alpha-lg: 0.12;
 
   /* ================================================================== */
-  /* SEMANTIC -- what components are allowed to use                      */
+  /* SEMANTIC -- LIGHT. What components are allowed to use.              */
   /* ================================================================== */
+
+  /* Tells the UA which treatment to paint native controls, scrollbars and the
+   * canvas in. Overridden in the dark blocks below. */
+  color-scheme: light;
 
   /* --- Background layers ------------------------------------------- */
   /* `sunken` sits *behind* content (the sidebar rail); `app` is the page
@@ -105,56 +164,118 @@
   --color-surface-subtle: var(--vector-gray-50);
   --color-surface-hover: var(--vector-gray-100);
   --color-surface-active: var(--vector-gray-200);
-  --color-surface-selected: var(--vector-indigo-50);
+  --color-surface-selected: var(--vector-cyan-50);
+  /* A wash over the page behind a modal. Not `opacity` on the page itself,
+   * which would fade the dialog with it. */
+  --color-overlay-scrim: hsl(218deg 25% 18% / 0.32);
 
   /* --- Borders ------------------------------------------------------ */
+  /* Four weights, and `control` is the one people get wrong. A divider
+   * between rows is decorative and may be faint; the outline of a text input
+   * is the only thing telling the user a control is there, so WCAG 1.4.11
+   * puts it at 3:1 and `--color-border` does not clear that bar. */
   --color-border-subtle: var(--vector-gray-100);
   --color-border: var(--vector-gray-200);
   --color-border-strong: var(--vector-gray-300);
+  --color-border-control: var(--vector-gray-450);
 
   /* --- Text --------------------------------------------------------- */
   --color-text-primary: var(--vector-gray-900);
   --color-text-secondary: var(--vector-gray-600);
   --color-text-muted: var(--vector-gray-500);
   --color-text-on-accent: var(--vector-gray-0);
-  --color-text-accent: var(--vector-indigo-600);
+  --color-text-accent: var(--vector-cyan-600);
   --color-text-danger: var(--vector-red-600);
   --color-text-success: var(--vector-green-700);
+  --color-text-warning: var(--vector-amber-700);
   /* Text inside a control the UI has switched off. Deliberately *not* a text
    * token below AA: a disabled control still has to be readable, because "I
    * cannot use this yet" is information the user needs. It is distinguished
    * from enabled text by weight and by an adjacent visible marker, never by
    * contrast alone. */
   --color-text-disabled: var(--vector-gray-500);
+  /* Decorative only -- separator dots, watermark rules. Below AA by design;
+   * never put a word the user has to read in it. */
+  --color-text-faint: var(--vector-gray-400);
 
   /* --- Accent ------------------------------------------------------- */
-  --color-accent: var(--vector-indigo-500);
-  --color-accent-hover: var(--vector-indigo-600);
-  --color-accent-active: var(--vector-indigo-700);
-  --color-accent-subtle: var(--vector-indigo-50);
-  --color-accent-border: var(--vector-indigo-200);
+  --color-accent: var(--vector-cyan-600);
+  --color-accent-hover: var(--vector-cyan-700);
+  --color-accent-active: var(--vector-cyan-800);
+  --color-accent-subtle: var(--vector-cyan-50);
+  --color-accent-subtle-hover: var(--vector-cyan-100);
+  --color-accent-border: var(--vector-cyan-200);
+  --color-accent-glyph: var(--vector-cyan-500);
 
-  /* --- Status ------------------------------------------------------- */
+  /* --- Status: danger / success / warning / info -------------------- */
   --color-danger: var(--vector-red-600);
   --color-danger-hover: var(--vector-red-700);
   --color-danger-subtle: var(--vector-red-50);
   --color-danger-border: var(--vector-red-200);
+  --color-danger-text: var(--vector-red-600);
 
   --color-success: var(--vector-green-600);
   --color-success-hover: var(--vector-green-700);
   --color-success-subtle: var(--vector-green-50);
   --color-success-border: var(--vector-green-200);
+  --color-success-text: var(--vector-green-700);
+
+  --color-warning: var(--vector-amber-600);
+  --color-warning-hover: var(--vector-amber-700);
+  --color-warning-subtle: var(--vector-amber-50);
+  --color-warning-border: var(--vector-amber-200);
+  --color-warning-text: var(--vector-amber-700);
+
+  --color-info: var(--vector-cyan-600);
+  --color-info-subtle: var(--vector-cyan-50);
+  --color-info-border: var(--vector-cyan-200);
+  --color-info-text: var(--vector-cyan-700);
+
+  /* --- Workflow state categories ------------------------------------ */
+  /* Mirrors the server's `WorkflowStateCategory`. These tint the status
+   * glyph; they never carry the meaning alone -- StatusIndicator draws a
+   * different *silhouette* per category precisely so that the colour is
+   * redundant for anyone who cannot separate these hues. */
+  --color-status-backlog: var(--vector-gray-450);
+  --color-status-unstarted: var(--vector-gray-600);
+  --color-status-started: var(--vector-amber-600);
+  --color-status-completed: var(--vector-green-600);
+  --color-status-canceled: var(--vector-gray-500);
+
+  /* --- Priority ----------------------------------------------------- */
+  /* Restrained on purpose. Only `urgent` and `high` are coloured; a five-hue
+   * priority scale turns every list into a fruit salad and stops red from
+   * meaning anything. Magnitude is carried by the glyph's bar count. */
+  --color-priority-none: var(--vector-gray-450);
+  --color-priority-low: var(--vector-gray-500);
+  --color-priority-medium: var(--vector-gray-600);
+  --color-priority-high: var(--vector-amber-600);
+  --color-priority-urgent: var(--vector-red-600);
+
+  /* --- Avatar tints -------------------------------------------------- */
+  /* An avatar's hue is derived per-person from their name and arrives as an
+   * inline `--avatar-hue`; only the saturation/lightness pair is a theme
+   * decision, so it lives here. Splitting it this way is what keeps every one
+   * of the 360 possible hues legible in both themes without checking any of
+   * them: lightness is fixed, so the contrast is fixed. */
+  --avatar-bg: 42% 91%;
+  --avatar-fg: 52% 26%;
 
   /* --- Focus ring --------------------------------------------------- */
-  /* Ring *plus* offset ring in the surface colour, so the indicator stays
+  /* Ring *plus* offset ring in the page colour, so the indicator stays
    * visible when the focused control sits directly on a coloured background
-   * and a plain outline would blend into it. */
+   * and a plain outline would blend into it. Components that sit on a
+   * different surface re-point `--focus-ring-backdrop` locally. */
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
-  --focus-ring-color: var(--vector-indigo-500);
-  --focus-ring: 0 0 0 var(--focus-ring-offset) var(--color-bg-app),
+  --focus-ring-color: var(--vector-cyan-500);
+  --focus-ring-backdrop: var(--color-bg-app);
+  --focus-ring: 0 0 0 var(--focus-ring-offset) var(--focus-ring-backdrop),
     0 0 0 calc(var(--focus-ring-offset) + var(--focus-ring-width))
       var(--focus-ring-color);
+  /* For controls with no room to breathe (a cell in a dense row): the ring is
+   * drawn inside the box instead of around it. */
+  --focus-ring-inset: inset 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
 
   /* --- Spacing ------------------------------------------------------ */
   /* A 4px base with two half-steps at the small end. Dense UI spends most of
@@ -173,6 +294,8 @@
   --space-10: 4rem; /* 64px */
 
   /* --- Radii -------------------------------------------------------- */
+  /* Small. A 12px radius on a 28px control is a pill, and pills read as
+   * marketing; crisp near-rectangles read as instrument panel. */
   --radius-sm: 3px;
   --radius-md: 5px;
   --radius-lg: 8px;
@@ -208,19 +331,25 @@
   --weight-semibold: 600;
 
   /* Negative tracking on large type only; small text needs its default
-   * spacing to stay legible. */
+   * spacing to stay legible. `caps` is for the uppercase micro-labels that
+   * head a list section, where unspaced capitals set solid. */
   --tracking-tight: -0.011em;
   --tracking-normal: 0;
   --tracking-wide: 0.02em;
+  --tracking-caps: 0.06em;
 
   /* --- Elevation ---------------------------------------------------- */
-  --shadow-sm: 0 1px 2px hsl(var(--vector-shadow-color) / 0.06);
+  /* Used sparingly and only for things that genuinely float (menus, dialogs,
+   * toasts). Depth inside the page comes from layered surfaces and 1px
+   * borders; a card with a drop shadow around every list section is how a
+   * dense tool ends up looking like a pricing page. */
+  --shadow-sm: 0 1px 2px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-sm));
   --shadow-md:
-    0 2px 4px hsl(var(--vector-shadow-color) / 0.06),
-    0 4px 12px hsl(var(--vector-shadow-color) / 0.08);
+    0 2px 4px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-sm)),
+    0 4px 12px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-md));
   --shadow-lg:
-    0 4px 8px hsl(var(--vector-shadow-color) / 0.06),
-    0 12px 32px hsl(var(--vector-shadow-color) / 0.12);
+    0 4px 8px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-sm)),
+    0 12px 32px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-lg));
 
   /* --- Motion ------------------------------------------------------- */
   /* Chrome feedback should be perceptible but never something you wait on.
@@ -228,14 +357,23 @@
   --duration-instant: 60ms;
   --duration-fast: 100ms;
   --duration-moderate: 160ms;
+  --duration-slow: 240ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
 
   /* --- Layering ----------------------------------------------------- */
   /* Named, and few. The failure mode this prevents is `z-index: 9999`
-   * appearing in a component because nobody knew what it had to beat. */
+   * appearing in a component because nobody knew what it had to beat.
+   *
+   * Note that a `<dialog>` opened as a modal is painted in the browser's top
+   * layer and ignores z-index entirely. The scale below only orders things
+   * that are still in the normal flow. */
   --z-base: 0;
+  --z-raised: 1;
   --z-sticky: 10;
   --z-overlay: 100;
+  --z-popover: 200;
+  --z-toast: 300;
   --z-skip-link: 1000;
 
   /* --- Layout ------------------------------------------------------- */
@@ -248,6 +386,14 @@
    * a precision task. */
   --control-height-sm: 1.75rem; /* 28px */
   --control-height-md: 2rem; /* 32px */
+  /* One dense list row. Fixed, so rows do not jitter as their content varies
+   * and a future virtualised list can compute offsets without measuring. */
+  --row-height: 2.25rem; /* 36px */
+  /* The column every status/priority glyph is drawn into. A fixed width means
+   * the titles down a list all start on the same x, which is most of what
+   * makes a dense list scannable. */
+  --glyph-size: 0.875rem; /* 14px */
+  --glyph-column: 1.25rem; /* 20px */
 
   /* The single viewport width at which the shell stops being a two-column
    * layout. Recorded here as the one source of truth -- but note that CSS
@@ -255,4 +401,188 @@
    * repeated in the `@media` blocks that use it. Change both together; they
    * are cross-referenced by comment at every use site. */
   --layout-breakpoint-compact: 48rem;
+}
+
+/* ==================================================================== */
+/* SEMANTIC -- DARK                                                      */
+/*                                                                       */
+/* Only tokens whose *value* differs are restated. Everything structural */
+/* -- spacing, radii, type, motion, layering -- is shared, because a     */
+/* theme is a palette and not a second design.                           */
+/*                                                                       */
+/* The two rule bodies below are identical apart from their selector.    */
+/* That duplication is deliberate. Hoisting it into one selector list    */
+/* is impossible here: the media-query arm has to carry the              */
+/* `:not([data-theme='light'])` guard and the explicit arm must not, and */
+/* CSS has no way to share a declaration block between two rules without */
+/* a build step this project does not have.                              */
+/* ==================================================================== */
+
+@media (prefers-color-scheme: dark) {
+  /* `:not([data-theme='light'])` is what lets an explicit light choice beat
+   * the OS preference. Without it a "light" toggle would be a no-op for every
+   * user whose system is dark -- the users for whom the toggle matters most. */
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
+    --color-bg-sunken: var(--vector-gray-1000);
+    --color-bg-app: var(--vector-gray-950);
+
+    --color-surface: var(--vector-gray-900);
+    --color-surface-raised: var(--vector-gray-850);
+    --color-surface-subtle: var(--vector-gray-850);
+    --color-surface-hover: var(--vector-gray-800);
+    --color-surface-active: var(--vector-gray-750);
+    --color-surface-selected: var(--vector-cyan-950);
+    /* Heavier than the light scrim: the page behind is already dark, so a 32%
+     * wash barely separates the dialog from it. */
+    --color-overlay-scrim: hsl(218deg 30% 4% / 0.62);
+
+    --color-border-subtle: var(--vector-gray-850);
+    --color-border: var(--vector-gray-800);
+    --color-border-strong: var(--vector-gray-750);
+    --color-border-control: var(--vector-gray-dim);
+
+    --color-text-primary: var(--vector-gray-100);
+    --color-text-secondary: var(--vector-gray-400);
+    --color-text-muted: var(--vector-gray-mute);
+    /* cyan-600 is dark enough that white sits on it at 5.6:1, and that holds
+     * in both themes -- so the on-accent colour does not flip. */
+    --color-text-on-accent: var(--vector-gray-0);
+    --color-text-accent: var(--vector-cyan-300);
+    --color-text-danger: var(--vector-red-400);
+    --color-text-success: var(--vector-green-400);
+    --color-text-warning: var(--vector-amber-300);
+    --color-text-disabled: var(--vector-gray-mute);
+    --color-text-faint: var(--vector-gray-dim);
+
+    /* Fills stay at the mid ramp so white text keeps working on them; only
+     * the *text* and *glyph* roles move to the light end. That asymmetry is
+     * the whole trick to inverting a palette without re-picking it. */
+    --color-accent: var(--vector-cyan-600);
+    --color-accent-hover: var(--vector-cyan-500);
+    --color-accent-active: var(--vector-cyan-400);
+    --color-accent-subtle: var(--vector-cyan-950);
+    --color-accent-subtle-hover: var(--vector-cyan-900);
+    --color-accent-border: var(--vector-cyan-800);
+    --color-accent-glyph: var(--vector-cyan-300);
+
+    --color-danger-subtle: var(--vector-red-950);
+    --color-danger-border: var(--vector-red-900);
+    --color-danger-text: var(--vector-red-300);
+
+    --color-success-subtle: var(--vector-green-950);
+    --color-success-border: var(--vector-green-900);
+    --color-success-text: var(--vector-green-300);
+
+    --color-warning-subtle: var(--vector-amber-950);
+    --color-warning-border: var(--vector-amber-900);
+    --color-warning-text: var(--vector-amber-300);
+
+    --color-info-subtle: var(--vector-cyan-950);
+    --color-info-border: var(--vector-cyan-900);
+    --color-info-text: var(--vector-cyan-300);
+
+    --color-status-backlog: var(--vector-gray-dim);
+    --color-status-unstarted: var(--vector-gray-400);
+    --color-status-started: var(--vector-amber-300);
+    --color-status-completed: var(--vector-green-300);
+    --color-status-canceled: var(--vector-gray-mute);
+
+    --color-priority-none: var(--vector-gray-dim);
+    --color-priority-low: var(--vector-gray-mute);
+    --color-priority-medium: var(--vector-gray-400);
+    --color-priority-high: var(--vector-amber-300);
+    --color-priority-urgent: var(--vector-red-400);
+
+    --avatar-bg: 34% 21%;
+    --avatar-fg: 62% 76%;
+
+    --focus-ring-color: var(--vector-cyan-300);
+
+    /* Shadows do almost nothing against a near-black page, so they get darker
+     * and heavier rather than lighter; the 1px border on a floating panel is
+     * what actually separates it from the page in this theme. */
+    --vector-shadow-color: 220deg 40% 2%;
+    --vector-shadow-alpha-sm: 0.4;
+    --vector-shadow-alpha-md: 0.5;
+    --vector-shadow-alpha-lg: 0.6;
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --color-bg-sunken: var(--vector-gray-1000);
+  --color-bg-app: var(--vector-gray-950);
+
+  --color-surface: var(--vector-gray-900);
+  --color-surface-raised: var(--vector-gray-850);
+  --color-surface-subtle: var(--vector-gray-850);
+  --color-surface-hover: var(--vector-gray-800);
+  --color-surface-active: var(--vector-gray-750);
+  --color-surface-selected: var(--vector-cyan-950);
+  --color-overlay-scrim: hsl(218deg 30% 4% / 0.62);
+
+  --color-border-subtle: var(--vector-gray-850);
+  --color-border: var(--vector-gray-800);
+  --color-border-strong: var(--vector-gray-750);
+  --color-border-control: var(--vector-gray-dim);
+
+  --color-text-primary: var(--vector-gray-100);
+  --color-text-secondary: var(--vector-gray-400);
+  --color-text-muted: var(--vector-gray-mute);
+  --color-text-on-accent: var(--vector-gray-0);
+  --color-text-accent: var(--vector-cyan-300);
+  --color-text-danger: var(--vector-red-400);
+  --color-text-success: var(--vector-green-400);
+  --color-text-warning: var(--vector-amber-300);
+  --color-text-disabled: var(--vector-gray-mute);
+  --color-text-faint: var(--vector-gray-dim);
+
+  --color-accent: var(--vector-cyan-600);
+  --color-accent-hover: var(--vector-cyan-500);
+  --color-accent-active: var(--vector-cyan-400);
+  --color-accent-subtle: var(--vector-cyan-950);
+  --color-accent-subtle-hover: var(--vector-cyan-900);
+  --color-accent-border: var(--vector-cyan-800);
+  --color-accent-glyph: var(--vector-cyan-300);
+
+  --color-danger-subtle: var(--vector-red-950);
+  --color-danger-border: var(--vector-red-900);
+  --color-danger-text: var(--vector-red-300);
+
+  --color-success-subtle: var(--vector-green-950);
+  --color-success-border: var(--vector-green-900);
+  --color-success-text: var(--vector-green-300);
+
+  --color-warning-subtle: var(--vector-amber-950);
+  --color-warning-border: var(--vector-amber-900);
+  --color-warning-text: var(--vector-amber-300);
+
+  --color-info-subtle: var(--vector-cyan-950);
+  --color-info-border: var(--vector-cyan-900);
+  --color-info-text: var(--vector-cyan-300);
+
+  --color-status-backlog: var(--vector-gray-dim);
+  --color-status-unstarted: var(--vector-gray-400);
+  --color-status-started: var(--vector-amber-300);
+  --color-status-completed: var(--vector-green-300);
+  --color-status-canceled: var(--vector-gray-mute);
+
+  --color-priority-none: var(--vector-gray-dim);
+  --color-priority-low: var(--vector-gray-mute);
+  --color-priority-medium: var(--vector-gray-400);
+  --color-priority-high: var(--vector-amber-300);
+  --color-priority-urgent: var(--vector-red-400);
+
+  --avatar-bg: 34% 21%;
+  --avatar-fg: 62% 76%;
+
+  --focus-ring-color: var(--vector-cyan-300);
+
+  --vector-shadow-color: 220deg 40% 2%;
+  --vector-shadow-alpha-sm: 0.4;
+  --vector-shadow-alpha-md: 0.5;
+  --vector-shadow-alpha-lg: 0.6;
 }

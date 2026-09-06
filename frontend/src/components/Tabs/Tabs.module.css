@@ -1,0 +1,69 @@
+.tablist {
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  border-block-end: var(--border-width) solid var(--color-border);
+}
+
+.tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+
+  height: var(--control-height-md);
+  padding: 0;
+  border: 0;
+  background: none;
+
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.tab:hover {
+  color: var(--color-text-primary);
+}
+
+/**
+ * The active underline overlaps the tablist's own bottom border rather than
+ * replacing it, which keeps the row of tabs on one baseline. `::after` is used
+ * so the indicator can be 2px without the tab's box growing 2px taller than
+ * its neighbours -- the classic cause of tabs that shift by a pixel as you
+ * click between them.
+ */
+.selected {
+  color: var(--color-text-primary);
+}
+
+.selected::after {
+  content: '';
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: -1px;
+  height: 2px;
+  border-radius: var(--radius-full) var(--radius-full) 0 0;
+  background-color: var(--color-accent);
+}
+
+.count {
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  padding-block-start: var(--space-6);
+}
+
+/* The panel is focusable so keyboard users can reach its content directly from
+ * the tab; it is not a control, so it takes no ring styling beyond the global
+ * one. */
+.panel:focus-visible {
+  border-radius: var(--radius-sm);
+}

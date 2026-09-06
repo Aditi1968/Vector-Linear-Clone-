@@ -1,0 +1,40 @@
+.skeleton {
+  display: block;
+  width: var(--skeleton-width, 100%);
+  height: var(--skeleton-height, 0.75rem);
+  border-radius: var(--radius-sm);
+
+  /* A sweep across a flat base rather than a pulsing opacity. Opacity fades
+   * the placeholder towards whatever is behind it, so the same rule looks
+   * different on every surface; a gradient over an explicit colour does not.
+   * `background-size: 200%` is what gives the sweep somewhere to travel. */
+  background-color: var(--color-surface-hover);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-surface-active) 50%,
+    transparent 100%
+  );
+  background-size: 200% 100%;
+  animation: sweep 1.3s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+
+/**
+ * The global reduced-motion rule collapses the animation, which would freeze
+ * the sweep mid-travel and leave a lopsided gradient on screen. A flat block
+ * is the honest still frame.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    background-image: none;
+  }
+}

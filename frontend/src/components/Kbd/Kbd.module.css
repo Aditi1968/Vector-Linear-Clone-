@@ -1,0 +1,33 @@
+/**
+ * A keyboard hint.
+ *
+ * Vector is a keyboard-driven tool, so these appear in menus, tooltips and
+ * empty states -- often several to a line. They are therefore sized to sit
+ * *inside* a line of 13px text without changing its leading, which is why the
+ * height is in `em` and the font size is a fraction of the parent rather than
+ * a token: a `--text-2xs` key next to `--text-lg` heading text looks like a
+ * mistake.
+ */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  min-width: 1.5em;
+  height: 1.5em;
+  padding-inline: 0.4em;
+
+  border: var(--border-width) solid var(--color-border-strong);
+  /* A single hairline under the key rather than a drop shadow: it reads as a
+   * physical edge at 11px, where a blurred shadow just reads as dirt. */
+  border-bottom-width: 2px;
+  border-radius: var(--radius-sm);
+
+  background-color: var(--color-surface-subtle);
+  color: var(--color-text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.85em;
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-none);
+  white-space: nowrap;
+}

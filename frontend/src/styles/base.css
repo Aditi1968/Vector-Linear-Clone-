@@ -141,6 +141,47 @@ hr {
   background-color: var(--color-border);
 }
 
+/**
+ * `<dialog>` ships with a 1px inset border, `padding: 1em` and `color: canvas`
+ * backgrounds, and `showModal()` centres it with UA margins. Zeroing that here
+ * rather than in the component keeps the component's stylesheet describing
+ * Vector's dialog instead of arguing with Chrome's.
+ *
+ * `:not([open])` stays `display: none` -- the UA rule already does that, and
+ * restating it means a component may safely give `dialog` a `display` value
+ * without accidentally showing a closed one.
+ */
+dialog {
+  max-width: none;
+  max-height: none;
+  margin: auto;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+}
+
+dialog:not([open]) {
+  display: none;
+}
+
+/**
+ * Scrollbars.
+ *
+ * `scrollbar-width`/`scrollbar-color` are the standard properties and are the
+ * reason this product ships no `ScrollArea` component: a JS-driven custom
+ * scrollbar exists to work around what these two lines now do natively, and it
+ * costs a resize observer, a wheel handler, and every keyboard and
+ * accessibility behaviour the platform gives away for free.
+ *
+ * `thin` rather than `none`: a scrollbar that is invisible until you move the
+ * mouse is a discoverability bug in a tool whose main surface is a long list.
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-strong) transparent;
+}
+
 /* ------------------------------------------------------------------ */
 /* Focus                                                               */
 /* ------------------------------------------------------------------ */

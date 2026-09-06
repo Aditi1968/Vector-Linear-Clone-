@@ -1,0 +1,110 @@
+.root {
+  position: relative;
+  display: inline-flex;
+}
+
+.menu {
+  position: absolute;
+  z-index: var(--z-popover);
+  inset-block-start: calc(100% + var(--space-2));
+  inset-inline-start: 0;
+
+  min-width: 12rem;
+  max-width: 20rem;
+  padding: var(--space-2);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
+
+  background-color: var(--color-surface-raised);
+  /* Border *and* shadow. The shadow does the lifting in light mode and almost
+   * nothing against a near-black page, where the border is the only thing
+   * separating the panel from what is behind it. */
+  box-shadow: var(--shadow-lg);
+
+  animation: drop var(--duration-fast) var(--ease-out);
+}
+
+.alignEnd {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+}
+
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  width: 100%;
+
+  height: var(--control-height-sm);
+  padding-inline: var(--space-4);
+  border: 0;
+  border-radius: var(--radius-sm);
+
+  background: none;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  text-align: start;
+  white-space: nowrap;
+}
+
+.item:hover:not(:disabled) {
+  background-color: var(--color-surface-hover);
+}
+
+/* The focused item is highlighted as well as ringed. Focus moves with the
+ * arrow keys here, so the ring alone reads as a stray outline rather than as
+ * "this is the item you are on". */
+.item:focus-visible {
+  background-color: var(--color-surface-hover);
+}
+
+.item:disabled {
+  color: var(--color-text-disabled);
+}
+
+.destructive {
+  color: var(--color-text-danger);
+}
+
+.destructive:hover:not(:disabled),
+.destructive:focus-visible {
+  background-color: var(--color-danger-subtle);
+}
+
+.itemIcon {
+  display: inline-flex;
+  flex: none;
+  color: var(--color-text-muted);
+  font-size: 1.05em;
+}
+
+.destructive .itemIcon {
+  color: inherit;
+}
+
+.itemLabel {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.shortcut {
+  flex: none;
+  margin-inline-start: var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-family: var(--font-mono);
+}
+
+.separator {
+  height: var(--border-width);
+  margin: var(--space-2) calc(var(--space-2) * -1);
+  background-color: var(--color-border);
+}
