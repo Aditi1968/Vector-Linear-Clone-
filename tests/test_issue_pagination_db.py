@@ -31,7 +31,6 @@ Marked `db`: deselected by default, skipped when Docker is unreachable.
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from operator import attrgetter
-from pathlib import Path
 from uuid import UUID
 
 import asyncpg
@@ -44,14 +43,10 @@ from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
 from app.services.teams import TeamService
 
-from tests.conftest import reset_schema
+from tests.conftest import apply_all_migrations, reset_schema
 
 
 pytestmark = pytest.mark.db
-
-MIGRATIONS_DIR = Path(__file__).resolve().parents[1] / "migrations"
-MIGRATION_001 = MIGRATIONS_DIR / "001_issues.sql"
-MIGRATION_002 = MIGRATIONS_DIR / "002_tenancy.sql"
 
 # The tenant 002 seeds, written as literals rather than read back out of the
 # database: 002 names both rows in the file precisely so that a test can
@@ -74,9 +69,21 @@ INSERT = """
         priority,
         completed_at,
         created_at,
-        updated_at
+        updated_at,
+        number,
+        workflow_state_id
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+"""
+
+# The bootstrap team's starting state, resolved rather than named as a
+# literal: 005 chooses the ids, and `issues.workflow_state_id` is NOT NULL
+# with no default.
+DEFAULT_STATE_SQL = """
+SELECT id FROM workflow_states
+WHERE workspace_id = $1 AND team_id = $2 AND type = 'unstarted'
+ORDER BY position, id
+LIMIT 1
 """
 
 # Small on purpose. At three rows a wrong page is readable at a glance, and
@@ -335,12 +342,20 @@ async def seeded(postgres_dsn):
         # has to follow the FK graph, and that graph grows with every
         # migration. A list here goes stale silently.
         await reset_schema(connection)
-        await connection.execute(MIGRATION_001.read_text(encoding="utf-8"))
 
-        # 002 as well as 001: the repository's SELECT leads with
-        # `workspace_id = $1`, and both that column and the bootstrap tenant
-        # these rows are filed against arrive with it.
-        await connection.execute(MIGRATION_002.read_text(encoding="utf-8"))
+        # Every migration, not a pinned 001+002 prefix. The subject here is
+        # the real IssueRepository, and its SELECT list is written against
+        # whatever the schema currently holds: 002 put `workspace_id` in the
+        # predicate, and 008 put `cycle_id` in the columns it reads back. A
+        # prefix that stops short of the newest migration builds a table the
+        # repository's own query cannot run against, and the failure names a
+        # column rather than the pagination this file is about.
+        await apply_all_migrations(connection)
+
+        state_id = await connection.fetchval(
+            DEFAULT_STATE_SQL, BOOTSTRAP_WORKSPACE_ID, BOOTSTRAP_TEAM_ID
+        )
+
         await connection.executemany(
             INSERT,
             [
@@ -354,8 +369,14 @@ async def seeded(postgres_dsn):
                     row.completed_at,
                     row.created_at,
                     row.updated_at,
+                    # 005 made both NOT NULL. The number is the seed's own
+                    # position and never the ordering under test -- these
+                    # rows are deliberately seeded out of created_at order,
+                    # and nothing in this file reads `number`.
+                    position,
+                    state_id,
                 )
-                for row in SEED
+                for position, row in enumerate(SEED, start=1)
             ],
         )
 

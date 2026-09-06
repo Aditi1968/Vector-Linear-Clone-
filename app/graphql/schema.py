@@ -126,30 +126,6 @@ def _mask_result(result):
     return result
 
 
-@strawberry.type
-class Query(IssueQuery, CycleQuery):
-    """The schema's single root query, composed one feature at a time.
-
-    GraphQL allows exactly one root query type, and a growing product wants
-    more than one file's worth of resolvers on it. Composing by inheritance
-    keeps each feature's reads in its own module -- so two features being
-    written at once do not edit the same class -- while the root that
-    clients see stays a single type.
-
-    The bases must not name the same field twice. Nothing checks that:
-    Python's MRO would quietly pick the first, and the schema would export
-    without complaint. Two features that both want `cycles` have to settle
-    it between themselves, and the exported SDL -- checked in, and diffed on
-    every change by `npm run graphql:schema:check` -- is where a collision
-    is visible.
-    """
-
-
-@strawberry.type
-class Mutation(IssueMutation, CycleMutation):
-    """The schema's single root mutation, composed the same way."""
-
-
 class _MaskedSchema(strawberry.Schema):
     """A schema that masks internal errors on every path out, not most.
 

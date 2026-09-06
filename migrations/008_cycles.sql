@@ -1,9 +1,12 @@
 -- Cycles: a team's time-boxed iteration, and the column on issues that puts
 -- an issue in one.
 --
--- The product rule this file has to make unrepresentable is narrow and easy
--- to state: a cycle belongs to exactly one team, and an issue may only join a
--- cycle belonging to ITS OWN team. Two single-column foreign keys --
+-- Two product rules this file has to make unrepresentable, both of them
+-- rules the server is the only place able to hold.
+--
+-- The first is about ownership: a cycle belongs to exactly one team, and an
+-- issue may only join a cycle belonging to ITS OWN team. Two single-column
+-- foreign keys --
 -- issues.cycle_id -> cycles.id alongside the tenancy pair 002 already
 -- declares -- would each pass while together describing an issue on team A
 -- sitting in team B's cycle, in another workspace entirely. So the reference
@@ -11,6 +14,14 @@
 -- carries the workspace into the team reference, and for the same reason: the
 -- server is the only place a rule like this cannot be raced by an application
 -- that checked first and wrote second.
+--
+-- The second is about time: a team's cycles may not overlap. That one is
+-- `cycles_no_overlap`, an EXCLUDE over a tstzrange, and it is stated in the
+-- schema for exactly the reason the first one is -- a service that SELECTs
+-- for an overlap and then INSERTs is two statements with a race between
+-- them, and two concurrent creates walk straight through it. See the
+-- constraint itself for why the range is half-open and why btree_gist is
+-- installed above.
 --
 -- Apply this ONLY through `python -m scripts.apply_migration
 -- migrations/008_cycles.sql`. A hand-run gets no ledger row, no advisory lock
@@ -25,6 +36,28 @@
 -- default. There is deliberately no automatic cycle generation here and none
 -- planned in this migration's scope: cycles are created explicitly, so no
 -- statement in this file invents one.
+
+
+-- Required by `cycles_no_overlap` below, and by nothing else in this file.
+--
+-- An EXCLUDE constraint is backed by a GiST index, and stock GiST has no
+-- operator class for UUID equality -- so `team_id WITH =` cannot be part of
+-- the key without this. The alternative shapes are both worse: "one
+-- exclusion per team" is not expressible, and dropping team_id from the key
+-- would forbid two DIFFERENT teams from running cycles in the same
+-- fortnight, which is the normal state of a workspace rather than an error.
+--
+-- Bare, not IF NOT EXISTS: tests/test_migration_lint.py rejects the guarded
+-- spelling for every statement including this one, on the grounds that
+-- "already installed" is not "installed at the version and schema this
+-- migration was written against". The ledger owns idempotency.
+--
+-- btree_gist is a trusted extension on PostgreSQL 13+, so this wants the
+-- database owner rather than a superuser. It is also transactional -- unlike
+-- a value added by `ALTER TYPE`, an extension can be created and USED in the
+-- same transaction, which is what lets the constraint below be declared in
+-- this same file without splitting it in two.
+CREATE EXTENSION btree_gist;
 
 
 CREATE TABLE cycles (
@@ -102,16 +135,50 @@ CREATE TABLE cycles (
     -- cycle" query -- `now() BETWEEN starts_at AND ends_at` and its
     -- half-open variants alike -- disagrees about whether such a row is ever
     -- live. Rejecting it at the source is cheaper than teaching every reader
-    -- to cope with it.
+    -- to cope with it. It is also what keeps `cycles_no_overlap` below
+    -- meaningful: an empty tstzrange overlaps nothing, so a zero-length row
+    -- would slip past the exclusion constraint entirely.
+    CONSTRAINT cycles_dates_ordered CHECK (ends_at > starts_at),
+
+    -- One team runs one cycle at a time: no two of a team's cycles may cover
+    -- the same instant.
     --
-    -- What this does NOT say is that a team's cycles cannot overlap. That
-    -- would be an EXCLUDE constraint over a tstzrange, which needs
-    -- btree_gist for the equality part of the key, and installing an
-    -- extension is a decision of its own rather than a rider on this one.
-    -- Overlap is also not obviously wrong: a team running a hardening cycle
-    -- across the end of a feature cycle is a real thing to want. Left out on
-    -- purpose, and recorded here so its absence reads as a decision.
-    CONSTRAINT cycles_dates_ordered CHECK (ends_at > starts_at)
+    -- This is an EXCLUDE and not a service-level check, and the difference is
+    -- the whole point of writing it here. `SELECT ... WHERE ranges overlap`
+    -- followed by an INSERT is two statements with a gap between them, and
+    -- under READ COMMITTED two concurrent creates both read a table in which
+    -- the other's row does not exist yet, both find no overlap, and both
+    -- insert. Nothing about that is unlikely -- it is one user double-clicking
+    -- a button. A GiST exclusion constraint takes the decision inside the
+    -- index write, so the second transaction blocks on the first and then
+    -- fails, whatever the interleaving.
+    --
+    -- The rule is enforced rather than left open because "the current cycle"
+    -- is a concept the product depends on, and it only has an answer if the
+    -- ranges are disjoint: `WHERE now() >= starts_at AND now() < ends_at`
+    -- returns at most one row here, and would return an arbitrary number of
+    -- them under overlap, leaving every reader to invent its own tiebreak.
+    --
+    -- '[)' -- half-open, and load-bearing. Cycles are normally written back
+    -- to back, so a cycle ending 2026-01-15T00:00Z and the next starting at
+    -- that same instant is the ordinary case; under '[]' those two share the
+    -- boundary instant and the constraint would refuse the most common thing
+    -- a team does. Half-open makes an end exclusive, so they abut and do not
+    -- overlap. It is the default for a two-argument tstzrange, and written
+    -- out anyway because the whole behaviour of the constraint turns on it.
+    --
+    -- workspace_id is in the key although team_id alone already implies it --
+    -- cycles_team_fk forces a row's team to a real teams row and teams.id is
+    -- a primary key, so two cycles sharing a team share a workspace. It is
+    -- written out so the constraint reads as tenant-scoped without tracing a
+    -- foreign key to prove it, which is the same convention every statement
+    -- in app/repositories/ follows.
+    CONSTRAINT cycles_no_overlap
+        EXCLUDE USING gist (
+            workspace_id WITH =,
+            team_id WITH =,
+            tstzrange(starts_at, ends_at, '[)') WITH &&
+        )
 );
 
 

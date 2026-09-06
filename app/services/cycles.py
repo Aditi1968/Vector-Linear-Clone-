@@ -23,6 +23,7 @@ NAME_MAX_LENGTH = 200
 # turns into a wrong error message rather than a loud one.
 CYCLES_TEAM_NUMBER_KEY = "cycles_team_number_key"
 CYCLES_TEAM_FK = "cycles_team_fk"
+CYCLES_NO_OVERLAP = "cycles_no_overlap"
 
 
 class CycleService:
@@ -44,15 +45,23 @@ class CycleService:
 
     ## What is refused where
 
-    Two rules about a cycle are enforced by PostgreSQL and not by any
+    Three rules about a cycle are enforced by PostgreSQL and not by any
     statement in this file: that the team a cycle names belongs to the
-    workspace the cycle claims, and that a team's cycle numbers are unique.
-    Both would be racy as a SELECT first -- the team could be deleted, and
-    the number taken, between the look and the write -- so the write is
+    workspace the cycle claims, that a team's cycle numbers are unique, and
+    that a team's cycles do not overlap in time. Every one of them would be
+    racy as a SELECT first -- the team could be deleted, the number taken,
+    and the range claimed, between the look and the write -- so the write is
     attempted and the server's refusal is translated here into the same
     structured error a pre-check would have produced. The translation is
     narrowed to one named constraint each: anything else propagates as the
     unexpected failure it is.
+
+    The overlap rule is the one where this matters most, because a
+    pre-check for it looks convincing and is not: two concurrent creates
+    both read a table without the other's row, both find the range free, and
+    both insert. `cycles_no_overlap` is a GiST exclusion constraint, so the
+    decision happens inside the index write and the second caller fails
+    however the two interleave. Nothing in this file may re-implement it.
 
     ## Field names in errors
 
@@ -104,6 +113,8 @@ class CycleService:
                     )
                 except asyncpg.UniqueViolationError as error:
                     raise self._duplicate_number(error, number) from None
+                except asyncpg.ExclusionViolationError as error:
+                    raise self._overlapping_dates(error) from None
                 except asyncpg.ForeignKeyViolationError as error:
                     raise self._unknown_team(error) from None
 
@@ -222,6 +233,8 @@ class CycleService:
                     )
                 except asyncpg.UniqueViolationError as error:
                     raise self._duplicate_number(error, number) from None
+                except asyncpg.ExclusionViolationError as error:
+                    raise self._overlapping_dates(error) from None
 
             # Outside the transaction: an UPDATE that matched nothing changed
             # nothing, so there is no work to roll back and no reason to hold
@@ -289,7 +302,13 @@ class CycleService:
         a field error, and it should be visible as a raise where it happens.
         """
         if error.constraint_name != CYCLES_TEAM_NUMBER_KEY:
-            return error
+            # Annotated rather than returned inline: asyncpg ships no types,
+            # so the parameter is Any and would silently satisfy any return
+            # type this function grew later. The same note stands on the two
+            # translations below.
+            unexpected: Exception = error
+
+            return unexpected
 
         return ValidationError(
             [
@@ -297,6 +316,36 @@ class CycleService:
                     field="number",
                     code="DUPLICATE",
                     message=f"This team already has a cycle numbered {number}",
+                )
+            ]
+        )
+
+    @staticmethod
+    def _overlapping_dates(error: asyncpg.ExclusionViolationError) -> Exception:
+        """Translate a clash with another of the team's cycles, or hand back
+        the original.
+
+        Reported on `startsAt` because that is the field a client moves to
+        resolve it, and because a two-field error would put the same message
+        twice under one input. The message does not name the cycle in the
+        way -- that would be a second query on a failure path, and it would
+        report a row the caller may have no other route to.
+
+        Narrowed to the one constraint, like every other translation here:
+        an exclusion violation from a constraint added later is not this
+        error, and must not be described to a client as one.
+        """
+        if error.constraint_name != CYCLES_NO_OVERLAP:
+            unexpected: Exception = error
+
+            return unexpected
+
+        return ValidationError(
+            [
+                ValidationIssue(
+                    field="startsAt",
+                    code="OVERLAPPING",
+                    message="This team already has a cycle covering those dates",
                 )
             ]
         )
@@ -312,7 +361,9 @@ class CycleService:
         property that stops a client sweeping ids to map a stranger's teams.
         """
         if error.constraint_name != CYCLES_TEAM_FK:
-            return error
+            unexpected: Exception = error
+
+            return unexpected
 
         return ValidationError(
             [
