@@ -297,6 +297,37 @@ export function MoreIcon(props: IconProps) {
 }
 
 /**
+ * A document: a page with ruled lines, corner folded.
+ *
+ * The fold is what separates it from the generic rectangle a card or a panel
+ * would use, and it survives 14px because it is one straight cut rather than
+ * a curl.
+ */
+export function DocumentIcon(props: IconProps) {
+  return (
+    <svg {...BASE_PROPS} {...props}>
+      <path d="M9.1 2.2H5.2a1.6 1.6 0 0 0-1.6 1.6v8.4a1.6 1.6 0 0 0 1.6 1.6h5.6a1.6 1.6 0 0 0 1.6-1.6V5.5Z" />
+      <path d="M9.1 2.2v3.3h3.3M6 8.6h4M6 11h2.6" />
+    </svg>
+  )
+}
+
+/**
+ * A favourite: an outlined star.
+ *
+ * Outlined rather than solid because the rail draws the *set* of favourites,
+ * not the act of favouriting -- a filled star reads as "this one is starred"
+ * and would be wrong on a section heading. The per-row toggle fills it.
+ */
+export function StarIcon(props: IconProps) {
+  return (
+    <svg {...BASE_PROPS} {...props}>
+      <path d="M8 2.4l1.72 3.49 3.85.56-2.79 2.71.66 3.84L8 11.19l-3.44 1.81.66-3.84L2.43 6.45l3.85-.56Z" />
+    </svg>
+  )
+}
+
+/**
  * Settings: sliders, not a gear.
  *
  * A gear's teeth turn to mush below about 20px, and this icon is rendered at

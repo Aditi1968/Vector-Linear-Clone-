@@ -95,7 +95,18 @@ describe('accessibility', () => {
       first, the global create action before the list it files into, and the
       whole of the chrome before the first row.
     */
-    const path = await tabPath(user, 16)
+    /*
+      The budget is a bound on the walk, not a claim about the rail's size.
+      It was 16, which was one more thing pinned than the comment above
+      intends: the rail grew twelve destinations (triage, initiatives,
+      roadmap, documents, saved views, favourites, analytics, releases,
+      environments, label groups, templates) and the walk stopped inside the
+      navigation, so `firstRowAt` was -1 and the failure read as a tab-order
+      regression rather than as a longer menu. Raised with headroom so the
+      next section to land does not re-fail it; the assertions below are still
+      about ORDER, and none of them cares how many stops precede the row.
+    */
+    const path = await tabPath(user, 40)
 
     // The skip link is first, which is the only position it works from.
     expect(path[0]).toBe('Skip to main content')

@@ -68,6 +68,14 @@
  * whose workflow state has not resolved, where a flex line would shuffle the
  * whole row left. The trailing track is `auto`, so the meta column is as wide
  * as it needs and no wider.
+ *
+ * The identifier track is `--key-column` and not `auto`, which is what makes
+ * the paragraph above true. Every row is its OWN grid container -- there is no
+ * shared column context down the list -- so an `auto` track is sized by that
+ * one row's identifier. A list holding both ENG-9 and ENG-1421 then starts its
+ * titles at two different x positions, which is exactly the drift this comment
+ * claims to prevent. The token is wide enough for five characters and a
+ * hyphen; a longer key truncates rather than moving the title.
  */
 .rowItem {
   padding: 0;
@@ -77,7 +85,8 @@
   display: grid;
   flex: 1;
   grid-template-columns:
-    var(--glyph-column) var(--glyph-column) auto minmax(0, 1fr) auto auto;
+    var(--glyph-column) var(--glyph-column) var(--key-column) minmax(0, 1fr)
+    auto auto;
   gap: var(--space-4);
   align-items: center;
   min-width: 0;

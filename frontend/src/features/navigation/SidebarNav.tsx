@@ -8,7 +8,11 @@ import type { ShellSidebarQuery } from '../../generated/operations'
 import { TEAM_KEY_PARAM, useAppPaths, useWorkspaceSlug } from '../../app/routes'
 import type { AppPaths } from '../../app/routes'
 import { NavRow } from './NavRow'
-import { primaryNavigationItems, workspaceNavigationItems } from './navigationItems'
+import {
+  primaryNavigationItems,
+  viewsNavigationItems,
+  workspaceNavigationItems,
+} from './navigationItems'
 import styles from './SidebarNav.module.css'
 
 type Team = ShellSidebarQuery['teams'][number]
@@ -79,6 +83,26 @@ export function SidebarNav({ id, collapsed }: SidebarNavProps) {
                   </span>
                 ) : undefined
               }
+            />
+          </li>
+        ))}
+      </ul>
+
+      {/*
+        Between the shipped sections and the teams, because these are the
+        viewer's OWN lists -- a saved view belongs to whoever created it and a
+        favourite is a row in that viewer's table. Its own `aria-label` rather
+        than a third entry in "Workspace": a screen-reader user tabbing the
+        rail should hear that the list changed owner.
+      */}
+      <ul className={styles.list} role="list" aria-label="Your views">
+        {viewsNavigationItems.map((item) => (
+          <li key={item.id}>
+            <NavRow
+              to={item.to(paths)}
+              end={item.end ?? false}
+              icon={item.icon}
+              label={item.label}
             />
           </li>
         ))}

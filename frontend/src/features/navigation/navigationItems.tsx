@@ -1,12 +1,18 @@
 import type { ReactNode } from 'react'
 
 import {
+  AlertIcon,
   BoardIcon,
+  CycleIcon,
+  DocumentIcon,
   InboxIcon,
   IssueIcon,
   IssuesIcon,
+  LabelIcon,
   ProjectIcon,
+  RelationIcon,
   SettingsIcon,
+  StarIcon,
   TeamIcon,
 } from '../../components'
 import type { AppPaths } from '../../app/routes'
@@ -71,6 +77,19 @@ export const primaryNavigationItems: readonly NavigationItem[] = [
     to: (paths) => paths.inbox(),
   },
   {
+    /*
+     * Directly after Inbox, and the pair is deliberate: both are queues of
+     * work arriving rather than work you went looking for. Inbox is what
+     * happened to issues you already care about; Triage is work that has not
+     * been accepted into a team's board yet. Keeping them adjacent is what
+     * stops someone reading Triage as a filter over All Issues.
+     */
+    id: 'triage',
+    label: 'Triage',
+    icon: <AlertIcon />,
+    to: (paths) => paths.triage(),
+  },
+  {
     id: 'issues',
     label: 'All Issues',
     icon: <IssuesIcon />,
@@ -95,6 +114,52 @@ export const primaryNavigationItems: readonly NavigationItem[] = [
     icon: <ProjectIcon />,
     to: (paths) => paths.projects(),
   },
+  {
+    id: 'initiatives',
+    label: 'Initiatives',
+    icon: <RelationIcon />,
+    to: (paths) => paths.initiatives(),
+  },
+  {
+    /*
+     * Roadmap is a *view* of initiatives and projects over time rather than a
+     * container of its own, so it follows them rather than opening the group.
+     */
+    id: 'roadmap',
+    label: 'Roadmap',
+    icon: <CycleIcon />,
+    to: (paths) => paths.roadmap(),
+  },
+  {
+    id: 'documents',
+    label: 'Documents',
+    icon: <DocumentIcon />,
+    to: (paths) => paths.documents(),
+  },
+]
+
+/*
+ * Lists the viewer assembled, rather than lists the product ships.
+ *
+ * Separate from `primaryNavigationItems` because these two are the only
+ * entries whose CONTENTS differ per person: a saved view belongs to whoever
+ * created it, and a favourite is a row in that viewer's own table. Grouping
+ * them under the shipped sections would suggest the workspace agrees on what
+ * they contain.
+ */
+export const viewsNavigationItems: readonly NavigationItem[] = [
+  {
+    id: 'saved-views',
+    label: 'Saved Views',
+    icon: <IssuesIcon />,
+    to: (paths) => paths.savedViews(),
+  },
+  {
+    id: 'favorites',
+    label: 'Favorites',
+    icon: <StarIcon />,
+    to: (paths) => paths.favorites(),
+  },
 ]
 
 /** The workspace itself, rather than the work inside it. */
@@ -104,6 +169,36 @@ export const workspaceNavigationItems: readonly NavigationItem[] = [
     label: 'Members',
     icon: <TeamIcon />,
     to: (paths) => paths.members(),
+  },
+  {
+    id: 'analytics',
+    label: 'Analytics',
+    icon: <BoardIcon />,
+    to: (paths) => paths.analytics(),
+  },
+  {
+    id: 'releases',
+    label: 'Releases',
+    icon: <CycleIcon />,
+    to: (paths) => paths.releases(),
+  },
+  {
+    id: 'environments',
+    label: 'Environments',
+    icon: <ProjectIcon />,
+    to: (paths) => paths.environments(),
+  },
+  {
+    id: 'label-groups',
+    label: 'Label Groups',
+    icon: <LabelIcon />,
+    to: (paths) => paths.labelGroups(),
+  },
+  {
+    id: 'templates',
+    label: 'Templates',
+    icon: <IssueIcon />,
+    to: (paths) => paths.templates(),
   },
   {
     id: 'settings',
