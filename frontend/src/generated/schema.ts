@@ -108,6 +108,49 @@ export type CycleUpdateInput = {
   workspaceSlug: Scalars['String']['input'];
 };
 
+/** One shortcut in one person's sidebar. Exactly one of `teamId`, `projectId` and `savedViewId` is set. */
+export type Favorite = {
+  __typename?: 'Favorite';
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  /** Where this sits in the person's own list. Neither unique nor contiguous: ties are broken by id, so two favorites sharing a number are ordered stably rather than ambiguously. */
+  position: Scalars['Int']['output'];
+  projectId?: Maybe<Scalars['UUID']['output']>;
+  savedViewId?: Maybe<Scalars['UUID']['output']>;
+  teamId?: Maybe<Scalars['UUID']['output']>;
+};
+
+/** Exactly one of `teamId`, `projectId` and `savedViewId` must be supplied. Sending none or more than one is a field error rather than a guess at which was meant. */
+export type FavoriteAddInput = {
+  projectId?: InputMaybe<Scalars['UUID']['input']>;
+  savedViewId?: InputMaybe<Scalars['UUID']['input']>;
+  teamId?: InputMaybe<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type FavoriteDeletePayload = {
+  __typename?: 'FavoriteDeletePayload';
+  deletedFavoriteId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type FavoritePayload = {
+  __typename?: 'FavoritePayload';
+  errors: Array<ValidationErrorType>;
+  favorite?: Maybe<Favorite>;
+};
+
+export type FavoriteRemoveInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type FavoriteReorderInput = {
+  id: Scalars['UUID']['input'];
+  position: Scalars['Int']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
 export type GithubDisconnectInput = {
   workspaceSlug: Scalars['String']['input'];
 };
@@ -131,6 +174,116 @@ export type GithubRepository = {
   __typename?: 'GithubRepository';
   fullName: Scalars['String']['output'];
   repositoryId: Scalars['ID']['output'];
+};
+
+export type Health =
+  | 'AT_RISK'
+  | 'OFF_TRACK'
+  | 'ON_TRACK';
+
+export type Initiative = {
+  __typename?: 'Initiative';
+  childInitiativeIds: Array<Scalars['UUID']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  description?: Maybe<Scalars['String']['output']>;
+  health?: Maybe<Health>;
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  ownerId?: Maybe<Scalars['UUID']['output']>;
+  parentInitiativeId?: Maybe<Scalars['UUID']['output']>;
+  projectIds: Array<Scalars['UUID']['output']>;
+  status: InitiativeStatus;
+  targetDate?: Maybe<Scalars['Date']['output']>;
+  updatedAt: Scalars['DateTime']['output'];
+  updates: Array<InitiativeUpdate>;
+};
+
+export type InitiativeClearParentInput = {
+  initiativeId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type InitiativeConnection = {
+  __typename?: 'InitiativeConnection';
+  nodes: Array<Initiative>;
+  pageInfo: PageInfo;
+};
+
+export type InitiativeCreateInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  name: Scalars['String']['input'];
+  ownerId?: InputMaybe<Scalars['UUID']['input']>;
+  status?: InitiativeStatus;
+  targetDate?: InputMaybe<Scalars['Date']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type InitiativeDeleteInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type InitiativeDeletePayload = {
+  __typename?: 'InitiativeDeletePayload';
+  deletedInitiativeId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type InitiativePayload = {
+  __typename?: 'InitiativePayload';
+  errors: Array<ValidationErrorType>;
+  initiative?: Maybe<Initiative>;
+};
+
+export type InitiativeProjectInput = {
+  initiativeId: Scalars['UUID']['input'];
+  projectId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type InitiativeSetParentInput = {
+  initiativeId: Scalars['UUID']['input'];
+  parentInitiativeId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type InitiativeStatus =
+  | 'ACTIVE'
+  | 'CANCELED'
+  | 'COMPLETED'
+  | 'PLANNED';
+
+export type InitiativeUpdate = {
+  __typename?: 'InitiativeUpdate';
+  authorId: Scalars['UUID']['output'];
+  body: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  health: Health;
+  id: Scalars['UUID']['output'];
+  initiativeId: Scalars['UUID']['output'];
+};
+
+export type InitiativeUpdateInput = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  id: Scalars['UUID']['input'];
+  name?: InputMaybe<Scalars['String']['input']>;
+  ownerId?: InputMaybe<Scalars['UUID']['input']>;
+  status?: InputMaybe<InitiativeStatus>;
+  targetDate?: InputMaybe<Scalars['Date']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type InitiativeUpdatePayload = {
+  __typename?: 'InitiativeUpdatePayload';
+  errors: Array<ValidationErrorType>;
+  update?: Maybe<InitiativeUpdate>;
+};
+
+export type InitiativeUpdatePostInput = {
+  body: Scalars['String']['input'];
+  health: Health;
+  initiativeId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type InvitationAcceptInput = {
@@ -534,7 +687,18 @@ export type Mutation = {
   cycleCreate: CyclePayload;
   cycleDelete: CycleDeletePayload;
   cycleUpdate: CyclePayload;
+  favoriteAdd: FavoritePayload;
+  favoriteRemove: FavoriteDeletePayload;
+  favoriteReorder: FavoritePayload;
   githubDisconnect: GithubIntegration;
+  initiativeClearParent: InitiativePayload;
+  initiativeCreate: InitiativePayload;
+  initiativeDelete: InitiativeDeletePayload;
+  initiativeProjectAdd: InitiativePayload;
+  initiativeProjectRemove: InitiativePayload;
+  initiativeSetParent: InitiativePayload;
+  initiativeUpdate: InitiativePayload;
+  initiativeUpdatePost: InitiativeUpdatePayload;
   /** Redeem an invitation token as the authenticated caller. */
   invitationAccept: InvitationAcceptPayload;
   /** Invite an email address to the workspace. Returns the raw invitation token once and never again. */
@@ -565,13 +729,19 @@ export type Mutation = {
   notificationMarkRead: NotificationMarkReadPayload;
   projectCreate: ProjectPayload;
   projectDelete: ProjectDeletePayload;
+  projectDependencyAdd: ProjectDependencyPayload;
+  projectDependencyRemove: ProjectDependencyPayload;
   projectMilestoneCreate: ProjectMilestonePayload;
   projectMilestoneDelete: ProjectMilestoneDeletePayload;
   projectMilestoneUpdate: ProjectMilestonePayload;
   projectTeamAdd: ProjectPayload;
   projectTeamRemove: ProjectPayload;
   projectUpdate: ProjectPayload;
+  projectUpdatePost: ProjectUpdatePayload;
   register: RegisterPayload;
+  savedViewCreate: SavedViewPayload;
+  savedViewDelete: SavedViewDeletePayload;
+  savedViewUpdate: SavedViewPayload;
   slackChannelsSync: SlackChannelsSyncPayload;
   slackDefaultChannelSet: SlackNotificationSettingsPayload;
   slackDisconnect: SlackDisconnectPayload;
@@ -610,8 +780,63 @@ export type MutationCycleUpdateArgs = {
 };
 
 
+export type MutationFavoriteAddArgs = {
+  input: FavoriteAddInput;
+};
+
+
+export type MutationFavoriteRemoveArgs = {
+  input: FavoriteRemoveInput;
+};
+
+
+export type MutationFavoriteReorderArgs = {
+  input: FavoriteReorderInput;
+};
+
+
 export type MutationGithubDisconnectArgs = {
   input: GithubDisconnectInput;
+};
+
+
+export type MutationInitiativeClearParentArgs = {
+  input: InitiativeClearParentInput;
+};
+
+
+export type MutationInitiativeCreateArgs = {
+  input: InitiativeCreateInput;
+};
+
+
+export type MutationInitiativeDeleteArgs = {
+  input: InitiativeDeleteInput;
+};
+
+
+export type MutationInitiativeProjectAddArgs = {
+  input: InitiativeProjectInput;
+};
+
+
+export type MutationInitiativeProjectRemoveArgs = {
+  input: InitiativeProjectInput;
+};
+
+
+export type MutationInitiativeSetParentArgs = {
+  input: InitiativeSetParentInput;
+};
+
+
+export type MutationInitiativeUpdateArgs = {
+  input: InitiativeUpdateInput;
+};
+
+
+export type MutationInitiativeUpdatePostArgs = {
+  input: InitiativeUpdatePostInput;
 };
 
 
@@ -737,6 +962,16 @@ export type MutationProjectDeleteArgs = {
 };
 
 
+export type MutationProjectDependencyAddArgs = {
+  input: ProjectDependencyInput;
+};
+
+
+export type MutationProjectDependencyRemoveArgs = {
+  input: ProjectDependencyInput;
+};
+
+
 export type MutationProjectMilestoneCreateArgs = {
   input: ProjectMilestoneCreateInput;
 };
@@ -767,8 +1002,28 @@ export type MutationProjectUpdateArgs = {
 };
 
 
+export type MutationProjectUpdatePostArgs = {
+  input: ProjectUpdatePostInput;
+};
+
+
 export type MutationRegisterArgs = {
   input: RegisterInput;
+};
+
+
+export type MutationSavedViewCreateArgs = {
+  input: SavedViewCreateInput;
+};
+
+
+export type MutationSavedViewDeleteArgs = {
+  input: SavedViewDeleteInput;
+};
+
+
+export type MutationSavedViewUpdateArgs = {
+  input: SavedViewUpdateInput;
 };
 
 
@@ -864,7 +1119,9 @@ export type PageInfo = {
 export type Project = {
   __typename?: 'Project';
   createdAt: Scalars['DateTime']['output'];
+  dependencies: ProjectDependencies;
   description?: Maybe<Scalars['String']['output']>;
+  health?: Maybe<Health>;
   id: Scalars['UUID']['output'];
   leadId?: Maybe<Scalars['UUID']['output']>;
   milestones: Array<ProjectMilestone>;
@@ -873,6 +1130,7 @@ export type Project = {
   targetDate?: Maybe<Scalars['Date']['output']>;
   teamIds: Array<Scalars['UUID']['output']>;
   updatedAt: Scalars['DateTime']['output'];
+  updates: Array<ProjectUpdate>;
 };
 
 export type ProjectConnection = {
@@ -898,6 +1156,24 @@ export type ProjectDeleteInput = {
 export type ProjectDeletePayload = {
   __typename?: 'ProjectDeletePayload';
   deletedProjectId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type ProjectDependencies = {
+  __typename?: 'ProjectDependencies';
+  blockedBy: Array<Scalars['UUID']['output']>;
+  blocks: Array<Scalars['UUID']['output']>;
+};
+
+export type ProjectDependencyInput = {
+  blockedProjectId: Scalars['UUID']['input'];
+  blockingProjectId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type ProjectDependencyPayload = {
+  __typename?: 'ProjectDependencyPayload';
+  dependencies?: Maybe<ProjectDependencies>;
   errors: Array<ValidationErrorType>;
 };
 
@@ -963,6 +1239,16 @@ export type ProjectTeamInput = {
   workspaceSlug: Scalars['String']['input'];
 };
 
+export type ProjectUpdate = {
+  __typename?: 'ProjectUpdate';
+  authorId: Scalars['UUID']['output'];
+  body: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  health: Health;
+  id: Scalars['UUID']['output'];
+  projectId: Scalars['UUID']['output'];
+};
+
 export type ProjectUpdateInput = {
   description?: InputMaybe<Scalars['String']['input']>;
   id: Scalars['UUID']['input'];
@@ -973,11 +1259,28 @@ export type ProjectUpdateInput = {
   workspaceSlug: Scalars['String']['input'];
 };
 
+export type ProjectUpdatePayload = {
+  __typename?: 'ProjectUpdatePayload';
+  errors: Array<ValidationErrorType>;
+  update?: Maybe<ProjectUpdate>;
+};
+
+export type ProjectUpdatePostInput = {
+  body: Scalars['String']['input'];
+  health: Health;
+  projectId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
 export type Query = {
   __typename?: 'Query';
   cycle?: Maybe<Cycle>;
   cycles: Array<Cycle>;
+  /** This viewer's favorites in this workspace, in their own order. Per-user and per-workspace: the same person in two workspaces has two independent lists. */
+  favorites: Array<Favorite>;
   githubIntegration: GithubIntegration;
+  initiative?: Maybe<Initiative>;
+  initiatives: InitiativeConnection;
   /** Invitations to this workspace that have not been accepted or expired. Admins and owners only. */
   invitations: Array<WorkspaceInvitation>;
   issue?: Maybe<Issue>;
@@ -991,6 +1294,8 @@ export type Query = {
   notifications: NotificationConnection;
   project?: Maybe<Project>;
   projects: ProjectConnection;
+  savedView?: Maybe<SavedView>;
+  savedViews: SavedViewConnection;
   search: SearchResults;
   slackChannels: Array<SlackChannel>;
   slackIntegration: SlackIntegration;
@@ -1014,7 +1319,25 @@ export type QueryCyclesArgs = {
 };
 
 
+export type QueryFavoritesArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
 export type QueryGithubIntegrationArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryInitiativeArgs = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryInitiativesArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
   workspaceSlug: Scalars['String']['input'];
 };
 
@@ -1083,6 +1406,20 @@ export type QueryProjectsArgs = {
 };
 
 
+export type QuerySavedViewArgs = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QuerySavedViewsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+  teamId?: InputMaybe<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
 export type QuerySearchArgs = {
   first?: Scalars['Int']['input'];
   query: Scalars['String']['input'];
@@ -1125,6 +1462,117 @@ export type RegisterPayload = {
   errors: Array<ValidationErrorType>;
   user?: Maybe<User>;
 };
+
+export type SavedView = {
+  __typename?: 'SavedView';
+  createdAt: Scalars['DateTime']['output'];
+  createdBy: Scalars['UUID']['output'];
+  filter: SavedViewFilter;
+  grouping?: Maybe<SavedViewGrouping>;
+  id: Scalars['UUID']['output'];
+  /** The issues this view selects, in the order it stores. Loading a saved view is this field: the filter and the ordering come from the stored row, never from the document, so the page is the one that was saved. */
+  issues: IssueConnection;
+  layout: SavedViewLayout;
+  name: Scalars['String']['output'];
+  orderDirection: OrderDirection;
+  orderField: IssueOrderField;
+  subgrouping?: Maybe<SavedViewGrouping>;
+  teamId?: Maybe<Scalars['UUID']['output']>;
+  updatedAt: Scalars['DateTime']['output'];
+  visibility: SavedViewVisibility;
+};
+
+
+export type SavedViewIssuesArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
+export type SavedViewConnection = {
+  __typename?: 'SavedViewConnection';
+  nodes: Array<SavedView>;
+  pageInfo: PageInfo;
+};
+
+export type SavedViewCreateInput = {
+  filter?: InputMaybe<IssueFilterInput>;
+  grouping?: InputMaybe<SavedViewGrouping>;
+  layout?: SavedViewLayout;
+  name: Scalars['String']['input'];
+  orderBy?: InputMaybe<IssueOrderInput>;
+  subgrouping?: InputMaybe<SavedViewGrouping>;
+  teamId?: InputMaybe<Scalars['UUID']['input']>;
+  visibility?: SavedViewVisibility;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type SavedViewDeleteInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type SavedViewDeletePayload = {
+  __typename?: 'SavedViewDeletePayload';
+  deletedSavedViewId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+/** The filter a saved view stores, in the same vocabulary `IssueFilterInput` takes. Every field is a narrowing and none of them can widen a list beyond the workspace the request was authorized for. */
+export type SavedViewFilter = {
+  __typename?: 'SavedViewFilter';
+  assignee?: Maybe<SavedViewIdFilter>;
+  cycle?: Maybe<SavedViewIdFilter>;
+  labelId?: Maybe<Scalars['UUID']['output']>;
+  priority?: Maybe<Scalars['Int']['output']>;
+  project?: Maybe<SavedViewIdFilter>;
+  stateCategory?: Maybe<WorkflowStateCategory>;
+  teamId?: Maybe<Scalars['UUID']['output']>;
+  workflowStateId?: Maybe<Scalars['UUID']['output']>;
+};
+
+/** What a saved view gathers its rows by. The server stores and validates this choice; the grouping itself is a rendering of a page the client already holds. There is deliberately no LABEL: an issue wears many labels, so grouping by one would put the same issue in several groups and every count drawn from them would overstate the list. */
+export type SavedViewGrouping =
+  | 'ASSIGNEE'
+  | 'CYCLE'
+  | 'PRIORITY'
+  | 'PROJECT'
+  | 'TEAM'
+  | 'WORKFLOW_STATE';
+
+/** A filter on a column that may hold nothing. The wrapper's presence is the filter and its `id` is what to match: `{id: null}` selects the rows holding nothing -- unassigned, in no project, in no cycle -- while the wrapper itself being null means the view does not filter on that column at all. */
+export type SavedViewIdFilter = {
+  __typename?: 'SavedViewIdFilter';
+  id?: Maybe<Scalars['UUID']['output']>;
+};
+
+/** How a saved view arranges the issues it selects. */
+export type SavedViewLayout =
+  | 'BOARD'
+  | 'LIST';
+
+export type SavedViewPayload = {
+  __typename?: 'SavedViewPayload';
+  errors: Array<ValidationErrorType>;
+  savedView?: Maybe<SavedView>;
+};
+
+export type SavedViewUpdateInput = {
+  filter?: InputMaybe<IssueFilterInput>;
+  grouping?: InputMaybe<SavedViewGrouping>;
+  id: Scalars['UUID']['input'];
+  layout?: InputMaybe<SavedViewLayout>;
+  name?: InputMaybe<Scalars['String']['input']>;
+  orderBy?: InputMaybe<IssueOrderInput>;
+  subgrouping?: InputMaybe<SavedViewGrouping>;
+  teamId?: InputMaybe<Scalars['UUID']['input']>;
+  visibility?: InputMaybe<SavedViewVisibility>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+/** Who can see a saved view. PERSONAL is its creator alone; SHARED is every member of the workspace. Sharing is an update of this field rather than an operation of its own. */
+export type SavedViewVisibility =
+  | 'PERSONAL'
+  | 'SHARED';
 
 export type SearchResults = {
   __typename?: 'SearchResults';
