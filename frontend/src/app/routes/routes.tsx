@@ -4,6 +4,7 @@ import { RequireAuth, authRoutes } from '../../features/auth'
 import { CycleDetailPage, CycleListPage } from '../../features/cycles'
 import { InboxPage } from '../../features/inbox'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
+import { MembersPage } from '../../features/members'
 import { MyIssuesPage } from '../../features/myIssues'
 import { onboardingRoutes } from '../../features/onboarding'
 import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
@@ -101,12 +102,7 @@ export const routes: RouteObject[] = [
       },
       {
         path: ROUTE_SEGMENTS.members,
-        element: (
-          <Placeholder
-            title="Members"
-            description="Everyone in this workspace, the role each holds, and any outstanding invitations."
-          />
-        ),
+        element: <MembersPage />,
       },
       {
         path: ROUTE_SEGMENTS.settings,
