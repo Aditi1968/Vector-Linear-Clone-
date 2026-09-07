@@ -462,7 +462,13 @@ def test_the_tree_carries_exactly_one_type_ignore():
     for path in REPO_ROOT.rglob("*.py"):
         relative = path.relative_to(REPO_ROOT).as_posix()
 
-        if relative.startswith((".venv/", "build/", "dist/")):
+        # `.claude/` joins the list for the same reason the other three are
+        # on it: each is a nested copy of code that is not this repository's
+        # source. Agent runs check git worktrees out into `.claude/worktrees/`,
+        # and every one of them holds its own `app/graphql/limits.py` -- so
+        # without this the census counts the tree's single suppression once
+        # per live worktree and fails while nothing has been suppressed.
+        if relative.startswith((".venv/", "build/", "dist/", ".claude/")):
             continue
 
         # This file is the scanner, so it necessarily spells out the very
