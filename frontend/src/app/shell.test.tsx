@@ -457,27 +457,24 @@ describe('application shell', () => {
     )
   })
 
-  it('does not present the command palette as something that works', async () => {
-    await renderShell({ initialPath: UNKNOWN_PATH })
+  it('opens the command palette from the rail', async () => {
+    const { user } = await renderShell({ initialPath: UNKNOWN_PATH })
 
     /*
-      The accessible name is pinned exactly rather than matched loosely. It is
-      the only one of this control's signals that reaches a screen-reader
-      user -- the others are the disabled state and the dashed treatment --
-      and a loose match would still pass with the `aria-label` deleted.
-
-      The name begins with the visible word "Command" so that WCAG 2.5.3
-      (Label in Name) holds.
+      The accessible name is the visible word, so WCAG 2.5.3 (Label in Name)
+      holds: "Command" is what is on screen and what a speech-input user can
+      say. The chord reaches a screen reader through `aria-keyshortcuts`
+      instead of being spelled into the name, which is what keeps the name
+      from drifting as the hint changes shape.
     */
-    const command = screen.getByRole('button', {
-      name: 'Command palette — not available yet',
-    })
+    const command = screen.getByRole('button', { name: 'Command' })
 
-    expect(command).toBeDisabled()
-
-    // The chord is shown because it is the real one, and a hint is not a
-    // promise that the key is bound today.
+    expect(command).toHaveAttribute('aria-haspopup', 'dialog')
     expect(command).toHaveTextContent('K')
+
+    await user.click(command)
+
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument()
   })
 
   it('renders an unknown URL inside the shell, with one main landmark', async () => {

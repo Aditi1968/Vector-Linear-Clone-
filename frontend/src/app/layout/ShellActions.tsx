@@ -1,6 +1,8 @@
+import { useState } from 'react'
 import { NavLink } from 'react-router-dom'
 
 import { ChevronRightIcon, Kbd, SearchIcon, cx } from '../../components'
+import { CommandPalette, ariaKeyshortcuts } from '../../features/command'
 import { useAppPaths } from '../routes/useAppPaths'
 import styles from './Sidebar.module.css'
 
@@ -52,32 +54,45 @@ export const COMMAND_CHORD: readonly [string, string] = IS_APPLE
   : ['Ctrl', 'K']
 
 /**
- * The command palette's place in the rail. The palette does not exist yet.
+ * The command palette's place in the rail, and the palette itself.
  *
- * `disabled` rather than live-and-inert: a control that opens nothing when
- * pressed is a bug report, and one that is switched off is a statement about
- * the product's state. The accessible name says so outright, because the
- * dimming that says it visually reaches nobody using a screen reader.
+ * Both here, and the state that joins them is a `useState` rather than a
+ * context. The palette is a `<dialog>` in the browser's top layer, so where
+ * it sits in the tree decides nothing about where it paints -- which means
+ * the smallest correct home for it is beside the one control that opens it.
+ * A provider in `AppLayout` would buy nothing and would be a second thing to
+ * keep in step.
  *
- * The chord is still shown, and it is the real one -- it is what a user will
- * reach for the day the palette lands, and a hint is not a promise that the
- * key is bound today. Nothing in this file binds it: a working hint would be
- * the palette, and the palette is another agent's screen.
+ * The chord is passed down rather than imported by the palette: the shell
+ * imports `features/command`, so an import back would close a cycle.
  */
 export function CommandAffordance() {
+  const [open, setOpen] = useState(false)
+
   return (
-    <button
-      type="button"
-      disabled
-      className={cx(styles.action, styles.actionPending)}
-      aria-label="Command palette — not available yet"
-    >
-      <ChevronRightIcon className={styles.actionIcon} />
-      <span className={cx(styles.actionLabel, styles.collapsible)}>Command</span>
-      <span className={cx(styles.actionHint, styles.collapsible)} aria-hidden="true">
-        <Kbd>{COMMAND_CHORD[0]}</Kbd>
-        <Kbd>{COMMAND_CHORD[1]}</Kbd>
-      </span>
-    </button>
+    <>
+      <button
+        type="button"
+        className={styles.action}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        aria-keyshortcuts={ariaKeyshortcuts(COMMAND_CHORD)}
+        onClick={() => {
+          setOpen(true)
+        }}
+      >
+        <ChevronRightIcon className={styles.actionIcon} />
+        <span className={cx(styles.actionLabel, styles.collapsible)}>Command</span>
+        {/* `aria-hidden`, because `aria-keyshortcuts` above already says this
+          * to a screen reader in the spelling the spec defines. Two
+          * announcements of one shortcut is worse than one. */}
+        <span className={cx(styles.actionHint, styles.collapsible)} aria-hidden="true">
+          <Kbd>{COMMAND_CHORD[0]}</Kbd>
+          <Kbd>{COMMAND_CHORD[1]}</Kbd>
+        </span>
+      </button>
+
+      <CommandPalette open={open} onOpenChange={setOpen} chord={COMMAND_CHORD} />
+    </>
   )
 }

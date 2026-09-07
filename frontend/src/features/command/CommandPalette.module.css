@@ -1,0 +1,25 @@
+/**
+ * The command palette.
+ *
+ * No motion rules here. `src/styles/base.css` collapses every animation and
+ * transition under `prefers-reduced-motion: reduce` globally, so the rise the
+ * dialog animates in with is already honoured -- a second media query in this
+ * file would only be a copy that can rot.
+ */
+
+/**
+ * Anchored near the top of the viewport rather than centred.
+ *
+ * A palette grows downwards as results arrive. Centred, it would grow in both
+ * directions and the input under the user's eyes would move while they type.
+ */
+.dialog {
+  margin-block-start: 12vh;
+}
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-height: 0;
+}
