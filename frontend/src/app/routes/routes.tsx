@@ -7,6 +7,7 @@ import { IssueDetailPage, IssueListPage } from '../../features/issues'
 import { MyIssuesPage } from '../../features/myIssues'
 import { onboardingRoutes } from '../../features/onboarding'
 import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
+import { TeamIssuesPage, TeamPage } from '../../features/teams'
 import { AppLayout } from '../layout'
 import { NotFound } from './NotFound'
 import { Placeholder } from './Placeholder'
@@ -92,21 +93,11 @@ export const routes: RouteObject[] = [
       },
       {
         path: ROUTE_SEGMENTS.team,
-        element: (
-          <Placeholder
-            title="Team"
-            description="One team's overview, its workflow states and its members."
-          />
-        ),
+        element: <TeamPage />,
       },
       {
         path: ROUTE_SEGMENTS.teamIssues,
-        element: (
-          <Placeholder
-            title="Team issues"
-            description="One team's issues, grouped by workflow state."
-          />
-        ),
+        element: <TeamIssuesPage />,
       },
       {
         path: ROUTE_SEGMENTS.members,
