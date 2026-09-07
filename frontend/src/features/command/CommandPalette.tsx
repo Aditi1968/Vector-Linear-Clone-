@@ -1,10 +1,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 
-import { Dialog, Input, Kbd, SearchIcon, VisuallyHidden } from '../../components'
+import { Dialog, Input, Kbd, SearchIcon, Spinner, VisuallyHidden } from '../../components'
 import { CommandList, optionDomId } from './CommandList'
 import { filterItems, useNavigationCommands } from './commands'
 import type { PaletteGroup, PaletteItem } from './commands'
+import { useCommandSearch } from './useCommandSearch'
 import { matchesChord } from './lib/keyboard'
 import type { Chord } from './lib/keyboard'
 import styles from './CommandPalette.module.css'
@@ -77,14 +78,25 @@ export function CommandPalette({ open, onOpenChange, chord }: CommandPaletteProp
   const listboxId = `${baseId}-listbox`
 
   const navigationCommands = useNavigationCommands()
+  const search = useCommandSearch(query)
 
-  const groups = useMemo<readonly PaletteGroup[]>(() => {
-    const navigation = filterItems(navigationCommands, query)
-
-    return [{ id: 'navigation', label: 'Go to', items: navigation }].filter(
-      (group) => group.items.length > 0,
-    )
-  }, [navigationCommands, query])
+  /**
+   * What the workspace holds first, what the product can do second.
+   *
+   * The order is the answer to "what did the user mean". Someone who types
+   * `auth` almost always wants the issue about authentication, not the
+   * Settings screen -- and the commands are a short, stable list that stays
+   * reachable one arrow-up away because the cursor wraps.
+   */
+  const groups = useMemo<readonly PaletteGroup[]>(
+    () =>
+      [
+        { id: 'issues', label: 'Issues', items: search.issues },
+        { id: 'projects', label: 'Projects', items: search.projects },
+        { id: 'navigation', label: 'Go to', items: filterItems(navigationCommands, query) },
+      ].filter((group) => group.items.length > 0),
+    [navigationCommands, query, search.issues, search.projects],
+  )
 
   const items = useMemo(() => groups.flatMap((group) => group.items), [groups])
 
@@ -265,7 +277,11 @@ export function CommandPalette({ open, onOpenChange, chord }: CommandPaletteProp
             // put the cursor on whatever happened to land at the old index.
             setActiveIndex(0)
           }}
-          icon={<SearchIcon />}
+          /* The glyph becomes the spinner while a search is out. It is the
+           * one place in the palette that never moves, so a wait shown here
+           * costs no layout and cannot push the results the user is reading.
+           * Unlabelled: the status region below announces the wait. */
+          icon={search.loading ? <Spinner /> : <SearchIcon />}
           role="combobox"
           aria-label="Search issues and projects, or run a command"
           aria-controls={listboxId}
@@ -284,6 +300,8 @@ export function CommandPalette({ open, onOpenChange, chord }: CommandPaletteProp
           id={listboxId}
           optionIdPrefix={baseId}
           activeItemId={activeItem?.id ?? null}
+          loading={search.loading}
+          failed={search.failed}
           onActivate={run}
           onHover={(item) => {
             setActiveIndex(items.indexOf(item))
@@ -300,9 +318,11 @@ export function CommandPalette({ open, onOpenChange, chord }: CommandPaletteProp
         */}
         <div role="status" aria-live="polite">
           <VisuallyHidden as="div">
-            {items.length === 0
-              ? 'No results'
-              : `${String(items.length)} ${items.length === 1 ? 'result' : 'results'}`}
+            {search.loading
+              ? 'Searching'
+              : items.length === 0
+                ? 'No results'
+                : `${String(items.length)} ${items.length === 1 ? 'result' : 'results'}`}
           </VisuallyHidden>
         </div>
 

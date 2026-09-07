@@ -1,4 +1,4 @@
-import { EmptyState, SearchIcon, cx } from '../../components'
+import { EmptyState, ErrorState, SearchIcon, Spinner, cx } from '../../components'
 import type { PaletteGroup, PaletteItem } from './commands'
 import styles from './CommandPalette.module.css'
 
@@ -9,6 +9,10 @@ export interface CommandListProps {
   /** Prefix for every option's id, so the combobox can point at one. */
   optionIdPrefix: string
   activeItemId: string | null
+  /** A search is in flight, or about to be. Suppresses "no matches". */
+  loading: boolean
+  /** The search failed. */
+  failed: boolean
   onActivate: (item: PaletteItem) => void
   onHover: (item: PaletteItem) => void
 }
@@ -46,16 +50,45 @@ export function CommandList({
   id,
   optionIdPrefix,
   activeItemId,
+  loading,
+  failed,
   onActivate,
   onHover,
 }: CommandListProps) {
-  if (groups.length === 0) {
+  if (failed) {
+    /* No `detail`, and no retry button. What went wrong is the transport or
+     * the server, neither of which has anything a user can act on, and the
+     * next keystroke reissues the search anyway. */
     return (
-      <EmptyState
-        icon={<SearchIcon />}
-        title="No matches"
-        description="Nothing in this workspace matches that. Try fewer words."
+      <ErrorState
+        title="Could not search this workspace"
+        description="Something went wrong on our side. Try again in a moment."
       />
+    )
+  }
+
+  if (groups.length === 0) {
+    /*
+      The order of these two matters. A palette that says "no matches" while
+      the request is still out is telling the user the answer is no, and they
+      will act on it -- so the wait is shown until there is a real answer.
+
+      The spinner is unlabelled decoration: the palette's own status region
+      says "Searching", and two elements announcing one wait is worse than
+      one.
+    */
+    return (
+      <div className={styles.pending}>
+        {loading ? (
+          <Spinner />
+        ) : (
+          <EmptyState
+            icon={<SearchIcon />}
+            title="No matches"
+            description="Nothing in this workspace matches that. Try fewer words."
+          />
+        )}
+      </div>
     )
   }
 

@@ -1,0 +1,42 @@
+# The command palette's one document.
+#
+# Edit here, never in `src/generated/`. `npm run graphql:codegen` builds the
+# types and the `TypedDocumentNode` from this file plus `schema.graphql`.
+
+# What this workspace holds that matches what the user typed.
+#
+# ## `first: 8` is a literal, not a variable
+#
+# A palette shows what fits above the fold and is scrolled past rather than
+# paged through, so the count is a property of this surface and not of the
+# call site. Written into the document, it is also part of the cache key --
+# so the palette's results and the search *screen*'s results, which will ask
+# for a longer page, are two entries rather than one that keeps overwriting
+# the other with the wrong length.
+#
+# Eight of each, because the server applies `first` to issues and projects
+# separately.
+#
+# ## The selection is deliberately thin
+#
+# Three fields on an issue and two on a project: what a row draws, and the id
+# a row navigates by. `Issue` has twenty-odd fields and the palette would use
+# none of them -- and because Apollo normalises by id, a fat selection here
+# would also write over the list's cached rows on every keystroke.
+#
+# Identifiers need no special handling on this side. `ENG-42` typed into the
+# box is a query like any other; `app/services/search.py` recognises it and
+# puts that exact issue first, deduplicated against the text results.
+query CommandSearch($workspaceSlug: String!, $query: String!) {
+  search(workspaceSlug: $workspaceSlug, query: $query, first: 8) {
+    issues {
+      id
+      identifier
+      title
+    }
+    projects {
+      id
+      name
+    }
+  }
+}

@@ -1,8 +1,29 @@
 import { fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { WORKSPACE_SLUG } from '../../test/factories'
+import { WORKSPACE_SLUG, issueId } from '../../test/factories'
 import { renderApp } from '../../test/render'
+import type { CommandSearchQuery } from '../../generated/operations'
+
+/**
+ * A search response, typed against the real operation.
+ *
+ * Built here rather than added to `src/test/factories.ts`: the palette is the
+ * only caller of this document, and a fixture in the shared file would be a
+ * shape three other agents have to merge around for no benefit.
+ */
+function searchData(
+  issues: { id: string; identifier: string; title: string }[] = [],
+  projects: { id: string; name: string }[] = [],
+): CommandSearchQuery {
+  return {
+    search: {
+      __typename: 'SearchResults',
+      issues: issues.map((issue) => ({ __typename: 'Issue', ...issue })),
+      projects: projects.map((project) => ({ __typename: 'Project', ...project })),
+    },
+  }
+}
 
 /**
  * The command palette, tested through the real shell.
@@ -275,15 +296,17 @@ describe('moving through the palette', () => {
   })
 
   it('filters the commands, and says so when nothing matches', async () => {
-    const { user } = await renderShell()
+    const { user, link } = await renderShell()
 
     pressChord()
     await user.type(paletteInput(), 'sett')
+    await link.resolve('CommandSearch', { data: searchData() })
 
     expect(optionNames()).toEqual(['Settings'])
     expect(activeOptionName()).toBe('Settings')
 
     await user.type(paletteInput(), 'zzz')
+    await link.resolve('CommandSearch', { data: searchData() })
 
     expect(screen.queryByRole('listbox')).toBeNull()
     expect(screen.getByText('No matches')).toBeInTheDocument()
@@ -302,5 +325,117 @@ describe('moving through the palette', () => {
     // Built from the path helpers, so the workspace segment is there without
     // any component writing one.
     expect(currentPath()).toBe(`/${WORKSPACE_SLUG}/cycles`)
+  })
+})
+
+describe('searching the workspace from the palette', () => {
+  it('asks once for the last thing typed, not once per keystroke', async () => {
+    const { link } = await renderShell()
+
+    pressChord()
+
+    const input = paletteInput()
+
+    /*
+      `fireEvent.change` rather than `user.type`, and that is not a shortcut.
+      The debounce is a real 200ms timer, so a test that typed with a
+      keystroke delay would be asserting that the machine running it is fast
+      -- three synchronous changes are unambiguously one burst.
+    */
+    fireEvent.change(input, { target: { value: 'a' } })
+    fireEvent.change(input, { target: { value: 'au' } })
+    fireEvent.change(input, { target: { value: 'aut' } })
+
+    const variables = await link.waitForRequest('CommandSearch')
+
+    expect(variables).toEqual({ workspaceSlug: WORKSPACE_SLUG, query: 'aut' })
+    expect(link.countOf('CommandSearch')).toBe(1)
+  })
+
+  it('never asks for an empty query', async () => {
+    const { user, link } = await renderShell()
+
+    pressChord()
+    await user.type(paletteInput(), 'a')
+    await link.resolve('CommandSearch', { data: searchData() })
+
+    await user.clear(paletteInput())
+    await link.idle()
+
+    // The server short-circuits a blank query without touching the database,
+    // so the round trip would only establish what both ends already know.
+    expect(link.countOf('CommandSearch')).toBe(1)
+  })
+
+  it('groups what it found, and runs it', async () => {
+    const { user, link, currentPath } = await renderShell()
+
+    pressChord()
+    fireEvent.change(paletteInput(), { target: { value: 'auth' } })
+
+    await link.resolve('CommandSearch', {
+      data: searchData(
+        [{ id: issueId(42), identifier: 'ENG-42', title: 'Broken auth redirect' }],
+        [{ id: issueId(7), name: 'Authentication' }],
+      ),
+    })
+
+    const groups = screen.getAllByRole('group').map((group) => group.textContent ?? '')
+
+    // Issues first, then projects, then the commands: someone who types
+    // "auth" wants the issue about authentication, not the Settings screen.
+    expect(groups[0]).toContain('Broken auth redirect')
+    expect(groups[1]).toContain('Authentication')
+
+    // The identifier rides along as the row's hint, which is what makes a
+    // result scannable when several issues share a title.
+    expect(activeOptionName()).toContain('ENG-42')
+
+    await user.keyboard('{Enter}')
+
+    expect(currentPath()).toBe(`/${WORKSPACE_SLUG}/issues/${issueId(42)}`)
+  })
+
+  it('says it is searching rather than saying there is nothing', async () => {
+    const { link } = await renderShell()
+
+    pressChord()
+    fireEvent.change(paletteInput(), { target: { value: 'zzzz' } })
+
+    await link.waitForRequest('CommandSearch')
+
+    /*
+      The failure this guards against is the palette answering "no matches"
+      while the request is still out. A user reads that as the answer and
+      stops looking.
+    */
+    expect(screen.queryByText('No matches')).toBeNull()
+
+    // Scoped to the dialog: the screen behind it has a loading skeleton with
+    // a status region of its own.
+    const dialog = palette()
+
+    expect(dialog).not.toBeNull()
+    expect(within(dialog as HTMLElement).getByRole('status')).toHaveTextContent(
+      'Searching',
+    )
+
+    await link.resolve('CommandSearch', { data: searchData() })
+
+    expect(screen.getByText('No matches')).toBeInTheDocument()
+  })
+
+  it('reports a failed search without leaking what failed', async () => {
+    const { link } = await renderShell()
+
+    pressChord()
+    fireEvent.change(paletteInput(), { target: { value: 'auth' } })
+
+    await link.fail('CommandSearch', new Error('connect ECONNREFUSED 127.0.0.1:8000'))
+
+    const alert = screen.getByRole('alert')
+
+    expect(alert).toHaveTextContent('Could not search this workspace')
+    expect(alert).not.toHaveTextContent('ECONNREFUSED')
   })
 })

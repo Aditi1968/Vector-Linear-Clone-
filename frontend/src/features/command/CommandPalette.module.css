@@ -45,6 +45,16 @@
   overflow-y: auto;
 }
 
+/* Waiting, or nothing found. Given the height a short result list would have
+ * had, so the dialog does not jump as one replaces the other. */
+.pending {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 8rem;
+  color: var(--color-text-muted);
+}
+
 .group {
   display: flex;
   flex-direction: column;
