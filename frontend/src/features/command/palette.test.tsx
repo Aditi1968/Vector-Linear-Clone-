@@ -1,6 +1,7 @@
-import { fireEvent, screen } from '@testing-library/react'
+import { fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { WORKSPACE_SLUG } from '../../test/factories'
 import { renderApp } from '../../test/render'
 
 /**
@@ -52,8 +53,15 @@ function palette(): HTMLElement | null {
   return screen.queryByRole('dialog', { name: 'Command palette' })
 }
 
+/**
+ * The query field.
+ *
+ * `combobox` rather than `textbox`: the role is what tells a screen reader
+ * that this field has a list attached and that the arrow keys mean something
+ * in it, so querying by it is also an assertion that the pattern is intact.
+ */
 function paletteInput(): HTMLElement {
-  return screen.getByRole('textbox', {
+  return screen.getByRole('combobox', {
     name: 'Search issues and projects, or run a command',
   })
 }
@@ -179,5 +187,120 @@ describe('command palette focus', () => {
     pressChord()
 
     expect(paletteInput()).toHaveValue('')
+  })
+})
+
+/** The option the combobox currently points at, by its accessible name. */
+function activeOptionName(): string {
+  const activeId = paletteInput().getAttribute('aria-activedescendant')
+
+  expect(activeId).not.toBeNull()
+
+  const option = document.getElementById(activeId ?? '')
+
+  expect(option).not.toBeNull()
+  expect(option).toHaveAttribute('role', 'option')
+  expect(option).toHaveAttribute('aria-selected', 'true')
+
+  return option?.textContent ?? ''
+}
+
+function optionNames(): string[] {
+  return within(screen.getByRole('listbox')).getAllByRole('option').map(
+    (option) => option.textContent ?? '',
+  )
+}
+
+describe('moving through the palette', () => {
+  it('names the cursor through aria-activedescendant, starting at the top', async () => {
+    await renderShell()
+
+    pressChord()
+
+    const input = paletteInput()
+
+    // The combobox pattern, spelled out: the field keeps focus, and the
+    // option it points at is the one Enter will run.
+    expect(input).toHaveAttribute('role', 'combobox')
+    expect(input).toHaveAttribute('aria-expanded', 'true')
+    expect(input).toHaveAttribute('aria-controls', screen.getByRole('listbox').id)
+
+    expect(activeOptionName()).toBe('My Issues')
+  })
+
+  it('moves down and up with the arrow keys, and wraps at both ends', async () => {
+    const { user } = await renderShell()
+
+    pressChord()
+
+    await user.keyboard('{ArrowDown}')
+    expect(activeOptionName()).toBe('Inbox')
+
+    await user.keyboard('{ArrowUp}')
+    expect(activeOptionName()).toBe('My Issues')
+
+    // Up from the first reaches the last, which is the fastest route to it.
+    await user.keyboard('{ArrowUp}')
+    expect(activeOptionName()).toBe(optionNames().at(-1))
+  })
+
+  it('keeps focus in the query field while the cursor moves', async () => {
+    const { user } = await renderShell()
+
+    pressChord()
+    await user.keyboard('{ArrowDown}{ArrowDown}')
+
+    // The whole reason for `aria-activedescendant`: the next character the
+    // user types has to land in the field, not on an option.
+    expect(paletteInput()).toHaveFocus()
+  })
+
+  it('navigates on Enter, and closes', async () => {
+    const { user, currentPath } = await renderShell()
+
+    pressChord()
+    await user.keyboard('{ArrowDown}{Enter}')
+
+    expect(currentPath()).toBe(`/${WORKSPACE_SLUG}/inbox`)
+    expect(palette()).toBeNull()
+  })
+
+  it('navigates on a click', async () => {
+    const { user, currentPath } = await renderShell()
+
+    pressChord()
+    await user.click(screen.getByRole('option', { name: 'Settings' }))
+
+    expect(currentPath()).toBe(`/${WORKSPACE_SLUG}/settings`)
+  })
+
+  it('filters the commands, and says so when nothing matches', async () => {
+    const { user } = await renderShell()
+
+    pressChord()
+    await user.type(paletteInput(), 'sett')
+
+    expect(optionNames()).toEqual(['Settings'])
+    expect(activeOptionName()).toBe('Settings')
+
+    await user.type(paletteInput(), 'zzz')
+
+    expect(screen.queryByRole('listbox')).toBeNull()
+    expect(screen.getByText('No matches')).toBeInTheDocument()
+
+    // Enter with nothing to run must not navigate or close.
+    await user.keyboard('{Enter}')
+    expect(palette()).toBeInTheDocument()
+  })
+
+  it('sends every command to a workspace-scoped URL', async () => {
+    const { user, currentPath } = await renderShell()
+
+    pressChord()
+    await user.click(screen.getByRole('option', { name: 'Cycles' }))
+
+    // Built from the path helpers, so the workspace segment is there without
+    // any component writing one.
+    expect(currentPath()).toBe(`/${WORKSPACE_SLUG}/cycles`)
   })
 })
