@@ -541,6 +541,10 @@ type Mutation {
   issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
   githubDisconnect(input: GithubDisconnectInput!): GithubIntegration!
   slackDisconnect(input: SlackDisconnectInput!): SlackDisconnectPayload!
+  slackChannelsSync(input: SlackChannelsSyncInput!): SlackChannelsSyncPayload!
+  slackDefaultChannelSet(input: SlackDefaultChannelSetInput!): SlackNotificationSettingsPayload!
+  slackNotificationPreferenceSet(input: SlackNotificationPreferenceSetInput!): SlackNotificationSettingsPayload!
+  slackTestNotification(input: SlackTestNotificationInput!): SlackTestNotificationPayload!
   notificationMarkRead(input: NotificationMarkReadInput!): NotificationMarkReadPayload!
   notificationMarkAllRead(input: NotificationMarkAllReadInput!): NotificationMarkAllReadPayload!
 }
@@ -734,6 +738,8 @@ type Query {
   search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
   githubIntegration(workspaceSlug: String!): GithubIntegration!
   slackIntegration(workspaceSlug: String!): SlackIntegration!
+  slackChannels(workspaceSlug: String!): [SlackChannel!]!
+  slackNotificationSettings(workspaceSlug: String!): SlackNotificationSettings!
   notifications(workspaceSlug: String!, unreadOnly: Boolean! = false, first: Int! = 50, after: String = null): NotificationConnection!
   notificationUnreadCount(workspaceSlug: String!): Int!
 }
@@ -754,12 +760,44 @@ type SearchResults {
   projects: [Project!]!
 }
 
+type SlackChannel {
+  id: String!
+  name: String!
+  isPrivate: Boolean!
+  isArchived: Boolean!
+  isMember: Boolean!
+  isAccessible: Boolean!
+}
+
+input SlackChannelsSyncInput {
+  workspaceSlug: String!
+}
+
+type SlackChannelsSyncPayload {
+  channels: [SlackChannel!]!
+  failure: SlackFailure
+}
+
+input SlackDefaultChannelSetInput {
+  workspaceSlug: String!
+  channelId: String!
+}
+
 input SlackDisconnectInput {
   workspaceSlug: String!
 }
 
 type SlackDisconnectPayload {
   integration: SlackIntegration!
+}
+
+enum SlackFailure {
+  NOT_CONNECTED
+  MISSING_SCOPE
+  NO_DEFAULT_CHANNEL
+  CHANNEL_UNAVAILABLE
+  SLACK_REFUSED
+  SLACK_UNREACHABLE
 }
 
 type SlackIntegration {
@@ -772,6 +810,46 @@ enum SlackIntegrationStatus {
   UNCONFIGURED
   DISCONNECTED
   CONNECTED
+}
+
+enum SlackNotificationEvent {
+  ISSUE_ASSIGNED
+  ISSUE_COMPLETED
+  ISSUE_PRIORITY_URGENT
+  PROJECT_HEALTH_CHANGED
+  PROJECT_UPDATE_PUBLISHED
+  PULL_REQUEST_MERGED
+}
+
+type SlackNotificationPreference {
+  event: SlackNotificationEvent!
+  enabled: Boolean!
+}
+
+input SlackNotificationPreferenceSetInput {
+  workspaceSlug: String!
+  event: SlackNotificationEvent!
+  enabled: Boolean!
+}
+
+type SlackNotificationSettings {
+  defaultChannelId: String
+  defaultChannelName: String
+  preferences: [SlackNotificationPreference!]!
+}
+
+type SlackNotificationSettingsPayload {
+  settings: SlackNotificationSettings
+  errors: [ValidationErrorType!]!
+}
+
+input SlackTestNotificationInput {
+  workspaceSlug: String!
+}
+
+type SlackTestNotificationPayload {
+  delivered: Boolean!
+  failure: SlackFailure
 }
 
 type Team {
