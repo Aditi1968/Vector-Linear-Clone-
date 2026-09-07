@@ -189,6 +189,11 @@ type DocumentRevisionConnection {
   pageInfo: PageInfo!
 }
 
+type DuplicateSuggestion {
+  issue: Issue!
+  similarity: Float!
+}
+
 type Environment {
   id: UUID!
   name: String!
@@ -1121,6 +1126,7 @@ type Mutation {
   releaseCreate(input: ReleaseCreateInput!): ReleasePayload!
   releaseStatusSet(input: ReleaseStatusSetInput!): ReleasePayload!
   releaseDelete(input: ReleaseDeleteInput!): ReleaseDeletePayload!
+  embeddingsRefresh(workspaceSlug: String!, limit: Int! = 100): Int!
 }
 
 type Notification {
@@ -1357,6 +1363,7 @@ type Query {
   document(workspaceSlug: String!, id: UUID!): Document
   documents(workspaceSlug: String!, projectId: UUID, initiativeId: UUID, first: Int! = 50, after: String = null): DocumentConnection!
   search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
+  issueDuplicateSuggestions(workspaceSlug: String!, title: String!, description: String = null, excludeIssueId: UUID = null, first: Int! = 5): [DuplicateSuggestion!]!
   githubIntegration(workspaceSlug: String!): GithubIntegration!
   slackIntegration(workspaceSlug: String!): SlackIntegration!
   slackChannels(workspaceSlug: String!): [SlackChannel!]!

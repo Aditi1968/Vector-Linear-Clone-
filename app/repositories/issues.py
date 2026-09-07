@@ -1147,3 +1147,14 @@ class IssueRepository:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+
+# The same mapping under a name a second module can import.
+#
+# app/repositories/embeddings.py selects ISSUE_COLUMNS and has to build the
+# same entity from it -- its hybrid and duplicate statements are anchored on
+# `issue_embeddings` but answer with issues -- and restating these nineteen
+# assignments there is exactly how the two copies come to disagree the next
+# time a column joins the entity. One expression list, one mapping, two
+# callers.
+issue_from_row = IssueRepository._to_entity

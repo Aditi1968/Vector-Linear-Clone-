@@ -222,7 +222,7 @@ jobs:
     # Deliberately no `services:` block.
     #
     # The postgres_dsn fixture in tests/conftest.py starts its own
-    # postgres:18 container through the Docker CLI, on an ephemeral host
+    # pgvector/pgvector:pg18 container through the Docker CLI, on an ephemeral host
     # port bound to 127.0.0.1, and removes it with the session. A service
     # container would be a second database that nothing connects to, and its
     # presence on the conventional port 5432 is exactly the condition that
@@ -253,11 +253,15 @@ jobs:
         # the whole suite when `docker info` fails, so an unreachable daemon
         # has to fail here, before a skip can be mistaken for a pass.
         #
-        # The tag is the one tests/conftest.py pins. uuidv7() in
-        # migrations/001_issues.sql is native to PostgreSQL 18 and 16/17
-        # reject the migration outright, so the major version is part of what
-        # is under test, not an implementation detail.
-        run: docker pull postgres:18
+        # The tag is the one tests/conftest.py pins, and it pins two things.
+        # uuidv7() in migrations/001_issues.sql is native to PostgreSQL 18 and
+        # 16/17 reject the migration outright, so the major version is part of
+        # what is under test. pgvector is the second: migration 025 creates the
+        # `vector` extension, stock postgres:18 does not ship it, and
+        # `apply_all_migrations` applies every file -- so without this image
+        # every db suite in the repository fails on 025. The image is the
+        # official postgres:18 with pgvector built in.
+        run: docker pull pgvector/pgvector:pg18
 
       - name: pytest -m db
         run: python -m pytest -q -m db --junitxml="${RUNNER_TEMP}/db-tests.xml"
@@ -288,7 +292,8 @@ jobs:
               sys.exit(
                   f"db-marked tests did not run: tests={total}, skipped={skipped}. "
                   "The fixture skips when the Docker daemon is unreachable or the "
-                  "postgres:18 container will not start. In CI that is a broken "
+                  "pgvector/pgvector:pg18 container will not start. In CI that "
+                  "is a broken "
                   "gate, not an environment fact."
               )
 

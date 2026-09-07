@@ -61,9 +61,31 @@ TEST_AUTHORIZED_SCOPE = AuthorizedWorkspaceScope(
 TEST_WORKFLOW_STATE_ID = UUID("00000000-0000-7000-8000-0000000000fc")
 TEST_TEAM_KEY = "ENG"
 
-# uuidv7() in migrations/001_issues.sql is native to PostgreSQL 18; 16 and 17
-# reject the migration outright, so the tag is pinned rather than floating.
-POSTGRES_IMAGE = "postgres:18"
+# The image the db suite starts, and the two things pinned in one tag.
+#
+# PostgreSQL 18, because uuidv7() in migrations/001_issues.sql is native to it
+# and 16 and 17 reject the migration outright -- so the major version is part
+# of what is under test rather than an implementation detail.
+#
+# pgvector, because migrations/025_semantic_search.sql opens with
+# `CREATE EXTENSION IF NOT EXISTS vector` and `tests/conftest.py`'s
+# `apply_all_migrations` applies every file in migrations/. Stock `postgres:18`
+# does not ship pgvector -- it is not a trusted extension and not part of
+# contrib -- so on that image 025 fails and takes every db suite in this
+# repository with it.
+#
+# `pgvector/pgvector:pg18` is the official `postgres:18` image with pgvector
+# built in: same upstream base, same major version, same uuidv7(), same
+# entrypoint and environment variables. Nothing else about this fixture
+# changes.
+#
+# The alternative considered and rejected: keep `postgres:18` here and skip
+# every test that touches 025. That would make a green `pytest -m db` mean "the
+# schema applies except for the migration nobody verified", and the CI skip
+# guard -- which fails the job if ANY db test skipped -- would have to be
+# weakened to allow it. A test that silently does not exercise the extension is
+# worse than no test.
+POSTGRES_IMAGE = "pgvector/pgvector:pg18"
 POSTGRES_USER = "vector"
 POSTGRES_PASSWORD = "vector"
 POSTGRES_DB = "vector_test"

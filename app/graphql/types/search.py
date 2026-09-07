@@ -1,6 +1,7 @@
 import strawberry
 
 from app.domain.search import SearchResults
+from app.domain.semantic_search import DuplicateSuggestion
 from app.domain.tenancy import WorkspaceScope
 from app.graphql.types.issue import IssueType
 from app.graphql.types.project import ProjectType
@@ -40,4 +41,34 @@ class SearchResultsType:
             projects=[
                 ProjectType.from_entity(entity, scope) for entity in results.projects
             ],
+        )
+
+
+@strawberry.type(name="DuplicateSuggestion")
+class DuplicateSuggestionType:
+    """One issue that might already be the one being written, and how close.
+
+    A wrapper type rather than a `similarity` field on `Issue`, because the
+    number is a property of the PAIR and not of the issue: the same issue is
+    0.91 similar to one draft and 0.12 similar to the next, so a field on
+    `Issue` would be a value that changed meaning depending on which query
+    returned it -- and would be selectable, as null, from every other query
+    that returns an issue.
+
+    `similarity` is a similarity and never a certainty. See
+    `app.domain.semantic_search.DuplicateSuggestion` for what that obliges a
+    client to do with it -- present a candidate a person judges, never a
+    verdict the product has reached.
+    """
+
+    issue: IssueType
+    similarity: float
+
+    @classmethod
+    def from_domain(
+        cls, suggestion: DuplicateSuggestion, scope: WorkspaceScope
+    ) -> "DuplicateSuggestionType":
+        return cls(
+            issue=IssueType.from_entity(suggestion.issue, scope),
+            similarity=suggestion.similarity,
         )
