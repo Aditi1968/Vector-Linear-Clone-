@@ -18,6 +18,7 @@ import type {
   CycleFieldsFragment,
   CycleIssuesQuery,
   CycleTeamsQuery,
+  CycleUnscheduledIssuesQuery,
 } from '../../../generated/operations'
 
 export type { CycleCreateInput, CycleUpdateInput } from '../../../generated/schema'
@@ -31,11 +32,19 @@ export type CycleTeam = CycleTeamsQuery['teams'][number]
 /**
  * One issue, as this feature's document selects it.
  *
- * Carries `cycle { id }` -- the field the screen's client-side filter reads,
- * and the only route from an issue to the cycle it is in, since the schema
- * has no `cycle.issues`.
+ * Narrower than the schema's `Issue` and narrower than it used to be: the
+ * cycle it is in is what the query filtered on, so nothing renders it and
+ * nothing selects it.
  */
 export type CycleIssue = CycleIssuesQuery['issues']['nodes'][number]
+
+/**
+ * One candidate for the "add an issue" menu: a team issue in no cycle.
+ *
+ * A menu entry shows a name and nothing else, so this carries less again.
+ */
+export type CycleUnscheduledIssue =
+  CycleUnscheduledIssuesQuery['issues']['nodes'][number]
 
 /**
  * What the cycle form collects.

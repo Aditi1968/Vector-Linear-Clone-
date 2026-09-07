@@ -8,6 +8,7 @@ import type {
   CycleIssuesQuery,
   CycleListQuery,
   CycleTeamsQuery,
+  CycleUnscheduledIssuesQuery,
 } from '../../generated/operations'
 
 /**
@@ -49,6 +50,7 @@ function cycle(overrides: Partial<CycleFields> = {}): CycleFields {
   return {
     __typename: 'Cycle',
     id: CYCLE_ID,
+    teamId: ENG,
     number: 12,
     name: null,
     startsAt: daysFromNow(-7),
@@ -75,12 +77,37 @@ function listData(cycles: readonly CycleFields[]): CycleListQuery {
   return { cycles: [...cycles] }
 }
 
-const noIssues: CycleIssuesQuery = {
-  issues: {
-    __typename: 'IssueConnection',
-    nodes: [],
-    pageInfo: { __typename: 'PageInfo', hasNextPage: false, endCursor: null },
-  },
+/** One page of the cycle's issues, as the server would answer the filter. */
+function issuesData(
+  nodes: CycleIssuesQuery['issues']['nodes'] = [],
+  { hasNextPage = false, totalCount = nodes.length } = {},
+): CycleIssuesQuery {
+  return {
+    issues: {
+      __typename: 'IssueConnection',
+      nodes: [...nodes],
+      pageInfo: {
+        __typename: 'PageInfo',
+        hasNextPage,
+        endCursor: hasNextPage ? 'cursor-1' : null,
+      },
+      totalCount,
+    },
+  }
+}
+
+function cycleIssue(title: string): CycleIssuesQuery['issues']['nodes'][number] {
+  return {
+    __typename: 'Issue',
+    id: '00000000-0000-4000-8000-0000000000e1',
+    identifier: 'ENG-1',
+    title,
+    completedAt: null,
+  }
+}
+
+const noUnscheduled: CycleUnscheduledIssuesQuery = {
+  issues: { __typename: 'IssueConnection', nodes: [] },
 }
 
 /** The section for one phase, found by the heading that names it. */
@@ -170,11 +197,20 @@ describe('the cycle list', () => {
 })
 
 describe('the cycle detail', () => {
-  async function openDetail(value: CycleFields | null) {
+  async function openDetail(
+    value: CycleFields | null,
+    issues: CycleIssuesQuery = issuesData(),
+  ) {
     const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/cycles/${CYCLE_ID}` })
 
     await view.link.resolve('CycleDetail', { data: { cycle: value } })
-    await view.link.resolve('CycleIssues', { data: noIssues })
+    await view.link.resolve('CycleIssues', { data: issues })
+
+    if (value !== null) {
+      // Only asked once the cycle has answered: the team it scopes to comes
+      // from `Cycle.teamId`, which is the point of selecting it.
+      await view.link.resolve('CycleUnscheduledIssues', { data: noUnscheduled })
+    }
 
     return view
   }
@@ -185,12 +221,53 @@ describe('the cycle detail', () => {
     expect(screen.getByText('No such cycle')).toBeInTheDocument()
   })
 
-  it('says an empty issue panel is empty, not broken', async () => {
+  it('asks the server for this cycle’s issues, by the id in the route', async () => {
+    const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/cycles/${CYCLE_ID}` })
+
+    await expect(view.link.waitForRequest('CycleIssues')).resolves.toEqual({
+      workspaceSlug: WORKSPACE_SLUG,
+      cycleId: CYCLE_ID,
+      after: null,
+    })
+  })
+
+  it('scopes the issues it offers to add to the cycle’s own team', async () => {
+    const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/cycles/${CYCLE_ID}` })
+
+    await view.link.resolve('CycleDetail', { data: { cycle: cycle() } })
+
+    // `issueSetCycle` refuses a cycle that is not the issue's team's, so a
+    // menu built from another team's issues would offer moves that cannot
+    // work. The team comes from the cycle, not from whichever team a picker
+    // was last left on.
+    await expect(view.link.waitForRequest('CycleUnscheduledIssues')).resolves.toEqual({
+      workspaceSlug: WORKSPACE_SLUG,
+      teamId: ENG,
+    })
+  })
+
+  it('says an empty issue panel is empty, without hedging about pages', async () => {
     await openDetail(cycle())
 
-    // The API has no per-cycle issue filter -- and `Cycle` exposes no team to
-    // scope by either -- so an empty panel means "none among those loaded".
     expect(screen.getByText('No issues in this cycle')).toBeInTheDocument()
+    expect(screen.getByText('Nothing has been scheduled into it yet.')).toBeInTheDocument()
+  })
+
+  it('states how many of the cycle’s issues are on screen, and only while some are not', async () => {
+    const partial = await openDetail(
+      cycle(),
+      issuesData([cycleIssue('Alpha')], { hasNextPage: true, totalCount: 4 }),
+    )
+
+    expect(
+      within(main()).getByText('Showing 1 of 4 issues in this cycle.'),
+    ).toBeInTheDocument()
+
+    partial.unmount()
+
+    await openDetail(cycle(), issuesData([cycleIssue('Alpha')]))
+
+    expect(within(main()).queryByText(/issues in this cycle\./)).toBeNull()
   })
 
   it('deletes a cycle through the loose-argument mutation the schema declares', async () => {

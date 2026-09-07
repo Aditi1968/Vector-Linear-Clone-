@@ -22,16 +22,18 @@ import {
   VisuallyHidden,
 } from '../../../components'
 import type { MenuItem } from '../../../components'
-import { useCycleActions, useCycleDetail, useCycleIssues } from '../api'
+import {
+  useCycleActions,
+  useCycleDetail,
+  useCycleIssues,
+  useCycleUnscheduledIssues,
+} from '../api'
 import type { CycleDraft, CycleValidationError } from '../api'
 import { CycleForm } from '../components/CycleForm'
 import { cyclePhase, cycleTitle, formatCycleDate } from '../lib/cycles'
 import styles from '../cycles.module.css'
 
 const NO_ERRORS: readonly CycleValidationError[] = []
-
-/** How many unassigned issues the "add an issue" menu offers. See ADDABLE_LIMIT in projects. */
-const ADDABLE_LIMIT = 15
 
 const PHASE_LABEL = {
   current: 'Current',
@@ -42,18 +44,18 @@ const PHASE_LABEL = {
 /**
  * One cycle: when it runs, where it sits relative to today, and what is in it.
  *
- * ## The issue list is filtered in the browser, and says so
+ * ## The server decides what is in it
  *
- * There is no `cycle.issues` field and no `issues(cycleId:)` argument, so the
- * issues here are the *workspace's*, matched on `issue.cycle.id`. Worse than
- * for projects: `Cycle` exposes no `teamId` either, so the query cannot even
- * be scoped to the cycle's team -- a screen holding a cycle id has no way to
- * recover which team it belongs to.
+ * `filter: { cycleId }`, so the list below is the cycle's rather than the
+ * workspace's sifted for it, and `totalCount` is how many issues the cycle
+ * holds. Scoping to the cycle's team as well would be redundant -- a cycle
+ * belongs to one team -- so `Cycle.teamId` is used for the one question that
+ * does need it: which issues may be *added*, since `issueSetCycle` refuses a
+ * cycle that is not the issue's team's.
  *
- * The footnote states exactly that, "Load more" says it loads more of the
- * workspace, and the progress indicator is labelled as counting loaded
- * issues. A panel that quietly showed a partial list as a complete one would
- * be the same UI with a lie in it.
+ * What survives is paging: while another page is outstanding the panel says
+ * how many of the total are on screen, and the progress label says the count
+ * is of what has been loaded.
  */
 export function CycleDetailPage() {
   const params = useParams()
@@ -62,7 +64,8 @@ export function CycleDetailPage() {
   const navigate = useNavigate()
 
   const { cycle, isLoading, isNotFound, errorMessage, retry } = useCycleDetail(cycleId)
-  const issueQuery = useCycleIssues()
+  const issueQuery = useCycleIssues(cycleId)
+  const unscheduled = useCycleUnscheduledIssues(cycle?.teamId)
   const actions = useCycleActions()
 
   const [isEditing, setIsEditing] = useState(false)
@@ -196,14 +199,10 @@ export function CycleDetailPage() {
 
   const title = cycleTitle(cycle)
   const phase = cyclePhase(cycle, now)
-  const cycleIssues = issueQuery.issues.filter((issue) => issue.cycle?.id === cycle.id)
+  const cycleIssues = issueQuery.issues
   const closed = cycleIssues.filter((issue) => issue.completedAt !== null).length
 
-  const addable = issueQuery.issues
-    .filter((issue) => issue.cycle === null)
-    .slice(0, ADDABLE_LIMIT)
-
-  const addItems: readonly MenuItem[] = addable.map((issue) => ({
+  const addItems: readonly MenuItem[] = unscheduled.map((issue) => ({
     id: issue.id,
     label: `${issue.identifier} ${issue.title}`,
     disabled: actions.isSaving,
@@ -277,7 +276,11 @@ export function CycleDetailPage() {
                     <ProgressIndicator
                       value={closed}
                       total={cycleIssues.length}
-                      label={`${title}: closed issues among those loaded`}
+                      label={
+                        issueQuery.hasNextPage
+                          ? `${title}: closed issues among those loaded`
+                          : `${title}: closed issues`
+                      }
                       showLabel
                     />
                     <span>closed &middot; completed or canceled</span>
@@ -294,7 +297,7 @@ export function CycleDetailPage() {
               </h2>
               {addItems.length > 0 && (
                 <Menu
-                  label="Add a loaded issue to this cycle"
+                  label="Add an unscheduled issue to this cycle"
                   items={addItems}
                   icon={<PlusIcon />}
                   size="sm"
@@ -320,11 +323,7 @@ export function CycleDetailPage() {
                     <EmptyState
                       icon={<IssuesIcon />}
                       title="No issues in this cycle"
-                      description={
-                        issueQuery.hasNextPage
-                          ? 'None among the issues loaded so far. Older issues may be in it -- load more below.'
-                          : 'Every issue in this workspace has been checked; none is in this cycle.'
-                      }
+                      description="Nothing has been scheduled into it yet."
                     />
                   ) : (
                     <List label="Issues in this cycle">
@@ -353,24 +352,23 @@ export function CycleDetailPage() {
                     </List>
                   )}
 
-                  <p className={styles.footnote}>
-                    The API offers no per-cycle issue filter -- and no way to
-                    find a cycle&apos;s team from the cycle -- so this list is
-                    matched in the browser against the {issueQuery.loadedCount}{' '}
-                    most recent{' '}
-                    {issueQuery.loadedCount === 1 ? 'issue' : 'issues'} in the
-                    workspace. Loading more loads more of the workspace, not
-                    more of this cycle.
-                  </p>
-
+                  {/* Only while the answer is partial: a count that matches
+                      what is on screen is a sentence nobody needs to read. */}
                   {issueQuery.hasNextPage && (
-                    <Button
-                      size="sm"
-                      onClick={issueQuery.loadMore}
-                      loading={issueQuery.isLoadingMore}
-                    >
-                      Load more workspace issues
-                    </Button>
+                    <>
+                      <p className={styles.footnote} role="status">
+                        Showing {cycleIssues.length} of {issueQuery.totalCount}{' '}
+                        issues in this cycle.
+                      </p>
+
+                      <Button
+                        size="sm"
+                        onClick={issueQuery.loadMore}
+                        loading={issueQuery.isLoadingMore}
+                      >
+                        Load more
+                      </Button>
+                    </>
                   )}
                 </>
               )}
