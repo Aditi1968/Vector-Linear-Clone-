@@ -83,6 +83,112 @@ scalar Date
 """Date with time (isoformat)"""
 scalar DateTime
 
+type Document {
+  id: UUID!
+  title: String!
+  projectId: UUID
+  initiativeId: UUID
+  creatorId: UUID!
+  lastEditedBy: UUID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  content: JSON
+  revisions(first: Int! = 20, after: String = null): DocumentRevisionConnection!
+  comments(first: Int! = 20, after: String = null): DocumentCommentConnection!
+}
+
+type DocumentComment {
+  id: UUID!
+  documentId: UUID!
+  authorId: UUID!
+  body: String!
+  editedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+type DocumentCommentConnection {
+  nodes: [DocumentComment!]!
+  pageInfo: PageInfo!
+}
+
+input DocumentCommentCreateInput {
+  workspaceSlug: String!
+  documentId: UUID!
+  body: String!
+}
+
+input DocumentCommentDeleteInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type DocumentCommentDeletePayload {
+  deletedCommentId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type DocumentCommentPayload {
+  comment: DocumentComment
+  errors: [ValidationErrorType!]!
+}
+
+type DocumentConnection {
+  nodes: [Document!]!
+  pageInfo: PageInfo!
+}
+
+input DocumentCreateInput {
+  workspaceSlug: String!
+  title: String!
+  content: JSON
+  projectId: UUID = null
+  initiativeId: UUID = null
+}
+
+input DocumentDeleteInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type DocumentDeletePayload {
+  deletedDocumentId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+input DocumentEditInput {
+  workspaceSlug: String!
+  id: UUID!
+  title: String
+  content: JSON
+  snapshot: Boolean! = false
+}
+
+type DocumentPayload {
+  document: Document
+  errors: [ValidationErrorType!]!
+}
+
+input DocumentRestoreInput {
+  workspaceSlug: String!
+  documentId: UUID!
+  revisionId: UUID!
+}
+
+type DocumentRevision {
+  id: UUID!
+  documentId: UUID!
+  title: String!
+  authorId: UUID!
+  createdAt: DateTime!
+  content: JSON
+}
+
+type DocumentRevisionConnection {
+  nodes: [DocumentRevision!]!
+  pageInfo: PageInfo!
+}
+
 """
 One shortcut in one person's sidebar. Exactly one of `teamId`, `projectId` and `savedViewId` is set.
 """
@@ -752,6 +858,11 @@ type IssueUpdatePayload {
   errors: [ValidationErrorType!]!
 }
 
+"""
+The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf).
+"""
+scalar JSON @specifiedBy(url: "https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf")
+
 type Label {
   id: UUID!
   name: String!
@@ -944,6 +1055,12 @@ type Mutation {
   initiativeSetParent(input: InitiativeSetParentInput!): InitiativePayload!
   initiativeClearParent(input: InitiativeClearParentInput!): InitiativePayload!
   initiativeUpdatePost(input: InitiativeUpdatePostInput!): InitiativeUpdatePayload!
+  documentCreate(input: DocumentCreateInput!): DocumentPayload!
+  documentEdit(input: DocumentEditInput!): DocumentPayload!
+  documentRestore(input: DocumentRestoreInput!): DocumentPayload!
+  documentDelete(input: DocumentDeleteInput!): DocumentDeletePayload!
+  documentCommentCreate(input: DocumentCommentCreateInput!): DocumentCommentPayload!
+  documentCommentDelete(input: DocumentCommentDeleteInput!): DocumentCommentDeletePayload!
   issueSetParent(input: IssueSetParentInput!): IssueParentPayload!
   issueClearParent(input: IssueClearParentInput!): IssueParentPayload!
   issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
@@ -1208,6 +1325,8 @@ type Query {
   projects(workspaceSlug: String!, first: Int! = 50, after: String = null): ProjectConnection!
   initiative(workspaceSlug: String!, id: UUID!): Initiative
   initiatives(workspaceSlug: String!, first: Int! = 50, after: String = null): InitiativeConnection!
+  document(workspaceSlug: String!, id: UUID!): Document
+  documents(workspaceSlug: String!, projectId: UUID, initiativeId: UUID, first: Int! = 50, after: String = null): DocumentConnection!
   search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
   githubIntegration(workspaceSlug: String!): GithubIntegration!
   slackIntegration(workspaceSlug: String!): SlackIntegration!
