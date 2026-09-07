@@ -35,6 +35,48 @@ Milestones = list[ProjectMilestoneEntity]
 NAME_MIN_LENGTH = 1
 NAME_MAX_LENGTH = 200
 
+
+def _name_issue(name: str | None | UnsetType) -> ValidationIssue | None:
+    """The one rule for a name, for every caller that takes one.
+
+    Three inputs, three answers, and the middle one is why this is a function
+    rather than two copies of an `if`.
+
+    UNSET means the caller did not mention the field, so there is nothing to
+    validate. None means the caller explicitly sent null -- which
+    `app/graphql/inputs/project.py` says at length is "an input error the
+    service reports rather than a shape the schema forbids", because there is
+    no SDL spelling for "nullable in the type system, rejected by the rules".
+    That report was never actually written: both validators here tested only
+    for UNSET and then called `len()`, so an explicit null reached `len(None)`
+    and surfaced as a masked TypeError -- an internal error for what the
+    schema's own comment calls ordinary bad input. A client following the
+    documented contract got a 500 and no field to correct.
+
+    None is REQUIRED rather than a code of its own. `name` is NOT NULL on both
+    tables, so "clear the name" is not an operation either row has; a null and
+    an empty string are the same request and deserve the same answer.
+    """
+    if isinstance(name, UnsetType):
+        return None
+
+    if name is None or len(name) < NAME_MIN_LENGTH:
+        return ValidationIssue(
+            field="name",
+            code="REQUIRED",
+            message="Name is required",
+        )
+
+    if len(name) > NAME_MAX_LENGTH:
+        return ValidationIssue(
+            field="name",
+            code="TOO_LONG",
+            message=f"Name must be at most {NAME_MAX_LENGTH} characters",
+        )
+
+    return None
+
+
 DESCRIPTION_MAX_LENGTH = 10_000
 
 POSITION_MIN = 0
@@ -390,7 +432,7 @@ class ProjectService:
         *,
         scope: WorkspaceScope,
         project_id: UUID,
-        name: str | UnsetType = UNSET,
+        name: str | None | UnsetType = UNSET,
         description: str | None | UnsetType = UNSET,
         state: str | UnsetType = UNSET,
         target_date: date | None | UnsetType = UNSET,
@@ -639,7 +681,7 @@ class ProjectService:
         *,
         scope: WorkspaceScope,
         milestone_id: UUID,
-        name: str | UnsetType = UNSET,
+        name: str | None | UnsetType = UNSET,
         target_date: date | None | UnsetType = UNSET,
         position: int | UnsetType = UNSET,
     ) -> ProjectMilestoneEntity:
@@ -780,7 +822,7 @@ class ProjectService:
     @staticmethod
     def _validate_project_fields(
         *,
-        name: str | UnsetType,
+        name: str | None | UnsetType,
         description: str | None | UnsetType,
         state: str | UnsetType,
     ) -> None:
@@ -801,23 +843,10 @@ class ProjectService:
         # spaces is a name the caller typed, and silently turning it into a
         # REQUIRED failure would report an error about input the client never
         # sent.
-        if not isinstance(name, UnsetType):
-            if len(name) < NAME_MIN_LENGTH:
-                issues.append(
-                    ValidationIssue(
-                        field="name",
-                        code="REQUIRED",
-                        message="Name is required",
-                    )
-                )
-            elif len(name) > NAME_MAX_LENGTH:
-                issues.append(
-                    ValidationIssue(
-                        field="name",
-                        code="TOO_LONG",
-                        message=f"Name must be at most {NAME_MAX_LENGTH} characters",
-                    )
-                )
+        name_issue = _name_issue(name)
+
+        if name_issue is not None:
+            issues.append(name_issue)
 
         if (
             not isinstance(description, UnsetType)
@@ -855,28 +884,15 @@ class ProjectService:
     @staticmethod
     def _validate_milestone_fields(
         *,
-        name: str | UnsetType,
+        name: str | None | UnsetType,
         position: int | UnsetType = UNSET,
     ) -> None:
         issues: list[ValidationIssue] = []
 
-        if not isinstance(name, UnsetType):
-            if len(name) < NAME_MIN_LENGTH:
-                issues.append(
-                    ValidationIssue(
-                        field="name",
-                        code="REQUIRED",
-                        message="Name is required",
-                    )
-                )
-            elif len(name) > NAME_MAX_LENGTH:
-                issues.append(
-                    ValidationIssue(
-                        field="name",
-                        code="TOO_LONG",
-                        message=f"Name must be at most {NAME_MAX_LENGTH} characters",
-                    )
-                )
+        name_issue = _name_issue(name)
+
+        if name_issue is not None:
+            issues.append(name_issue)
 
         if not isinstance(position, UnsetType) and position < POSITION_MIN:
             issues.append(

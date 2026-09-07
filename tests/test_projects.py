@@ -167,6 +167,58 @@ async def test_an_empty_name_is_refused_before_a_connection_is_taken(
     assert exploding_pool.acquire_count == 0
 
 
+async def test_an_explicit_null_name_is_refused_rather_than_crashing(
+    service, exploding_pool
+):
+    """Regression: `projectUpdate(name: null)` raised TypeError, not an error.
+
+    `app/graphql/inputs/project.py` argues that `name: String` stays nullable
+    in the SDL precisely so that a partial update need not resend it, and says
+    an explicit null is "an input error the service reports rather than a shape
+    the schema forbids". The report was never written: the validator tested
+    only for UNSET and then called `len()`, so a null reached `len(None)` and
+    left the resolver as a masked "Internal server error" -- a 500, with no
+    field named, for input the schema's own comment calls ordinary and bad.
+
+    REQUIRED rather than a code of its own, because `name` is NOT NULL on the
+    table: "clear the name" is not an operation this row has, so a null and an
+    empty string are the same request and get the same answer.
+    """
+    with pytest.raises(ValidationError) as raised:
+        await service.update(
+            scope=TEST_SCOPE,
+            project_id=UUID(int=1),
+            name=None,
+        )
+
+    assert [(issue.field, issue.code) for issue in raised.value.issues] == [
+        ("name", "REQUIRED")
+    ]
+    assert exploding_pool.acquire_count == 0
+
+
+async def test_an_explicit_null_milestone_name_is_refused_too(service, exploding_pool):
+    """The same defect, in the validator beside it.
+
+    `_validate_milestone_fields` carried an identical copy of the UNSET-only
+    check, and `ProjectMilestoneUpdateInput.name` is just as nullable -- so
+    fixing only the project path would have left the same 500 one mutation
+    over. Both now route through `_name_issue`, which is what makes this a
+    single rule rather than two that agree today.
+    """
+    with pytest.raises(ValidationError) as raised:
+        await service.update_milestone(
+            scope=TEST_SCOPE,
+            milestone_id=UUID(int=1),
+            name=None,
+        )
+
+    assert [(issue.field, issue.code) for issue in raised.value.issues] == [
+        ("name", "REQUIRED")
+    ]
+    assert exploding_pool.acquire_count == 0
+
+
 async def test_an_over_long_name_is_refused(service, exploding_pool):
     with pytest.raises(ValidationError) as raised:
         await service.create(
