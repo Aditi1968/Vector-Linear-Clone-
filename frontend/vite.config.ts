@@ -93,8 +93,24 @@ const proxy = {
   ),
 }
 
+/**
+ * Hosts the dev server will answer to besides localhost.
+ *
+ * Vite refuses a request whose Host it does not recognise, which is a DNS
+ * rebinding protection and worth keeping. But a provider OAuth callback has
+ * to arrive on a public HTTPS origin -- Slack will not register an http
+ * callback at all -- so during development the app is fronted by a tunnel,
+ * and every request through it carries the tunnel's Host.
+ *
+ * A suffix rather than one URL: a free tunnel's subdomain changes on every
+ * restart, and pinning the current one would mean editing this file each
+ * time. Development only; `vite build` output is served by something else
+ * entirely and this setting has no part in it.
+ */
+const DEV_TUNNEL_HOSTS = ['.ngrok-free.app', '.ngrok.io', '.trycloudflare.com']
+
 export default defineConfig({
   plugins: [react()],
-  server: { proxy },
-  preview: { proxy },
+  server: { proxy, allowedHosts: DEV_TUNNEL_HOSTS },
+  preview: { proxy, allowedHosts: DEV_TUNNEL_HOSTS },
 })
