@@ -87,6 +87,7 @@ EXPECTED_MIGRATIONS = [
     "021_triage_label_groups.sql",
     "022_initiatives.sql",
     "023_documents.sql",
+    "024_releases.sql",
 ]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the

@@ -21,6 +21,7 @@ from app.graphql.mutations.memberships import MembershipMutation
 from app.graphql.mutations.notifications import NotificationMutation
 from app.graphql.mutations.projects import ProjectMutation
 from app.graphql.mutations.relations import RelationMutation
+from app.graphql.mutations.releases import ReleaseMutation
 from app.graphql.mutations.saved_views import FavoriteMutation, SavedViewMutation
 from app.graphql.mutations.slack import SlackMutation
 from app.graphql.mutations.subscribers import SubscriberMutation
@@ -36,6 +37,7 @@ from app.graphql.queries.labels import LabelQuery
 from app.graphql.queries.memberships import MembershipQuery
 from app.graphql.queries.notifications import NotificationQuery
 from app.graphql.queries.projects import ProjectQuery
+from app.graphql.queries.releases import ReleaseQuery
 from app.graphql.queries.saved_views import SavedViewQuery
 from app.graphql.queries.search import SearchQuery
 from app.graphql.queries.slack import SlackQuery
@@ -88,6 +90,7 @@ QUERY_TYPES = (
     SubscriberQuery,
     TemplateQuery,
     TriageQuery,
+    ReleaseQuery,
 )
 
 Query = merge_types("Query", QUERY_TYPES)
@@ -111,6 +114,7 @@ MUTATION_TYPES = (
     TemplateMutation,
     TriageMutation,
     BulkMutation,
+    ReleaseMutation,
 )
 
 Mutation = merge_types("Mutation", MUTATION_TYPES)
