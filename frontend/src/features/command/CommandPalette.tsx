@@ -1,7 +1,15 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 
-import { Dialog, Input, Kbd, SearchIcon, Spinner, VisuallyHidden } from '../../components'
+import {
+  Dialog,
+  Input,
+  Kbd,
+  PlusIcon,
+  SearchIcon,
+  Spinner,
+  VisuallyHidden,
+} from '../../components'
 import { CommandList, optionDomId } from './CommandList'
 import { filterItems, useNavigationCommands } from './commands'
 import type { PaletteGroup, PaletteItem } from './commands'
@@ -23,6 +31,17 @@ export interface CommandPaletteProps {
    * inside a cycle is a temporal-dead-zone crash rather than a lint warning.
    */
   chord: Chord
+  /**
+   * The mounted screen's issue composer, or `null` when it offers none.
+   *
+   * The shell's create-issue slot, read by the shell and passed in -- the
+   * same one the rail's "New issue" button uses, so there is one create path
+   * and not a second one the palette invented. `null` removes the command
+   * rather than disabling it: a palette entry that cannot run is worse than
+   * an entry that is not there, because it costs an arrow key and an Enter
+   * to discover.
+   */
+  createIssue: (() => void) | null
 }
 
 /**
@@ -58,7 +77,12 @@ export interface CommandPaletteProps {
  * promise that what it shows can be done, and an entry that cannot is worse
  * than an entry that is missing.
  */
-export function CommandPalette({ open, onOpenChange, chord }: CommandPaletteProps) {
+export function CommandPalette({
+  open,
+  onOpenChange,
+  chord,
+  createIssue,
+}: CommandPaletteProps) {
   const [query, setQuery] = useState('')
 
   /**
@@ -80,6 +104,23 @@ export function CommandPalette({ open, onOpenChange, chord }: CommandPaletteProp
   const navigationCommands = useNavigationCommands()
   const search = useCommandSearch(query)
 
+  /* Every action the palette can run, which today is one -- and it is here
+   * only when a mounted screen has actually offered it. */
+  const actionCommands = useMemo<readonly PaletteItem[]>(
+    () =>
+      createIssue === null
+        ? []
+        : [
+            {
+              id: 'new-issue',
+              label: 'New issue',
+              icon: <PlusIcon />,
+              run: createIssue,
+            },
+          ],
+    [createIssue],
+  )
+
   /**
    * What the workspace holds first, what the product can do second.
    *
@@ -94,8 +135,9 @@ export function CommandPalette({ open, onOpenChange, chord }: CommandPaletteProp
         { id: 'issues', label: 'Issues', items: search.issues },
         { id: 'projects', label: 'Projects', items: search.projects },
         { id: 'navigation', label: 'Go to', items: filterItems(navigationCommands, query) },
+        { id: 'actions', label: 'Actions', items: filterItems(actionCommands, query) },
       ].filter((group) => group.items.length > 0),
-    [navigationCommands, query, search.issues, search.projects],
+    [actionCommands, navigationCommands, query, search.issues, search.projects],
   )
 
   const items = useMemo(() => groups.flatMap((group) => group.items), [groups])

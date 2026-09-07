@@ -4,6 +4,7 @@ import { NavLink } from 'react-router-dom'
 import { ChevronRightIcon, Kbd, SearchIcon, cx } from '../../components'
 import { CommandPalette, ariaKeyshortcuts } from '../../features/command'
 import { useAppPaths } from '../routes/useAppPaths'
+import { useCreateIssueAction } from './createIssueAction'
 import styles from './Sidebar.module.css'
 
 /**
@@ -69,6 +70,15 @@ export const COMMAND_CHORD: readonly [string, string] = IS_APPLE
 export function CommandAffordance() {
   const [open, setOpen] = useState(false)
 
+  /*
+    The same slot the rail's "New issue" button reads, handed to the palette
+    rather than reimplemented in it. `null` when the mounted screen offers no
+    composer, and the palette drops the command rather than showing one that
+    does nothing -- which is the same honesty the button gets by being
+    disabled, expressed the way a palette expresses it.
+  */
+  const createIssue = useCreateIssueAction()
+
   return (
     <>
       <button
@@ -92,7 +102,12 @@ export function CommandAffordance() {
         </span>
       </button>
 
-      <CommandPalette open={open} onOpenChange={setOpen} chord={COMMAND_CHORD} />
+      <CommandPalette
+        open={open}
+        onOpenChange={setOpen}
+        chord={COMMAND_CHORD}
+        createIssue={createIssue}
+      />
     </>
   )
 }

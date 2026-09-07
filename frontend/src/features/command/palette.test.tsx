@@ -1,7 +1,7 @@
 import { fireEvent, screen, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { WORKSPACE_SLUG, issueId } from '../../test/factories'
+import { WORKSPACE_SLUG, issueId, issueListData, issueRow } from '../../test/factories'
 import { renderApp } from '../../test/render'
 import type { CommandSearchQuery } from '../../generated/operations'
 
@@ -437,5 +437,38 @@ describe('searching the workspace from the palette', () => {
 
     expect(alert).toHaveTextContent('Could not search this workspace')
     expect(alert).not.toHaveTextContent('ECONNREFUSED')
+  })
+})
+
+describe('the create-issue action', () => {
+  it('opens the composer the mounted screen registered', async () => {
+    const { user, link } = await renderShell()
+
+    await link.resolve('IssueList', { data: issueListData([issueRow(1)]) })
+
+    pressChord()
+    await user.click(screen.getByRole('option', { name: 'New issue' }))
+
+    /*
+      The composer the issue list owns, reached through the shell's
+      create-issue slot -- the same one the rail's button uses. A second
+      create path in the palette would be a second composer to keep in step
+      with this one.
+    */
+    expect(screen.getByRole('heading', { name: 'New issue' })).toBeInTheDocument()
+    expect(palette()).toBeNull()
+  })
+
+  it('is absent on a screen that cannot create issues', async () => {
+    const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/settings` })
+
+    await view.link.idle()
+
+    pressChord()
+
+    // Nothing has filled the slot, so there is no command. Not a disabled
+    // one, and not one that opens a composer with nowhere to file.
+    expect(screen.queryByRole('option', { name: 'New issue' })).toBeNull()
+    expect(screen.getByRole('option', { name: 'Settings' })).toBeInTheDocument()
   })
 })
