@@ -15,11 +15,12 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
 import asyncpg
+import httpx
 from pydantic import SecretStr
 
 from app.config import Settings
@@ -410,6 +411,104 @@ def _repositories(value: Any) -> tuple[GithubRepositoryEntity, ...] | None:
     return tuple(found.values())
 
 
+# --- proving the installer owns what they claimed -----------------------
+
+# GitHub's OAuth token endpoint, and the API root the resulting user token is
+# spent against. Module constants and never arguments, so no caller can aim
+# this exchange at a host of their choosing.
+GITHUB_TOKEN_URL: Final = "https://github.com/login/oauth/access_token"
+GITHUB_USER_INSTALLATIONS_URL: Final = "https://api.github.com/user/installations"
+
+# How long the two calls below may take. Short, because they sit inside an
+# OAuth callback the user is watching, and a provider that has stopped
+# answering must not hold the request open.
+VERIFY_TIMEOUT_SECONDS: Final = 10.0
+
+
+class InstallationOwnershipCheck(Protocol):
+    """Whether the person finishing this flow can reach this installation."""
+
+    async def installed_for_user(self, *, code: str, installation_id: int) -> bool: ...
+
+
+class GithubUserInstallations:
+    """Asks GitHub, using the grant the installer just consented to.
+
+    This is the check `connect` could not make. An installation id arrives in
+    a query string and GitHub's ids are a small ascending counter, so naming
+    another organisation's is a guess anyone can make -- and the claim design
+    exists precisely because nothing in the redirect proves otherwise.
+
+    A signed `installation` delivery proves it, but only for an app being
+    installed for the first time: an app already installed emits no
+    `installation.created`, so a workspace connecting to an existing
+    installation would wait for a delivery that never comes.
+
+    The OAuth code closes that gap and is the only thing in the redirect that
+    can. It is single-use, issued by GitHub to this app for this browser, and
+    exchanges for a token whose `GET /user/installations` lists exactly the
+    installations that account may administer. An id in that list is one the
+    person clicking genuinely has; an id they guessed is not.
+
+    The user token is spent immediately and never stored, logged or returned.
+    It is a bearer credential for someone's whole GitHub account, and the only
+    safe thing to do with one is use it once and let it fall out of scope --
+    which is why this returns a bool rather than anything derived from it.
+    """
+
+    def __init__(self, *, client_id: str, client_secret: str, redirect_uri: str | None):
+        self._client_id = client_id
+        self._client_secret = client_secret
+        self._redirect_uri = redirect_uri
+
+    async def installed_for_user(self, *, code: str, installation_id: int) -> bool:
+        fields = {
+            "client_id": self._client_id,
+            "client_secret": self._client_secret,
+            "code": code,
+        }
+
+        # Deliberately absent, matching the authorize leg. GitHub compares
+        # the two and refuses the exchange when one sends a redirect_uri and
+        # the other does not, so this is not an omission but the other half of
+        # the same decision -- see the note in app/rest/github.py's install
+        # handler for why neither sends it.
+
+        async with httpx.AsyncClient(timeout=VERIFY_TIMEOUT_SECONDS) as client:
+            granted = await client.post(
+                GITHUB_TOKEN_URL, data=fields, headers={"Accept": "application/json"}
+            )
+
+            if granted.status_code != 200:
+                return False
+
+            token = granted.json().get("access_token")
+
+            if not isinstance(token, str) or not token:
+                return False
+
+            # One page is enough for the question being asked; an account with
+            # more than a hundred installations is not a case this flow has,
+            # and asking for more would turn a verification into a crawl.
+            listed = await client.get(
+                GITHUB_USER_INSTALLATIONS_URL,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                    "X-GitHub-Api-Version": "2022-11-28",
+                },
+                params={"per_page": 100},
+            )
+
+        if listed.status_code != 200:
+            return False
+
+        return any(
+            entry.get("id") == installation_id
+            for entry in (listed.json().get("installations") or [])
+        )
+
+
 class GithubService:
     """Business rules for a workspace's GitHub App installation.
 
@@ -429,7 +528,15 @@ class GithubService:
         pool: asyncpg.Pool,
         repository: GithubRepository,
         config: GithubAppConfig,
+        ownership: "InstallationOwnershipCheck | None" = None,
     ):
+        # Optional, and None is a real deployment rather than a degraded one:
+        # without it a claim is confirmed only by a signed `installation`
+        # delivery, which is exactly the behaviour 016 shipped. Supplying one
+        # adds a second, independent way to establish the same fact, and
+        # neither weakens the other -- both end at the same single writer of
+        # `confirmed_at`.
+        self._ownership = ownership
         self._pool = pool
         self._repository = repository
         self._config = config
@@ -475,6 +582,62 @@ class GithubService:
                 )
 
         return self._view(installation, repositories)
+
+    async def confirm_with_user_grant(
+        self,
+        *,
+        installation_id: int,
+        code: str,
+    ) -> bool:
+        """Promote a claim when GitHub says this installer owns it.
+
+        The second route to `confirmed_at`, and the one that makes connecting
+        to an ALREADY-INSTALLED app possible at all: GitHub emits
+        `installation.created` once, so a workspace joining an existing
+        installation would otherwise wait for a delivery that never arrives
+        and sit at PENDING until the claim expired.
+
+        The evidence is different from the webhook's but no weaker. A signed
+        delivery is GitHub telling us an installation happened; the OAuth code
+        is GitHub telling us that THIS browser's account can administer THIS
+        installation. The second is a closer answer to the question the claim
+        actually poses -- who clicked -- and the id is compared against a list
+        GitHub returns rather than anything the client supplied.
+
+        Fails closed everywhere: no checker configured, a refused exchange, a
+        token that does not list the id, or any transport failure all leave
+        the claim exactly as it was, for the webhook to confirm or the TTL to
+        expire. It never writes `confirmed_at` on its own authority --
+        `confirm_installation` is still the only writer, with the same three
+        predicates, so a claim that is already confirmed, already expired or
+        belongs to nobody is untouched.
+        """
+        if self._ownership is None:
+            return False
+
+        try:
+            owned = await self._ownership.installed_for_user(
+                code=code, installation_id=installation_id
+            )
+        except Exception:
+            # A provider that is slow, down or answering nonsense must not
+            # turn into a 500 in the middle of an OAuth callback. The claim
+            # survives; PENDING is an honest state and the webhook path and
+            # the TTL both still apply.
+            return False
+
+        if not owned:
+            return False
+
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                workspace_id = await self._repository.confirm_installation(
+                    connection,
+                    installation_id=installation_id,
+                    within=CLAIM_TTL,
+                )
+
+        return workspace_id is not None
 
     async def connect(
         self,

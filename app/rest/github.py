@@ -55,6 +55,7 @@ from app.services.github import (
     SIGNATURE_HEADER,
     GithubAppConfig,
     GithubService,
+    GithubUserInstallations,
     allowed_redirect,
     require_workspace_admin,
     verify_webhook_signature,
@@ -188,6 +189,18 @@ def build_services() -> GithubHttpServices:
             pool=pool,
             repository=GithubRepository(),
             config=GithubAppConfig.from_settings(settings),
+            # Built only when the deployment has an OAuth client to build it
+            # from; without one the service falls back to webhook-only
+            # confirmation, which is the behaviour 016 shipped.
+            ownership=(
+                GithubUserInstallations(
+                    client_id=settings.github_client_id,
+                    client_secret=settings.github_client_secret.get_secret_value(),
+                    redirect_uri=settings.github_oauth_callback_url,
+                )
+                if settings.github_client_id and settings.github_client_secret
+                else None
+            ),
         ),
         auth=AuthService(
             pool=pool,
@@ -406,16 +419,20 @@ async def install(
     # into a parameter of its own.
     parameters = {"client_id": config.client_id, "state": state}
 
-    # Sent only when the deployment configured one. GitHub falls back to the
-    # App's registered callback when `redirect_uri` is absent, so omitting it
-    # works for an App with exactly one -- but an App with several has no way
-    # to know which, and a value that does NOT match a registered one is
-    # rejected outright. Naming it makes the leg deterministic, and it is the
-    # same value the token exchange must present later: GitHub compares the
-    # two and refuses the exchange if they differ.
-    if services.oauth_callback_url:
-        parameters["redirect_uri"] = services.oauth_callback_url
-
+    # No `redirect_uri`. GitHub uses the App's registered Callback URL when
+    # the parameter is absent, and a GitHub App has exactly one -- so there is
+    # nothing for this to disambiguate and everything for it to get wrong.
+    #
+    # Sending it was tried and rejected: GitHub answered "The redirect_uri is
+    # not associated with this application", because it demands a byte-exact
+    # match against the registered value and this deployment's is a tunnel URL
+    # that changes whenever the tunnel restarts. Two copies of a value that
+    # moves is one copy too many, and the copy this process holds is the one
+    # that goes stale silently.
+    #
+    # `github_oauth_callback_url` is still read -- the flow has to know which
+    # ORIGIN it will come back on, because the state cookie has to be set on
+    # that host -- it is simply not sent to GitHub as a parameter.
     query = urlencode(parameters)
 
     response = RedirectResponse(
@@ -457,6 +474,7 @@ async def callback(
     services: Annotated[GithubHttpServices, Depends(build_services)],
     state: str | None = None,
     installation_id: int | None = None,
+    code: str | None = None,
 ) -> Response:
     """Finish an install GitHub is redirecting a browser back from.
 
@@ -499,6 +517,7 @@ async def callback(
             request,
             state=state,
             installation_id=installation_id,
+            code=code,
             services=services,
         )
     except HTTPException as exc:
@@ -515,6 +534,7 @@ async def _complete_install(
     *,
     state: str | None,
     installation_id: int | None,
+    code: str | None,
     services: GithubHttpServices,
 ) -> Response:
     """The callback's decisions, with the cookie handling left to its caller."""
@@ -555,6 +575,25 @@ async def _complete_install(
 
     try:
         await services.github.connect(scope, installation_id=installation_id)
+
+        # The claim is recorded. Now ask GitHub whether the account that just
+        # consented can actually administer the installation it named -- the
+        # one question the redirect itself cannot answer, and the reason
+        # `code` is read here at all.
+        #
+        # It is deliberately AFTER the claim rather than instead of it. The
+        # claim is what a second workspace collides with, so recording it
+        # first keeps the refusal for a contested id identical whether or not
+        # the verification then succeeds. A failure here leaves PENDING,
+        # which a signed `installation` delivery can still promote.
+        #
+        # This is what makes connecting to an app that is ALREADY installed
+        # work: GitHub emits `installation.created` once, so that route is
+        # closed for every installation after the first.
+        if code:
+            await services.github.confirm_with_user_grant(
+                installation_id=installation_id, code=code
+            )
     except GithubNotConfiguredError:
         raise _not_found() from None
     except GithubInstallationClaimedError:
