@@ -19,6 +19,7 @@ import hmac
 import json
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
+from uuid import UUID
 
 import httpx
 import pytest
@@ -62,6 +63,10 @@ SESSION_TOKEN = "session-token-for-the-installing-admin"
 OTHER_SESSION_TOKEN = "session-token-for-somebody-else"
 
 WORKSPACE_SLUG = "vector"
+
+# The issue a signed pull-request delivery is allowed to link to: one in the
+# workspace that owns the repository the delivery came from, and no other.
+ISSUE_ID = UUID("00000000-0000-7000-8000-0000000000c1")
 
 # A URL on the allowlist and one that is not. The second is the one an open
 # redirect would follow.
@@ -670,13 +675,141 @@ async def test_a_signed_delivery_this_server_has_no_rule_for_is_accepted():
     """204, so GitHub does not retry a payload nothing will ever handle."""
     repository = FakeGithubRepository(workspace_id=WORKSPACE_ID)
     body = installation_body()
-    headers = signed(body) | {"X-GitHub-Event": "push"}
+    headers = signed(body) | {"X-GitHub-Event": "check_run"}
 
     async with build_client(build_services_for(repository=repository)) as client:
         response = await client.post("/github/webhook", content=body, headers=headers)
 
     assert response.status_code == 204
     assert repository.calls == []
+
+
+# --- development deliveries, over real HTTP ---------------------------
+#
+# The rules in tests/test_github_development.py, asserted through the one
+# thing that stands between a stranger and them: the HMAC.
+
+
+def pull_request_body(title="Fixes ENG-142") -> bytes:
+    payload = {
+        "action": "opened",
+        "installation": {"id": INSTALLATION_ID},
+        "repository": {"id": 11111, "full_name": "acme/vector"},
+        "pull_request": {
+            "number": 84,
+            "title": title,
+            "body": None,
+            "state": "open",
+            "draft": False,
+            "merged_at": None,
+            "updated_at": "2026-04-01T10:00:00Z",
+            "head": {"ref": "eng-142-fix"},
+            "html_url": "https://github.com/acme/vector/pull/84",
+        },
+    }
+
+    # Not the canonical separators, for the reason `installation_body` gives:
+    # a signature verified over a re-serialised document proves nothing about
+    # the bytes that arrived.
+    return json.dumps(payload, indent=2).encode("utf-8")
+
+
+def development_repository() -> FakeGithubRepository:
+    repository = FakeGithubRepository(
+        workspace_id=WORKSPACE_ID,
+        repositories=[
+            GithubRepositoryEntity(repository_id=11111, full_name="acme/vector")
+        ],
+    )
+    repository.issues = {(WORKSPACE_ID, "ENG", 142): ISSUE_ID}
+
+    return repository
+
+
+async def test_a_forged_pull_request_delivery_is_refused_before_anything_is_read():
+    """The whole feature behind one HMAC.
+
+    A pull-request payload is the shape an attacker most wants accepted: it
+    names a repository, carries an identifier, and would create a link row.
+    A body signed with a secret this deployment does not hold reaches nothing
+    -- not the delivery table, not the routing lookup, not the resolver.
+    """
+    repository = development_repository()
+    body = pull_request_body()
+    headers = signed(body, secret="not-the-configured-secret") | {
+        "X-GitHub-Event": "pull_request",
+        "X-GitHub-Delivery": "d-forged",
+    }
+
+    async with build_client(build_services_for(repository=repository)) as client:
+        response = await client.post("/github/webhook", content=body, headers=headers)
+
+    assert response.status_code == 401
+    assert repository.calls == []
+    assert repository.pull_links == set()
+
+
+async def test_a_pull_request_delivery_tampered_with_after_signing_is_refused():
+    """One byte changed -- the identifier -- which is the whole threat model.
+
+    The signature is over the RAW body, so rewriting `ENG-142` to another
+    workspace's identifier invalidates it. Verified before `json.loads` runs.
+    """
+    repository = development_repository()
+    body = pull_request_body()
+    headers = signed(body) | {"X-GitHub-Event": "pull_request"}
+
+    async with build_client(build_services_for(repository=repository)) as client:
+        response = await client.post(
+            "/github/webhook",
+            content=body.replace(b"ENG-142", b"OTH-999"),
+            headers=headers,
+        )
+
+    assert response.status_code == 401
+    assert repository.calls == []
+
+
+async def test_a_correctly_signed_pull_request_delivery_is_applied():
+    repository = development_repository()
+    body = pull_request_body()
+    headers = signed(body) | {
+        "X-GitHub-Event": "pull_request",
+        "X-GitHub-Delivery": "d-1",
+    }
+
+    async with build_client(build_services_for(repository=repository)) as client:
+        response = await client.post("/github/webhook", content=body, headers=headers)
+
+    assert response.status_code == 204
+    assert {(link[3], link[4]) for link in repository.pull_links} == {
+        (ISSUE_ID, "title"),
+        (ISSUE_ID, "branch"),
+    }
+
+
+async def test_a_redelivery_is_answered_204_and_applied_once():
+    """A duplicate MUST be 2xx.
+
+    Anything else earns an infinite redelivery loop from GitHub for a payload
+    that is, in fact, fine -- which is the failure mode that makes an
+    idempotency check answering 409 worse than none at all.
+    """
+    repository = development_repository()
+    body = pull_request_body()
+    headers = signed(body) | {
+        "X-GitHub-Event": "pull_request",
+        "X-GitHub-Delivery": "d-1",
+    }
+
+    async with build_client(build_services_for(repository=repository)) as client:
+        first = await client.post("/github/webhook", content=body, headers=headers)
+        applied = len(repository.calls)
+        second = await client.post("/github/webhook", content=body, headers=headers)
+
+    assert (first.status_code, second.status_code) == (204, 204)
+    # The retry did exactly one thing: ask whether it was a retry.
+    assert repository.calls[applied:] == [("record_delivery", "d-1", "pull_request")]
 
 
 # --- an installation id is a claim, not proof -------------------------

@@ -26,6 +26,7 @@ from app.graphql.types.comment import (
     CommentConnection,
 )
 from app.graphql.types.errors import ValidationErrorType
+from app.graphql.types.github import GithubDevelopmentType
 from app.graphql.types.label import LabelType
 from app.graphql.types.pagination import PageInfo
 from app.graphql.types.project import ProjectType
@@ -345,6 +346,42 @@ class IssueType:
             raise bad_user_input("Invalid pagination arguments", exc) from None
 
         return IssueActivityConnection.from_domain(page)
+
+    @strawberry.field
+    async def development(self, info: Info) -> GithubDevelopmentType:
+        """The pull requests and commits attached to this issue.
+
+        Hung off the issue rather than published as a root field, and that is
+        the authorization decision rather than a shape preference: `self.scope`
+        is the scope the root resolver already authorised this issue under, so
+        there is no second boundary to get right and no `issueId` argument for
+        a caller to aim at another workspace. A root field would need both.
+
+        Deliberately NOT admin-only, unlike `githubIntegration`. Connecting a
+        GitHub organisation is an admin's act and is guarded as one; the pull
+        requests attached to an issue are part of the issue, and every member
+        who can open it can see them.
+
+        Non-null, and it answers for an issue with no activity rather than
+        returning null: `branchName` is what that issue's panel renders, so an
+        absence here would hide the field's only useful state.
+
+        Not batched. `Issue.labels` and `Issue.cycle` go through DataLoaders
+        because they are selected on every row of a fifty-issue page; this
+        belongs to the inspector for one open issue, and a loader for a field
+        selected once per document is a cache with nothing to batch.
+        """
+        entity = await info.context.github_service.development_for_issue(
+            self.scope,
+            issue_id=self.id,
+            # Both come from the row this type was built from, so the branch
+            # name is derived from what the issue IS rather than from anything
+            # the document sent.
+            identifier=self.identifier,
+            title=self.title,
+        )
+
+        return GithubDevelopmentType.from_entity(entity)
 
     @classmethod
     def from_entity(cls, entity: IssueEntity, scope: WorkspaceScope) -> "IssueType":

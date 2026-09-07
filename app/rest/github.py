@@ -81,6 +81,16 @@ router = APIRouter(prefix="/github", tags=["github"])
 # when they do.
 GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 
+# The header GitHub stamps each delivery with, and the only thing that tells a
+# retry from a first attempt. A retry is not an edge case: GitHub redelivers
+# anything it did not see a 2xx for, so at-least-once is the only delivery
+# semantics this endpoint has.
+#
+# Named here rather than spelled inline, for the reason SIGNATURE_HEADER is: a
+# typo would read as "no delivery id", which fails open into applying every
+# redelivery twice and does so silently.
+DELIVERY_HEADER = "X-GitHub-Delivery"
+
 # The state cookie. A cookie rather than a row, because the value has to be
 # proven to belong to *this browser* and a table cannot say that: a database
 # row keyed by the state would be readable by whoever presents the state, which
@@ -734,6 +744,14 @@ async def webhook(
     await services.github.apply_webhook(
         event=request.headers.get("X-GitHub-Event", ""),
         payload=payload,
+        # GitHub's own id for this delivery, and what makes a retry
+        # distinguishable from a first attempt. Passed through rather than
+        # acted on here: the duplicate check has to run inside the same
+        # transaction as the writes it guards, or a delivery that failed part
+        # way through would be recorded as applied. A delivery already applied
+        # comes back as the same 204 below -- anything else earns an infinite
+        # redelivery for a payload that is, in fact, fine.
+        delivery_id=request.headers.get(DELIVERY_HEADER),
     )
 
     return Response(status_code=status.HTTP_204_NO_CONTENT)

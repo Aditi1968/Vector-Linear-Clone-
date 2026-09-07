@@ -130,6 +130,36 @@ input FavoriteReorderInput {
   position: Int!
 }
 
+type GithubCommit {
+  repositoryId: ID!
+  repository: String!
+
+  """The full 40-character SHA, which is the commit's identity."""
+  sha: String!
+
+  """
+  The first seven characters, which is what a list shows. A rendering and never an identity: the abbreviation is ambiguous by construction.
+  """
+  shortSha: String!
+
+  """The whole commit message."""
+  message: String!
+
+  """The message's first line, which is what a list shows."""
+  summary: String!
+  url: String
+  committedAt: DateTime
+}
+
+type GithubDevelopment {
+  """
+  A deterministic branch name for this issue -- eng-142-fix-slack-oauth-callback. Safe to paste into `git checkout -b` for any title: unicode is folded, punctuation collapses, and a title that folds to nothing leaves the identifier alone. Creating it needs no GitHub permission and this field creates nothing; the identifier leads so that a pull request opened from the branch links back without anyone typing the identifier twice.
+  """
+  branchName: String!
+  pullRequests(first: Int! = 10): [GithubPullRequest!]!
+  commits(first: Int! = 10): [GithubCommit!]!
+}
+
 input GithubDisconnectInput {
   workspaceSlug: String!
 }
@@ -147,6 +177,50 @@ enum GithubIntegrationStatus {
   DISCONNECTED
   PENDING
   CONNECTED
+}
+
+enum GithubLinkSource {
+  TITLE
+  BODY
+  BRANCH
+}
+
+type GithubPullRequest {
+  repositoryId: ID!
+
+  """The repository this pull request is on, as owner/name."""
+  repository: String!
+  number: Int!
+  title: String!
+  state: GithubPullRequestState!
+
+  """
+  The branch the pull request is from, or null where the payload omitted it -- a deleted or cross-fork head.
+  """
+  branch: String
+
+  """
+  The link GitHub reported, stored rather than rebuilt from the owner, name and number: GitHub owns its URL layout, and a rebuilt link is a guess that breaks silently.
+  """
+  url: String
+  mergedAt: DateTime
+
+  """
+  GitHub's own updated_at, not Vector's. Null where the payload carried none.
+  """
+  updatedAt: DateTime
+
+  """
+  Which of the pull request's title, body and branch name this issue's identifier appears in. More than one is ordinary, and each is retracted independently: editing the title removes the title's link and leaves the branch's.
+  """
+  linkedBy: [GithubLinkSource!]!
+}
+
+enum GithubPullRequestState {
+  DRAFT
+  OPEN
+  MERGED
+  CLOSED
 }
 
 type GithubRepository {
@@ -340,6 +414,7 @@ type Issue {
   children(first: Int! = 10, after: String = null): IssueSummaryConnection!
   relations(first: Int! = 10, after: String = null): IssueRelationConnection!
   activity(first: Int! = 10, after: String = null): IssueActivityConnection!
+  development: GithubDevelopment!
   labels: [Label!]!
   comments(first: Int! = 20, after: String = null): CommentConnection!
 }
