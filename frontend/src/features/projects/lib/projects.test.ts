@@ -13,7 +13,7 @@ import type { ProjectIssue, ProjectMember, ProjectTeam } from '../api'
 /**
  * The project derivations, tested where they can be wrong in a way nobody
  * notices: the multi-team membership, the three answers to "who leads this",
- * and the client-side filters that stand in for the API's missing ones.
+ * and the two counts nothing in the API can be asked for.
  */
 
 function team(id: string, key: string): ProjectTeam {

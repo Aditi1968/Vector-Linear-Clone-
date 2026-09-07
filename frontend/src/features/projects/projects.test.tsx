@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { main, renderApp } from '../../test/render'
-import { WORKSPACE_SLUG } from '../../test/factories'
+import { WORKSPACE_SLUG, issueDetail, issueProjectSet } from '../../test/factories'
 import type {
   ProjectDetailData,
   ProjectDetailFields,
@@ -309,6 +309,27 @@ describe('the project detail', () => {
     expect(
       screen.getByText('Nothing in this workspace is filed against this project.'),
     ).toBeInTheDocument()
+  })
+
+  it('asks for the panel’s list again when an issue leaves the project', async () => {
+    const view = await openDetail(
+      project(),
+      issuesData([projectIssue('00000000-0000-4000-8000-0000000000e1', 'Alpha')]),
+    )
+
+    await view.user.click(screen.getByRole('button', { name: 'Actions for ENG-1' }))
+    await view.user.click(screen.getByRole('menuitem', { name: 'Remove from project' }))
+    await view.link.resolve('IssueSetProject', {
+      data: issueProjectSet(issueDetail(1, { project: null })),
+    })
+
+    // The panel reads a server-filtered connection, so correcting the issue's
+    // own `projectId` moves it out of nothing: without the refetch the row
+    // would sit in the list until a reload, which is the kind of staleness
+    // that reads as "the button did not work".
+    await expect(view.link.waitForRequest('ProjectIssues')).resolves.toMatchObject({
+      projectId: PROJECT_ID,
+    })
   })
 
   it('states how many of the project’s issues are on screen, and only while some are not', async () => {

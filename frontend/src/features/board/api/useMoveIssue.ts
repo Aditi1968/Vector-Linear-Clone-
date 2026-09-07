@@ -56,6 +56,17 @@ export interface UseMoveIssueResult {
  * leaves the old value on screen for one round trip and the real result
  * corrects it. Guessing it here would mean re-implementing a server rule in
  * the browser and being wrong the day it changes.
+ *
+ * ## No refetch, unlike the other membership writes
+ *
+ * A move can take a card out of an active status filter, and correcting the
+ * normalised issue does not remove it from a server-filtered connection -- so
+ * the card stays on the board in its new column. That is deliberate, and the
+ * opposite of the project and cycle panels, where a row that refused to leave
+ * would read as a button that did nothing: here the card is visibly where it
+ * was just put, which is the more useful answer. Refetching would instead
+ * discard every page loaded past the first (the merge policy reads the
+ * cursorless refetch as "start the list over") on every single drag.
  */
 export function useMoveIssue(): UseMoveIssueResult {
   const workspaceSlug = useWorkspaceSlug()

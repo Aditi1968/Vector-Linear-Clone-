@@ -173,9 +173,14 @@ export interface UseProjectActionsResult {
  * three times the code to save one round trip on a list that is a handful of
  * rows long.
  *
- * `issueSetProject` selects `projectId` and `milestoneId` on the issue, so
- * the normalised issue is corrected and the screen's client-side filter
- * follows without a refetch.
+ * `issueSetProject` needs help for the same reason, and this is the one that
+ * changed when the filtering moved to the server. It selects `projectId` and
+ * `milestoneId`, so the normalised issue is corrected -- which used to be
+ * enough, because the panel re-derived its list from the loaded workspace
+ * issues on every render. The panel now reads a server-filtered connection
+ * (`filter: { projectId }`), and correcting a row's `projectId` does not move
+ * it into or out of a cached connection: an issue removed from the project
+ * would sit there until a reload. So both membership lists are refetched.
  */
 export function useProjectActions(projectId: string): UseProjectActionsResult {
   const workspaceSlug = useWorkspaceSlug()
@@ -198,7 +203,11 @@ export function useProjectActions(projectId: string): UseProjectActionsResult {
     ProjectMilestoneDeleteDocument,
     { refetchQueries: ['ProjectDetail'] },
   )
-  const [setProject, setProjectState] = useMutation(IssueSetProjectDocument)
+  const [setProject, setProjectState] = useMutation(IssueSetProjectDocument, {
+    // The two lists whose *membership* this changes, refetched by name so
+    // whichever is mounted reruns with the variables it was mounted with.
+    refetchQueries: ['ProjectIssues', 'ProjectUnfiledIssues'],
+  })
 
   const updateProject = useCallback(
     async (draft: ProjectDraft) => {

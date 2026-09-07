@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import { main, renderApp } from '../../test/render'
-import { WORKSPACE_SLUG } from '../../test/factories'
+import { WORKSPACE_SLUG, issueCycleSet, issueDetail } from '../../test/factories'
 import type { CycleFields } from './api'
 import type {
   CycleIssuesQuery,
@@ -268,6 +268,22 @@ describe('the cycle detail', () => {
     await openDetail(cycle(), issuesData([cycleIssue('Alpha')]))
 
     expect(within(main()).queryByText(/issues in this cycle\./)).toBeNull()
+  })
+
+  it('asks for the panel’s list again when an issue leaves the cycle', async () => {
+    const view = await openDetail(cycle(), issuesData([cycleIssue('Alpha')]))
+
+    await view.user.click(screen.getByRole('button', { name: 'Remove' }))
+    await view.link.resolve('IssueSetCycle', {
+      data: issueCycleSet(issueDetail(1, { cycle: null })),
+    })
+
+    // The panel reads a server-filtered connection, so correcting the issue's
+    // own cycle moves it out of nothing: without the refetch the row would sit
+    // in the list until a reload.
+    await expect(view.link.waitForRequest('CycleIssues')).resolves.toMatchObject({
+      cycleId: CYCLE_ID,
+    })
   })
 
   it('deletes a cycle through the loose-argument mutation the schema declares', async () => {
