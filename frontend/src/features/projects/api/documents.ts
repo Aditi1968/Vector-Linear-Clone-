@@ -27,5 +27,6 @@ export {
   ProjectTeamAddDocument,
   ProjectTeamRemoveDocument,
   ProjectTeamsDocument,
+  ProjectUnfiledIssuesDocument,
   ProjectUpdateDocument,
 } from '../../../generated/operations'

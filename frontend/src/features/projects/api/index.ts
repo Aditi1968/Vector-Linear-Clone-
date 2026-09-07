@@ -19,6 +19,7 @@ export {
   useProjectList,
   useProjectMembers,
   useProjectTeams,
+  useUnfiledIssues,
 } from './queries'
 export type {
   UseProjectDetailResult,
@@ -53,6 +54,7 @@ export {
   ProjectTeamAddDocument,
   ProjectTeamRemoveDocument,
   ProjectTeamsDocument,
+  ProjectUnfiledIssuesDocument,
   ProjectUpdateDocument,
 } from './documents'
 
@@ -70,6 +72,7 @@ export type {
   ProjectState,
   ProjectTeam,
   ProjectTeamsData,
+  ProjectUnfiledIssue,
   ProjectUpdateInput,
   ProjectValidationError,
 } from './types'

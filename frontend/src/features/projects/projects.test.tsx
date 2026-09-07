@@ -11,7 +11,10 @@ import type {
   ProjectMilestone,
   ProjectTeamsData,
 } from './api'
-import type { ProjectMembersQuery } from '../../generated/operations'
+import type {
+  ProjectMembersQuery,
+  ProjectUnfiledIssuesQuery as ProjectUnfiledIssuesData,
+} from '../../generated/operations'
 
 /**
  * The project screens, against the real router, the real cache and a
@@ -96,22 +99,53 @@ const membersData: ProjectMembersQuery = {
   ],
 }
 
-const noIssues: ProjectIssuesData = {
-  issues: {
-    __typename: 'IssueConnection',
-    nodes: [],
-    pageInfo: { __typename: 'PageInfo', hasNextPage: false, endCursor: null },
-  },
+/** One page of the project's issues, as the server would answer the filter. */
+function issuesData(
+  nodes: ProjectIssuesData['issues']['nodes'] = [],
+  { hasNextPage = false, totalCount = nodes.length } = {},
+): ProjectIssuesData {
+  return {
+    issues: {
+      __typename: 'IssueConnection',
+      nodes: [...nodes],
+      pageInfo: {
+        __typename: 'PageInfo',
+        hasNextPage,
+        endCursor: hasNextPage ? 'cursor-1' : null,
+      },
+      totalCount,
+    },
+  }
 }
 
-/** Answer the three queries the detail screen fires, in any order. */
-async function openDetail(value: ProjectDetailFields | null) {
+function projectIssue(id: string, title: string): ProjectIssuesData['issues']['nodes'][number] {
+  return {
+    __typename: 'Issue',
+    id,
+    identifier: 'ENG-1',
+    title,
+    completedAt: null,
+    projectId: PROJECT_ID,
+    milestoneId: null,
+  }
+}
+
+const noUnfiled: ProjectUnfiledIssuesData = {
+  issues: { __typename: 'IssueConnection', nodes: [] },
+}
+
+/** Answer the queries the detail screen fires, in any order. */
+async function openDetail(
+  value: ProjectDetailFields | null,
+  issues: ProjectIssuesData = issuesData(),
+) {
   const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/projects/${PROJECT_ID}` })
 
   await view.link.resolve('ProjectDetail', { data: detailData(value) })
   await view.link.resolve('ProjectTeams', { data: teamsData })
   await view.link.resolve('ProjectMembers', { data: membersData })
-  await view.link.resolve('ProjectIssues', { data: noIssues })
+  await view.link.resolve('ProjectIssues', { data: issues })
+  await view.link.resolve('ProjectUnfiledIssues', { data: noUnfiled })
 
   return view
 }
@@ -248,11 +282,58 @@ describe('the project detail', () => {
     })
   })
 
-  it('says an empty issue panel is empty, not broken', async () => {
+  it('asks the server for this project’s issues, and for the unfiled ones', async () => {
+    const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/projects/${PROJECT_ID}` })
+
+    // The panel's list: filtered by the id in the route, so it does not wait
+    // for the project to load and does not sift the workspace for it.
+    await expect(view.link.waitForRequest('ProjectIssues')).resolves.toEqual({
+      workspaceSlug: WORKSPACE_SLUG,
+      projectId: PROJECT_ID,
+      after: null,
+    })
+
+    // The "add an issue" menu's list is the opposite question, and the null
+    // is the filter rather than the absence of one -- it is written into the
+    // document, so what has to be checked is that the two are separate
+    // requests and this one carries no project id of its own.
+    await expect(view.link.waitForRequest('ProjectUnfiledIssues')).resolves.toEqual({
+      workspaceSlug: WORKSPACE_SLUG,
+    })
+  })
+
+  it('says an empty issue panel is empty, without hedging about pages', async () => {
     await openDetail(project())
 
-    // The API has no per-project issue filter, so an empty panel means "none
-    // among those loaded". The screen has to be explicit about which.
     expect(screen.getByText('No issues in this project yet')).toBeInTheDocument()
+    expect(
+      screen.getByText('Nothing in this workspace is filed against this project.'),
+    ).toBeInTheDocument()
+  })
+
+  it('states how many of the project’s issues are on screen, and only while some are not', async () => {
+    const partial = await openDetail(
+      project(),
+      issuesData([projectIssue('00000000-0000-4000-8000-0000000000e1', 'Alpha')], {
+        hasNextPage: true,
+        totalCount: 7,
+      }),
+    )
+
+    // Server-side filtering does not make a paginated list complete, so the
+    // honest sentence survives -- around `totalCount`, which is now a fact.
+    expect(
+      within(main()).getByText('Showing 1 of 7 issues in this project.'),
+    ).toBeInTheDocument()
+
+    partial.unmount()
+
+    await openDetail(
+      project(),
+      issuesData([projectIssue('00000000-0000-4000-8000-0000000000e1', 'Alpha')]),
+    )
+
+    // And when the whole answer is loaded there is nothing to say about it.
+    expect(within(main()).queryByText(/issues in this project\./)).toBeNull()
   })
 })

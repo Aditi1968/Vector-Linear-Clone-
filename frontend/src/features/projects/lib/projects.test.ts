@@ -5,7 +5,6 @@ import {
   closedCount,
   formatDay,
   issuesInMilestone,
-  issuesInProject,
   leadLabel,
   resolveTeams,
 } from './projects'
@@ -115,24 +114,13 @@ describe('formatDay', () => {
   })
 })
 
-describe('the client-side filters standing in for the missing API arguments', () => {
+describe('the derivations the server does not do', () => {
+  // Which issues are the project's is `filter: { projectId }` now, so these
+  // are the two questions left for the browser: which milestone an issue is
+  // in, and how many of a set are closed. `ProjectMilestone` exposes no
+  // counts of its own, so the second has nowhere else to be computed.
   const mine = issue({ id: 'a', projectId: 'p1', milestoneId: 'm1', completedAt: '2026-01-01T00:00:00Z' })
   const alsoMine = issue({ id: 'b', projectId: 'p1', milestoneId: null })
-  const theirs = issue({ id: 'c', projectId: 'p2' })
-  const loose = issue({ id: 'd', projectId: null })
-
-  it('keeps only the issues filed against the project', () => {
-    expect(issuesInProject([mine, alsoMine, theirs, loose], 'p1').map((entry) => entry.id)).toEqual([
-      'a',
-      'b',
-    ])
-  })
-
-  it('is empty when the loaded page contains none of the project', () => {
-    // Not a bug and not an error: the API has no `issues(projectId:)`, so an
-    // empty result means "none among those loaded" and the screen says so.
-    expect(issuesInProject([theirs, loose], 'p1')).toEqual([])
-  })
 
   it('keeps only the issues in one milestone', () => {
     expect(issuesInMilestone([mine, alsoMine], 'm1').map((entry) => entry.id)).toEqual(['a'])

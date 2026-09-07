@@ -19,6 +19,7 @@ import {
   useProjectIssues,
   useProjectMembers,
   useProjectTeams,
+  useUnfiledIssues,
 } from '../api'
 import type { MilestoneDraft, ProjectDraft, ProjectOutcome, ProjectValidationError } from '../api'
 import { ProjectForm } from '../components/ProjectForm'
@@ -28,7 +29,6 @@ import { ProjectTeams } from '../components/ProjectTeams'
 import {
   closedCount,
   formatDay,
-  issuesInProject,
   leadLabel,
   projectStateLabel,
   projectStateTone,
@@ -48,13 +48,14 @@ const NO_ERRORS: readonly ProjectValidationError[] = []
  * hand-off of a project object from the list and no state that exists only if
  * the user arrived by clicking a row.
  *
- * ## Where the issue panel's honesty comes from
+ * ## Where the issue panel's numbers come from
  *
- * There is no `project.issues` field, so the issues are the workspace's,
- * matched on `projectId` here. Every number derived from them -- the header's
- * progress, each milestone's -- is therefore about *loaded* issues, and each
- * one is labelled that way rather than presented as a fact about the project.
- * See ../components/ProjectIssues.tsx.
+ * `filter: { projectId }`, so the issues below are the project's and every
+ * number derived from them -- the header's progress, each milestone's -- is
+ * about the project rather than about a page of the workspace. The one thing
+ * still worth saying out loud is paging: while there is another page, the
+ * progress labels say "among those loaded" and the panel says how many of the
+ * total are on screen. See ../components/ProjectIssues.tsx.
  */
 export function ProjectDetailPage() {
   const params = useParams()
@@ -65,7 +66,8 @@ export function ProjectDetailPage() {
   const { project, isLoading, isNotFound, errorMessage, retry } = useProjectDetail(projectId)
   const { teams } = useProjectTeams()
   const { members } = useProjectMembers()
-  const issueQuery = useProjectIssues()
+  const issueQuery = useProjectIssues(projectId)
+  const unfiledIssues = useUnfiledIssues()
 
   // `?? ''` only ever reaches a hook whose functions are not called before
   // `project` exists -- every control that could call one is rendered inside
@@ -237,7 +239,7 @@ export function ProjectDetailPage() {
     )
   }
 
-  const projectIssues = issuesInProject(issueQuery.issues, project.id)
+  const projectIssues = issueQuery.issues
   const closed = closedCount(projectIssues)
   const lead = leadLabel(project.leadId, members)
 
@@ -317,10 +319,16 @@ export function ProjectDetailPage() {
                       <ProgressIndicator
                         value={closed}
                         total={projectIssues.length}
-                        label={`${project.name}: closed issues among those loaded`}
+                        label={
+                          issueQuery.hasNextPage
+                            ? `${project.name}: closed issues among those loaded`
+                            : `${project.name}: closed issues`
+                        }
                         showLabel
                       />
-                      <span>closed, of the issues loaded</span>
+                      <span>
+                        {issueQuery.hasNextPage ? 'closed, of the issues loaded' : 'closed'}
+                      </span>
                     </span>
                   </dd>
                 </dl>
@@ -334,6 +342,7 @@ export function ProjectDetailPage() {
             <ProjectMilestones
               milestones={project.milestones}
               issues={projectIssues}
+              isPartial={issueQuery.hasNextPage}
               isCounting={issueQuery.isLoading}
               isSaving={actions.isSaving}
               onCreate={handleMilestoneCreate}
@@ -363,7 +372,8 @@ export function ProjectDetailPage() {
             <ProjectIssues
               projectId={project.id}
               issues={projectIssues}
-              loadedIssues={issueQuery.issues}
+              totalCount={issueQuery.totalCount}
+              unfiledIssues={unfiledIssues}
               milestones={project.milestones}
               isLoading={issueQuery.isLoading}
               isLoadingMore={issueQuery.isLoadingMore}
