@@ -33,12 +33,14 @@ import ast
 import importlib
 import inspect
 import pkgutil
+import tempfile
 from dataclasses import fields, is_dataclass
 from pathlib import Path
 
 import pytest
 
 import app
+from app.config import get_settings
 from app.graphql.schema import (
     MUTATION_TYPES,
     QUERY_TYPES,
@@ -314,11 +316,59 @@ def _domain_module(entity_name: str) -> str:
 
 
 # --------------------------------------------------------------------------
+# Building a real context, without a real deployment
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def configured(monkeypatch):
+    """Enough configuration for `get_context` to run, and nothing real.
+
+    `get_context` resolves settings, and `Settings` requires DATABASE_URL and
+    ENVIRONMENT with no defaults. A developer's checkout has a `.env` and CI
+    deliberately does not -- CI sets ENVIRONMENT and leaves DATABASE_URL unset
+    because no job in it opens a connection. So a test that reads the ambient
+    configuration passes locally and fails there, which is what these two gates
+    did when they were written.
+
+    The DSN is never connected to: `get_pool` is substituted below, and
+    `get_context` hands the pool object to the services without touching it.
+
+    `cache_clear` on both sides because `get_settings` is lru_cached: without
+    the first, this fixture would be answered from whatever an earlier test
+    built; without the second, every later test would be answered from this.
+    """
+    for name in ("DATABASE_URL", "ENVIRONMENT"):
+        monkeypatch.delenv(name, raising=False)
+
+    # No user:password in it, deliberately. `test_phase1a2_gates.py` refuses a
+    # credentialed DSN anywhere in a committed file, and it is right to: the
+    # shape is what a leaked one looks like, whether or not this one is real.
+    monkeypatch.setenv("DATABASE_URL", "postgresql://127.0.0.1:1/gate")
+    monkeypatch.setenv("ENVIRONMENT", "test")
+
+    # `.env` is resolved relative to the working directory, so a checkout that
+    # has one would otherwise override what was just set.
+    monkeypatch.chdir(tmp_path_for_settings())
+
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def tmp_path_for_settings() -> Path:
+    """A directory with no `.env` in it."""
+    return Path(tempfile.mkdtemp())
+
+
+# --------------------------------------------------------------------------
 # 4. The real context factory actually builds
 # --------------------------------------------------------------------------
 
 
-async def test_get_context_constructs_every_service_it_declares(monkeypatch):
+async def test_get_context_constructs_every_service_it_declares(
+    monkeypatch, configured
+):
     """`get_context` runs, and the object it returns is fully wired.
 
     The gap this closes is narrow and was reached three times in one
@@ -374,7 +424,9 @@ async def test_get_context_constructs_every_service_it_declares(monkeypatch):
 # --------------------------------------------------------------------------
 
 
-async def test_resolvers_only_read_context_attributes_that_exist(monkeypatch):
+async def test_resolvers_only_read_context_attributes_that_exist(
+    monkeypatch, configured
+):
     """No resolver reaches for a collaborator the context does not have.
 
     Gate 4 above proves `get_context` BUILDS everything it declares. This

@@ -955,20 +955,6 @@ async def test_a_whole_product_journey_over_http(application):
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "app/graphql/mutations/labels.py:125 and :144 call "
-        "`self._issue_payload(...)`. `Mutation` is assembled by "
-        "`strawberry.tools.merge_types`, so the root value at execution is "
-        "None and `self` is None in every resolver -- these two are the only "
-        "resolvers in the schema that use it. The service call has already "
-        "committed by then, so the mutation writes the row, writes its "
-        "activity, and answers `data: null` with a masked 'Internal server "
-        "error'. Remove this marker when the resolvers stop reaching through "
-        "`self`."
-    ),
-)
 @pytest.mark.parametrize("operation", ["attach", "detach"])
 async def test_attaching_a_label_reports_what_it_did(operation, application):
     """A label mutation must answer with the issue it changed.
@@ -986,9 +972,10 @@ async def test_attaching_a_label_reports_what_it_did(operation, application):
     said "Internal server error", so no UI can know that. The label is on the
     issue and the screen showing it says the request failed.
 
-    Asserted here as the behaviour the product should have, and marked
-    strict-xfail so that fixing the resolvers turns this green and makes the
-    marker itself the thing that fails.
+    It was found as a strict-xfail and is now an ordinary passing test:
+    `_issue_payload` moved to module scope and both resolvers call it
+    directly, because `merge_types` means no root resolver may reach through
+    `self` at all.
     """
     async with browser(application) as client:
         await sign_up(client, "labeller@example.test")

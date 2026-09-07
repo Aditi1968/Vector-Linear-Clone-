@@ -20,6 +20,40 @@ def _errors(exc: ValidationError) -> list[ValidationErrorType]:
     return [ValidationErrorType.from_domain(issue) for issue in exc.issues]
 
 
+async def _issue_payload(
+    info: Info,
+    scope: WorkspaceScope,
+    input: IssueLabelInput,
+) -> IssueLabelPayload:
+    """Re-read the issue the change landed on.
+
+    Read back rather than reconstructed, so the payload reports the row as it
+    now is. `issue` is nullable for the error case at the call sites and stays
+    nullable here for a reason that is not merely typing: the issue can be
+    deleted between the write and this read, and answering null is honest
+    where inventing a stale object would not be.
+
+    A module-level function, NOT a method, and that is the whole point rather
+    than a preference. The root types are assembled by `strawberry.tools.
+    merge_types`, so a root resolver's `self` is the root value -- which is
+    None. These two resolvers were the only ones in the schema that reached
+    through `self`, and `self._issue_payload` therefore raised AttributeError
+    AFTER the service call had already committed: the label really was
+    attached, the activity row really was written, and the client got
+    `data: null` with a masked "Internal server error", so a retry then
+    reported the label as already attached. Nothing here may depend on `self`.
+    """
+    entity = await info.context.issue_service.get_by_id(
+        scope=scope,
+        issue_id=input.issue_id,
+    )
+
+    return IssueLabelPayload(
+        issue=None if entity is None else IssueType.from_entity(entity, scope),
+        errors=[],
+    )
+
+
 @strawberry.type
 class LabelMutation:
     """The write half of labels, merged into the root Mutation.
@@ -122,7 +156,7 @@ class LabelMutation:
         except ValidationError as exc:
             return IssueLabelPayload(issue=None, errors=_errors(exc))
 
-        return await self._issue_payload(info, scope, input)
+        return await _issue_payload(info, scope, input)
 
     @strawberry.mutation
     async def issue_label_detach(
@@ -141,28 +175,4 @@ class LabelMutation:
         except ValidationError as exc:
             return IssueLabelPayload(issue=None, errors=_errors(exc))
 
-        return await self._issue_payload(info, scope, input)
-
-    @staticmethod
-    async def _issue_payload(
-        info: Info,
-        scope: WorkspaceScope,
-        input: IssueLabelInput,
-    ) -> IssueLabelPayload:
-        """Re-read the issue the change landed on.
-
-        Read back rather than reconstructed, so the payload reports the row as
-        it now is. `issue` is nullable for the error case above and stays
-        nullable here for a reason that is not merely typing: the issue can be
-        deleted between the write and this read, and answering null is honest
-        where inventing a stale object would not be.
-        """
-        entity = await info.context.issue_service.get_by_id(
-            scope=scope,
-            issue_id=input.issue_id,
-        )
-
-        return IssueLabelPayload(
-            issue=None if entity is None else IssueType.from_entity(entity, scope),
-            errors=[],
-        )
+        return await _issue_payload(info, scope, input)
