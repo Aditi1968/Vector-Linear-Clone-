@@ -97,9 +97,18 @@ export function BoardColumn({
       onDragOver={handleDragOver}
       onDrop={handleDrop}
     >
-      <h2 className={styles.columnHead} id={headingId}>
+      {/*
+        `aria-labelledby` points at the name alone and not at the whole
+        heading, which is what keeps the column's accessible name "In review"
+        rather than "Status: In review In review 4 loaded" -- the glyph
+        announces itself, and a name that carries a count changes every time a
+        card moves.
+      */}
+      <h2 className={styles.columnHead}>
         {category !== null && <StatusIndicator category={category} name={state?.name} />}
-        <span className={styles.columnName}>{column.name}</span>
+        <span className={styles.columnName} id={headingId}>
+          {column.name}
+        </span>
         <span className={styles.columnCount}>{count} loaded</span>
       </h2>
 

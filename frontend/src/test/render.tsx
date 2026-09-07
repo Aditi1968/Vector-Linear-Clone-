@@ -98,6 +98,15 @@ export interface RenderAppResult extends RenderResult {
   user: UserEvent
   /** The URL the router is currently showing. */
   currentPath: () => string
+  /**
+   * Its query string, `?` included, or `''` when there is none.
+   *
+   * Separate from `currentPath` because it answers a different question: a
+   * screen that keeps its view state in the query string -- the board's
+   * filters, sort and grouping -- is claiming that the URL *is* the state, and
+   * the only way to test that claim is to read what a control wrote there.
+   */
+  currentSearch: () => string
 }
 
 export function renderApp({
@@ -138,6 +147,7 @@ export function renderApp({
     link,
     user: userEvent.setup(),
     currentPath: () => router.state.location.pathname,
+    currentSearch: () => router.state.location.search,
   }
 }
 
