@@ -29,13 +29,13 @@ afterEach(() => {
   cleanup()
 
   /*
-    The shell remembers two things across a reload -- the theme and whether
-    the rail is collapsed -- and `localStorage` and `<html>` are the two
-    pieces of state in this environment that `cleanup()` does not touch. One
-    test collapsing the rail would otherwise leave every test that ran after
-    it mounting a collapsed rail, which fails in the confusing direction: a
-    control found by name in one file and not in the next, depending on
-    ordering.
+    The shell remembers four things across a reload -- the theme, whether the
+    rail is collapsed, the row density and whether lists are grouped -- and
+    `localStorage` and `<html>` are the two pieces of state in this
+    environment that `cleanup()` does not touch. One test collapsing the rail
+    would otherwise leave every test that ran after it mounting a collapsed
+    rail, which fails in the confusing direction: a control found by name in
+    one file and not in the next, depending on ordering.
 
     Cleared rather than stubbed, so the persistence itself is still the real
     thing under test -- `shell.test.tsx` mounts twice in one test to prove a
@@ -47,5 +47,9 @@ afterEach(() => {
     // A browser that refuses storage has nothing to clear.
   }
 
+  // Both attributes the preferences write. `data-density` re-points
+  // `--row-height` for the whole document, so one left behind would silently
+  // change every row height assertion in every file that ran after it.
   document.documentElement.removeAttribute('data-theme')
+  document.documentElement.removeAttribute('data-density')
 })

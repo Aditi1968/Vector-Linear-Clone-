@@ -1,0 +1,42 @@
+/*
+ * A card, not a floating panel: a 1px edge and a surface fill, no shadow.
+ *
+ * The panel sits *in* the page beside the list rather than above it, and
+ * elevation in this product is reserved for things that genuinely float --
+ * menus, dialogs, toasts, the palette. A drop shadow here would claim the
+ * panel is over the list, which is exactly the impression the design avoids
+ * by not making it a modal.
+ */
+.panel {
+  /* The focus ring's offset band is painted in the page colour by default,
+   * and this panel is not the page. Re-pointing it here means a control
+   * focused inside gets a ring whose gap matches what is behind it. */
+  --focus-ring-backdrop: var(--color-surface);
+
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-xl);
+  background-color: var(--color-surface);
+
+  /* Arrives in place rather than sliding in from an edge: the panel appears
+   * where the row it belongs to already is. Collapsed by the reduced-motion
+   * block in src/styles/base.css. */
+  animation: vin var(--duration-slow) var(--ease-out) both;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+
+  padding: var(--space-5-5) var(--space-5-5) var(--space-5);
+  border-bottom: var(--border-width) solid var(--color-border-subtle);
+}
+
+.body {
+  min-width: 0;
+  padding: var(--space-5-5);
+}

@@ -15,7 +15,9 @@
   display: flex;
   align-items: center;
   gap: var(--space-5);
-  min-height: var(--space-10);
+  /* The design's 56px bar. `min-` rather than `height`, so a header whose
+   * controls wrap on a narrow viewport grows instead of clipping them. */
+  min-height: var(--layout-header-height);
 
   padding: var(--space-5) var(--layout-content-padding-inline);
 

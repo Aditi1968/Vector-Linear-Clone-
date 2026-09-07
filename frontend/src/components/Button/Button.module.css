@@ -1,3 +1,13 @@
+/**
+ * A capsule, because that is what a button is in this product.
+ *
+ * `--radius-full` is reserved in the token file for the things that really
+ * are capsules -- buttons, segmented controls, tags -- and everything with a
+ * label follows that. Icon-only buttons are the exception and take
+ * `--radius-md` below, which is the same rule the design draws: the rail's
+ * glyph controls are 6px rounded squares and only the things with words on
+ * them are pills.
+ */
 .button {
   display: inline-flex;
   align-items: center;
@@ -6,7 +16,7 @@
 
   min-width: 0;
   border: var(--border-width) solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-full);
 
   font-weight: var(--weight-medium);
   line-height: var(--leading-none);
@@ -41,7 +51,13 @@
 }
 
 /* Square, so an icon-only button is a circle-of-influence around the glyph
- * rather than a wide slab with a lot of dead space. */
+ * rather than a wide slab with a lot of dead space. Rounded rather than
+ * circular: a pill and a square are the same shape at 1:1, and the design
+ * draws these as 6px squares. */
+.iconOnly {
+  border-radius: var(--radius-md);
+}
+
 .iconOnly.sm {
   width: var(--control-height-sm);
   padding-inline: 0;
@@ -56,26 +72,42 @@
 /* Variants                                                          */
 /* ---------------------------------------------------------------- */
 
+/**
+ * Brushed silver, top-lit, with dark ink on it.
+ *
+ * The most distinctive control in the interface and the only element that
+ * inverts, in a product that is otherwise entirely light ink on dark ground.
+ * A flat fill here -- of any colour -- loses that, which is why
+ * `--gradient-primary` is a gradient token rather than a colour.
+ *
+ * `background-image` and not `background`, so the `background-color` the
+ * disabled rule sets further down still wins when it needs to; the gradient
+ * is cleared there explicitly for the same reason. Gradients do not animate,
+ * so the hover swap is instant -- imperceptible at these durations, and not
+ * worth a pseudo-element cross-fade to avoid.
+ */
 .primary {
-  background-color: var(--color-accent);
-  border-color: var(--color-accent);
-  color: var(--color-text-on-accent);
+  background-image: var(--gradient-primary);
+  border-color: var(--color-primary-border);
+  color: var(--color-text-on-primary);
+  font-weight: var(--weight-semibold);
 }
 
 .primary:hover:not(:disabled, [aria-disabled='true']) {
-  background-color: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
+  background-image: var(--gradient-primary-hover);
 }
 
 .primary:active:not(:disabled, [aria-disabled='true']) {
-  background-color: var(--color-accent-active);
-  border-color: var(--color-accent-active);
+  background-image: var(--gradient-primary);
 }
 
+/* Outlined, on whatever it is sitting on. The design draws the secondary
+ * control as an edge and a label and nothing else, which is what keeps it
+ * from competing with the silver. */
 .secondary {
-  background-color: var(--color-surface);
+  background-color: transparent;
   border-color: var(--color-border-strong);
-  color: var(--color-text-primary);
+  color: var(--color-text-secondary);
 }
 
 .secondary:hover:not(:disabled, [aria-disabled='true']) {
@@ -101,15 +133,24 @@
   background-color: var(--color-surface-active);
 }
 
+/**
+ * Outlined in red, not filled with it.
+ *
+ * The design tints the danger *zone* -- the panel a destructive action sits
+ * in -- and leaves the button itself an edge and red text. A solid red slab
+ * would be the loudest thing on the page, which is the wrong emphasis for a
+ * control whose whole job is to be found deliberately rather than reached
+ * for. It also avoids inventing an ink colour: there is no `on-danger` token,
+ * and the cyan `on-accent` ink this used to wear was simply the wrong hue.
+ */
 .danger {
-  background-color: var(--color-danger);
-  border-color: var(--color-danger);
-  color: var(--color-text-on-accent);
+  background-color: transparent;
+  border-color: var(--color-danger-border);
+  color: var(--color-danger-text);
 }
 
 .danger:hover:not(:disabled, [aria-disabled='true']) {
   background-color: var(--color-danger-hover);
-  border-color: var(--color-danger-hover);
 }
 
 /* ---------------------------------------------------------------- */
@@ -128,6 +169,10 @@
  * they most need to be able to read.
  */
 .button:disabled {
+  /* Clears the primary variant's gradient. A `background-image` paints over
+   * `background-color` regardless of order, so without this a disabled
+   * primary button keeps its silver and only the ink goes grey. */
+  background-image: none;
   background-color: var(--color-surface-subtle);
   border-color: var(--color-border);
   color: var(--color-text-disabled);

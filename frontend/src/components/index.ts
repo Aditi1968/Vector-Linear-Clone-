@@ -65,8 +65,24 @@ export type { SkeletonProps } from './Skeleton'
 export { List, ListRow, ListRowMain, ListRowMeta } from './List'
 export type { ListProps, ListRowProps, ListRowSlotProps } from './List'
 
-export { EmptyState, ErrorState } from './States'
-export type { EmptyStateProps, ErrorStateProps } from './States'
+/* The issue list's two shapes. Presentational: neither knows a GraphQL type
+ * or a route, which is what lets triage, favourites, saved views and a team's
+ * issues draw the same list from four different queries. */
+export { IssueRow } from './IssueRow'
+export type { IssueRowProps } from './IssueRow'
+
+export { GroupHeader } from './GroupHeader'
+export type { GroupHeaderProps } from './GroupHeader'
+
+export { InspectorPanel } from './InspectorPanel'
+export type { InspectorPanelProps } from './InspectorPanel'
+
+export { EmptyState, ErrorState, PermissionState } from './States'
+export type {
+  EmptyStateProps,
+  ErrorStateProps,
+  PermissionStateProps,
+} from './States'
 
 export { VisuallyHidden } from './VisuallyHidden'
 export type { VisuallyHiddenProps } from './VisuallyHidden'

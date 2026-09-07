@@ -103,6 +103,30 @@ export const ROUTE_SEGMENTS = {
   members: 'members',
   settings: 'settings',
   search: 'search',
+
+  /*
+    The second wave of screens. Each is a real URL with a placeholder behind
+    it (see ./routes.tsx) rather than a segment reserved for later: a route
+    that exists is a mount point whoever builds the screen can find, and a
+    link that already resolves is one the rest of the product can render
+    today without knowing whether the page is finished.
+
+    All flat and all workspace-scoped. None takes a parameter yet; a detail
+    view arrives as its own segment beside the list, the way `issueDetail`
+    sits beside `issues`.
+  */
+  triage: 'triage',
+  savedViews: 'saved-views',
+  favorites: 'favorites',
+  initiatives: 'initiatives',
+  roadmap: 'roadmap',
+  documents: 'documents',
+  templates: 'templates',
+  releases: 'releases',
+  environments: 'environments',
+  labelGroups: 'label-groups',
+  analytics: 'analytics',
+  semanticSearch: 'semantic-search',
 } as const
 
 /**
@@ -190,6 +214,49 @@ export const paths = {
 
   /** Search within the workspace. */
   search: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.search}`,
+
+  /* ---------------------------------------------------------------- */
+  /* The second wave. Screens behind these are placeholders today; the  */
+  /* addresses are final, so a link built here does not change when the */
+  /* page behind it lands.                                              */
+  /* ---------------------------------------------------------------- */
+
+  /** Unassigned, unsorted work waiting to be accepted or declined. */
+  triage: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.triage}`,
+
+  /** Filter sets someone saved and named. */
+  savedViews: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.savedViews}`,
+
+  /** What the viewer starred. */
+  favorites: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.favorites}`,
+
+  /** Projects grouped into something larger than a project. */
+  initiatives: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.initiatives}`,
+
+  /** Projects and initiatives against a calendar. */
+  roadmap: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.roadmap}`,
+
+  /** Long-form writing that is not an issue. */
+  documents: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.documents}`,
+
+  /** Pre-filled issues, so a recurring piece of work is filed the same way. */
+  templates: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.templates}`,
+
+  /** What shipped, and what is in the next one. */
+  releases: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.releases}`,
+
+  /** Where the product runs, and what is deployed to each. */
+  environments: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.environments}`,
+
+  /** Labels that are mutually exclusive, administered together. */
+  labelGroups: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.labelGroups}`,
+
+  /** Throughput, cycle time, and the rest of the numbers. */
+  analytics: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.analytics}`,
+
+  /** Search by meaning rather than by substring. */
+  semanticSearch: (slug: string) =>
+    `/${seg(slug)}/${ROUTE_SEGMENTS.semanticSearch}`,
 } as const
 
 /** The slug-first path set. */
