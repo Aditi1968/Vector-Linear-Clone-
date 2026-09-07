@@ -332,6 +332,8 @@ def graphql_context(**services) -> VectorContext:
         "cycle_service",
         "project_service",
         "relation_service",
+        "saved_view_service",
+        "favorite_service",
         "search_service",
         "github_service",
         "slack_service",
