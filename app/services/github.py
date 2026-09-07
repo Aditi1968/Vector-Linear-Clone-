@@ -11,9 +11,10 @@ calling one of these.
 
 import hashlib
 import hmac
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Final, Protocol
 from urllib.parse import urlsplit
@@ -30,12 +31,20 @@ from app.domain.errors import (
 )
 from app.domain.github import (
     CONNECTED,
+    DEVELOPMENT_LIMIT,
     DISCONNECTED,
+    LINK_SOURCE_BODY,
+    LINK_SOURCE_BRANCH,
+    LINK_SOURCE_TITLE,
     PENDING,
+    PULL_REQUEST_STATES,
     UNCONFIGURED,
+    GithubDevelopmentEntity,
     GithubInstallationEntity,
     GithubIntegrationEntity,
     GithubRepositoryEntity,
+    branch_name_for,
+    issue_identifiers,
 )
 from app.domain.tenancy import AuthorizedWorkspaceScope, WorkspaceScope
 from app.repositories.github import GithubRepository
@@ -110,6 +119,54 @@ CLAIM_TTL: Final = timedelta(minutes=15)
 CONFIRMING_ACTIONS: Final = frozenset(
     {"created", "new_permissions_accepted", "unsuspend"}
 )
+
+# The events this server has a rule for. Everything else is accepted and
+# ignored, because a non-2xx earns a redelivery for a payload that will never
+# be handled differently.
+#
+# Checked before a connection is acquired, so `ping`, `check_run`,
+# `workflow_job` and the rest of what a GitHub App is subscribed to cost this
+# process one set membership each and no database work at all.
+HANDLED_EVENTS: Final = frozenset(
+    {"installation", "installation_repositories", "pull_request", "push"}
+)
+
+# The ceiling `github_deliveries_delivery_id_length` puts on the header.
+#
+# An id longer than this is not one GitHub sent -- it sends 36 -- and writing
+# it would abort the delivery on the CHECK, which is a 500 and therefore an
+# unbounded redelivery loop. Over-long ids are treated as absent instead: the
+# delivery is applied without the idempotency guard rather than refused
+# forever. See `_claim_delivery`.
+DELIVERY_ID_MAX_LENGTH: Final = 200
+
+# github_pull_requests_title_length, restated so the value is clamped here
+# rather than refused by the database mid-delivery.
+PULL_REQUEST_TITLE_MAX_LENGTH: Final = 1024
+
+# github_commits_message_length. A commit message can genuinely be long; this
+# is the point past which it is truncated rather than the delivery lost.
+COMMIT_MESSAGE_MAX_LENGTH: Final = 8192
+
+# github_pull_requests_url_length and github_commits_url_length.
+URL_MAX_LENGTH: Final = 2048
+
+# github_pull_requests_head_ref_format: printable ASCII, no spaces, bounded.
+# A ref that does not match is dropped to NULL rather than stored, for the
+# same reason the lengths above are clamped -- a CHECK violation inside the
+# delivery's transaction is a redelivery loop.
+_HEAD_REF = re.compile(r"^[!-~]{1,255}$")
+
+# github_commits_sha_format: exactly 40 lowercase hex characters.
+_SHA = re.compile(r"^[0-9a-f]{40}$")
+
+# How many commits one push may contribute.
+#
+# GitHub caps its own `commits` array at 20 and sends `head_commit` beside it,
+# so this is reached only by a payload that has grown a new shape. A bound on
+# work rather than a product rule: each commit costs an insert and a link
+# write inside the delivery's transaction.
+COMMITS_PER_PUSH_LIMIT: Final = 50
 
 
 def _private_key(settings: Settings) -> str | None:
@@ -411,6 +468,188 @@ def _repositories(value: Any) -> tuple[GithubRepositoryEntity, ...] | None:
     return tuple(found.values())
 
 
+# --- reading a development payload --------------------------------------
+#
+# Every function below turns one JSON value into something the schema in
+# migrations/017_github_development.sql will accept, or into None. None is
+# always a value the caller can act on, and never an exception, for one
+# reason that applies to all of them: these run inside the delivery's
+# transaction, and a CHECK violation or a raised parse error aborts it -- so
+# GitHub sees a 500, redelivers, and fails again, forever. Clamping and
+# dropping here is what makes a payload GitHub changes the shape of a missing
+# field rather than an outage.
+#
+# The payload is already proven to be GitHub's by the signature. That makes
+# these shape checks rather than trust boundaries -- with one exception, which
+# is the whole of the feature: the TEXT inside a pull request is written by
+# whoever opened it, and no signature says anything about that. It is never
+# trusted here and never resolved here; see `_link_pull_request`.
+
+
+def _text(value: Any, limit: int) -> str | None:
+    """A non-empty string, clamped to a column's length. None otherwise.
+
+    Truncated rather than refused, because the length is the database's bound
+    and not a statement about the payload: a title one character over is still
+    the pull request's title, and losing the whole delivery over the last
+    character would be a worse answer than losing the last character.
+    """
+    if not isinstance(value, str):
+        return None
+
+    trimmed = value.strip()[:limit].strip()
+
+    return trimmed or None
+
+
+def _url(value: Any) -> str | None:
+    """The html_url GitHub reported, if it fits the column."""
+    return _text(value, URL_MAX_LENGTH)
+
+
+def _head_ref(value: Any) -> str | None:
+    """A branch name that matches github_pull_requests_head_ref_format."""
+    if not isinstance(value, str) or not _HEAD_REF.match(value):
+        return None
+
+    return value
+
+
+def _sha(value: Any) -> str | None:
+    """A full 40-character lowercase SHA-1, or None.
+
+    Lowercased before matching, because git and GitHub both accept either
+    case and the column is keyed on one. A repository on SHA-256 sends 64
+    characters and lands here as None -- which is the right failure: widening
+    the column is a migration with an index and a display story, not something
+    to accept silently into a value the UI abbreviates to seven characters.
+    """
+    if not isinstance(value, str):
+        return None
+
+    lowered = value.lower()
+
+    return lowered if _SHA.match(lowered) else None
+
+
+def _instant(value: Any) -> datetime | None:
+    """One of GitHub's ISO 8601 timestamps as an aware datetime, or None.
+
+    `Z` is rewritten because `datetime.fromisoformat` accepts it only from
+    3.11 onwards and the two spellings mean the same instant; a value with no
+    offset at all is read as UTC, which is what GitHub sends everywhere it
+    omits one.
+
+    Aware rather than naive, deliberately. These are compared against
+    `github_updated_at` in SQL to decide whether a redelivery is older than
+    what is stored, and a naive value in that comparison is a comparison
+    against whatever timezone the session happens to be in.
+    """
+    if not isinstance(value, str):
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+
+    return parsed
+
+
+def _payload_repository_id(payload: Mapping[str, Any]) -> int | None:
+    """Which repository this delivery is about, by GitHub's numeric id.
+
+    The id and never `full_name`: the name is what a rename rewrites, and a
+    delivery that arrived between a rename and the `repository` event that
+    reports it would otherwise match nothing.
+
+    Answering this does NOT establish that the repository belongs to the
+    workspace the delivery routed to. That is a separate question, asked
+    against `github_repositories` under the resolved scope, and the two must
+    stay separate: `github_repositories_repository_id_idx` is deliberately not
+    unique, because two organisations may both grant access to a fork.
+    """
+    repository = payload.get("repository")
+
+    if not isinstance(repository, Mapping):
+        return None
+
+    return _positive_int(repository.get("id"))
+
+
+@dataclass(frozen=True, slots=True)
+class _PushedCommit:
+    """One commit off a push payload, already checked against the schema.
+
+    A parse result rather than a domain entity: it holds the identifiers its
+    message asked to link, which is a step in applying a delivery and not a
+    fact about a commit. `GithubCommitEntity` is what a reader gets back.
+    """
+
+    sha: str
+    message: str
+    url: str | None
+    committed_at: datetime | None
+    identifiers: tuple[tuple[str, int], ...]
+
+
+def _pushed_commit(value: Any) -> _PushedCommit | None:
+    """One entry of a push payload's commit list, or None if it is not one."""
+    if not isinstance(value, Mapping):
+        return None
+
+    sha = _sha(value.get("id"))
+    message = _text(value.get("message"), COMMIT_MESSAGE_MAX_LENGTH)
+
+    if sha is None or message is None:
+        return None
+
+    return _PushedCommit(
+        sha=sha,
+        message=message,
+        url=_url(value.get("url")),
+        committed_at=_instant(value.get("timestamp")),
+        identifiers=issue_identifiers(message),
+    )
+
+
+def _pushed_commits(payload: Mapping[str, Any]) -> tuple[_PushedCommit, ...]:
+    """Every commit this push reports, de-duplicated by SHA.
+
+    `head_commit` is read alongside the list and not instead of it. GitHub
+    caps `commits` at twenty entries, so on a large push the tip -- which is
+    where a merge commit's "Fixes ENG-142" lives -- is in `head_commit` and
+    nowhere else. On an ordinary push it is the last element of the list as
+    well, which is why the two are merged by SHA rather than concatenated.
+
+    Malformed entries are skipped rather than raising, for the reason
+    `_repositories` gives: the payload is already proven to be GitHub's, so a
+    bad entry is a schema change and not an attack -- and raising would fail
+    the whole delivery, which GitHub then retries, which fails again.
+    """
+    listed = payload.get("commits")
+    entries = list(listed) if isinstance(listed, list) else []
+    entries.append(payload.get("head_commit"))
+
+    found: dict[str, _PushedCommit] = {}
+
+    for entry in entries:
+        commit = _pushed_commit(entry)
+
+        if commit is None or commit.sha in found:
+            continue
+
+        found[commit.sha] = commit
+
+        if len(found) >= COMMITS_PER_PUSH_LIMIT:
+            break
+
+    return tuple(found.values())
+
+
 # --- proving the installer owns what they claimed -----------------------
 
 # GitHub's OAuth token endpoint, and the API root the resulting user token is
@@ -674,8 +913,10 @@ class GithubService:
 
         Re-connecting replaces rather than merges. A workspace that installs
         the app into a different account must not keep the previous account's
-        repositories, so the whole set goes first -- inside the same
-        transaction, so there is no instant at which the workspace is
+        repositories -- nor the pull requests and commits hanging off them,
+        which is why the development rows go first and not merely because
+        RESTRICT would refuse the order the other way round. All of it inside
+        the same transaction, so there is no instant at which the workspace is
         connected to an account and holding another one's repository names.
 
         The expired-claim sweep is third, between this workspace's own rows
@@ -698,6 +939,7 @@ class GithubService:
 
         async with self._pool.acquire() as connection:
             async with connection.transaction():
+                await self._repository.delete_development(connection, scope=scope)
                 await self._repository.delete_repositories(connection, scope=scope)
                 await self._repository.delete_installation(connection, scope=scope)
                 await self._repository.delete_expired_claim(
@@ -728,20 +970,35 @@ class GithubService:
         What it does guarantee is that deliveries for that installation now
         resolve to no workspace and are dropped.
 
-        Repositories first, because `github_repositories_installation_fk` is
-        RESTRICT -- and in one transaction, so a failure between the two
-        cannot leave repositories belonging to an installation that is gone.
+        Children first, and there are three generations of them now: the two
+        link tables, then the pull requests and commits, then the
+        repositories, then the installation. Every foreign key in 013 and 017
+        is RESTRICT, so any other order is a RestrictViolationError -- which is
+        what RESTRICT is for. It refuses to let one delete quietly discard
+        development history while the command tag reads `DELETE 1`, and makes
+        the ordering a decision this method states rather than one the schema
+        performs invisibly.
+
+        All of it in one transaction, so a failure part way cannot leave a
+        pull request belonging to a repository that is gone.
         """
         require_workspace_admin(scope)
 
         async with self._pool.acquire() as connection:
             async with connection.transaction():
+                await self._repository.delete_development(connection, scope=scope)
                 await self._repository.delete_repositories(connection, scope=scope)
                 await self._repository.delete_installation(connection, scope=scope)
 
         return self._view(None, ())
 
-    async def apply_webhook(self, *, event: str, payload: Mapping[str, Any]) -> None:
+    async def apply_webhook(
+        self,
+        *,
+        event: str,
+        payload: Mapping[str, Any],
+        delivery_id: str | None = None,
+    ) -> None:
         """Apply one verified delivery. Returns nothing, whatever happened.
 
         The caller has already verified GitHub's signature over the raw body;
@@ -753,28 +1010,31 @@ class GithubService:
         Silence is the contract. A delivery naming an installation no
         workspace has connected is ordinary -- the app is installed, the admin
         never finished the callback -- and so is an event this server has no
-        rule for. Reporting either back to GitHub as a failure would earn a
-        redelivery loop for something that will never succeed.
+        rule for, and so is a redelivery of one already applied. Reporting any
+        of them back to GitHub as a failure would earn a redelivery loop for
+        something that will never succeed.
 
-        The two events handled are the ones that change what the settings page
-        shows: `installation` (the account, the initial repository set, and
-        removal) and `installation_repositories` (the set changing later).
-        Everything else is accepted and ignored.
+        Four events are handled. Two change what the settings page shows --
+        `installation` (the account, the initial repository set, and removal)
+        and `installation_repositories` (the set changing later) -- and two
+        are the development activity an issue's panel renders,
+        `pull_request` and `push`. Everything else is accepted and ignored.
+
+        `delivery_id` is the X-GitHub-Delivery header, and it is claimed as
+        the FIRST statement of the transaction below -- before the routing
+        lookup, and therefore before anything is applied. GitHub's delivery is
+        at-least-once by design: it retries anything it did not see a 2xx for,
+        and `push` in particular writes rows a second application would have
+        to be trusted to make idempotent one statement at a time. See
+        `_claim_delivery`.
 
         This method is also where a claim becomes a connection, and that is
         deliberate rather than convenient: the signature checked upstream is
         the only evidence this deployment ever receives about who owns an
         installation, so the confirmation has to happen where the signature
         has just been verified and nowhere else. See `_resolve_workspace`.
-
-        `_apply_account` runs before any repository write, in one transaction,
-        and that ordering is load-bearing beyond tidiness:
-        `github_installations_unconfirmed_holds_no_account` in 016 aborts the
-        whole delivery if this ever reached an unconfirmed row, and it does so
-        before a private `full_name` from somebody else's organisation has
-        been inserted.
         """
-        if event not in ("installation", "installation_repositories"):
+        if event not in HANDLED_EVENTS:
             return
 
         installation = payload.get("installation")
@@ -793,6 +1053,13 @@ class GithubService:
             # half-applied, and the workspace lookup -- or the confirmation
             # that produced it -- has to hold for the writes that follow it.
             async with connection.transaction():
+                if not await self._claim_delivery(
+                    connection,
+                    delivery_id=delivery_id,
+                    event=event,
+                ):
+                    return
+
                 workspace_id = await self._resolve_workspace(
                     connection,
                     event=event,
@@ -805,28 +1072,383 @@ class GithubService:
 
                 scope = WorkspaceScope(workspace_id=workspace_id)
 
-                if event == "installation" and payload.get("action") == "deleted":
-                    # The app was uninstalled on GitHub. The integration is
-                    # over whether or not anyone told Vector, so the row goes
-                    # -- otherwise the settings page reports CONNECTED for an
-                    # installation that no longer exists.
-                    await self._repository.delete_repositories(
-                        connection,
-                        scope=scope,
-                    )
-                    await self._repository.delete_installation(
-                        connection,
-                        scope=scope,
-                    )
+                await self._dispatch(
+                    connection,
+                    scope,
+                    event=event,
+                    payload=payload,
+                    installation=installation,
+                )
 
-                    return
+    async def _claim_delivery(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        delivery_id: str | None,
+        event: str,
+    ) -> bool:
+        """Whether this delivery is a first attempt. False means already done.
 
-                await self._apply_account(connection, scope, installation)
+        The idempotency gate, run before the routing lookup and before any
+        write. `github_deliveries` is not workspace-scoped and cannot be: the
+        question "have I applied this already" has to be answerable before the
+        lookup that would say whose it is, which is precisely the work a
+        redelivery should not cost.
 
-                if event == "installation":
-                    await self._apply_full_set(connection, scope, payload)
-                else:
-                    await self._apply_delta(connection, scope, payload)
+        A delivery with no id, or one longer than the column's bound, is
+        applied unguarded rather than refused. A bounded write that fails the
+        CHECK would abort the transaction and reach GitHub as a 500 -- an
+        infinite redelivery loop for a header this server merely did not like.
+        Unguarded means "as safe as the writes themselves are", which is what
+        every delivery was before this table existed: the repository writes
+        are upserts, and the link writes are set-valued.
+        """
+        if delivery_id is None or not 0 < len(delivery_id) <= DELIVERY_ID_MAX_LENGTH:
+            return True
+
+        return await self._repository.record_delivery(
+            connection,
+            delivery_id=delivery_id,
+            event=event,
+        )
+
+    async def _dispatch(
+        self,
+        connection: asyncpg.Connection,
+        scope: WorkspaceScope,
+        *,
+        event: str,
+        payload: Mapping[str, Any],
+        installation: Mapping[str, Any],
+    ) -> None:
+        """Route one routed delivery to the rule that applies it.
+
+        `_apply_account` runs before any repository write, in the caller's one
+        transaction, and that ordering is load-bearing beyond tidiness:
+        `github_installations_unconfirmed_holds_no_account` in 016 aborts the
+        whole delivery if this ever reached an unconfirmed row, and it does so
+        before a private `full_name` from somebody else's organisation has
+        been inserted.
+
+        The two development events do NOT touch the account. They arrive for a
+        confirmed installation by construction -- `_resolve_workspace` only
+        confirms a claim from an `installation` event -- so there is nothing
+        for them to fill in, and writing an account login from a payload that
+        merely mentions one is a wider write than the event justifies.
+        """
+        if event == "pull_request":
+            await self._apply_pull_request(connection, scope, payload)
+
+            return
+
+        if event == "push":
+            await self._apply_push(connection, scope, payload)
+
+            return
+
+        if event == "installation" and payload.get("action") == "deleted":
+            # The app was uninstalled on GitHub. The integration is over
+            # whether or not anyone told Vector, so the rows go -- otherwise
+            # the settings page reports CONNECTED for an installation that no
+            # longer exists, and this workspace goes on holding development
+            # history for repositories it can no longer see.
+            #
+            # Children first, in this order, because every foreign key in 013
+            # and 017 is RESTRICT. All of it inside the caller's transaction,
+            # so there is no instant at which a pull request survives the
+            # repository it was opened on.
+            await self._repository.delete_development(connection, scope=scope)
+            await self._repository.delete_repositories(connection, scope=scope)
+            await self._repository.delete_installation(connection, scope=scope)
+
+            return
+
+        await self._apply_account(connection, scope, installation)
+
+        if event == "installation":
+            await self._apply_full_set(connection, scope, payload)
+        else:
+            await self._apply_delta(connection, scope, payload)
+
+    async def _apply_pull_request(
+        self,
+        connection: asyncpg.Connection,
+        scope: WorkspaceScope,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """Store a pull request as GitHub reports it, and re-derive its links.
+
+        Every action of the event runs the same code -- opened, edited,
+        reopened, closed, converted_to_draft, ready_for_review, synchronize --
+        because each carries the WHOLE `pull_request` object as it now stands,
+        not a diff. So there is nothing to branch on: the row is written from
+        the payload, and the links are re-derived from the payload's current
+        title, body and head ref. That is what makes an edit retract what the
+        edited text no longer says, without a single `if action ==` to get
+        wrong.
+
+        The repository is checked against this workspace's installation before
+        anything is written. `github_pull_requests_repository_fk` would refuse
+        the row anyway, but a foreign-key violation aborts the transaction and
+        becomes a 500, which GitHub answers by redelivering forever.
+
+        `merged_at` is cleared unless GitHub also says the pull request is
+        closed. Not defensive tidiness: `github_pull_requests_merged_is_closed`
+        refuses that combination, so a payload GitHub ever sent with both
+        would take the delivery down rather than store a state the derived
+        display state could not answer for.
+
+        A stale payload writes nothing AND re-derives nothing. Returning early
+        on `upsert_pull_request` answering False is the second half of the
+        out-of-order defence: the links come from the title, so applying them
+        from a payload too old to store would retract, from an older title,
+        links the current title still supports.
+        """
+        pull = payload.get("pull_request")
+        repository_id = _payload_repository_id(payload)
+
+        if repository_id is None or not isinstance(pull, Mapping):
+            return
+
+        number = _positive_int(pull.get("number"))
+        state = pull.get("state")
+        title = _text(pull.get("title"), PULL_REQUEST_TITLE_MAX_LENGTH)
+
+        if number is None or state not in PULL_REQUEST_STATES or title is None:
+            return
+
+        if not await self._repository.repository_exists(
+            connection,
+            scope=scope,
+            repository_id=repository_id,
+        ):
+            return
+
+        head = pull.get("head")
+        head_ref = _head_ref(head.get("ref")) if isinstance(head, Mapping) else None
+
+        applied = await self._repository.upsert_pull_request(
+            connection,
+            scope=scope,
+            repository_id=repository_id,
+            number=number,
+            title=title,
+            state=state,
+            draft=pull.get("draft") is True,
+            merged_at=(_instant(pull.get("merged_at")) if state == "closed" else None),
+            head_ref=head_ref,
+            url=_url(pull.get("html_url")),
+            github_updated_at=_instant(pull.get("updated_at")),
+        )
+
+        if not applied:
+            return
+
+        await self._link_pull_request(
+            connection,
+            scope,
+            repository_id=repository_id,
+            number=number,
+            title=title,
+            body=pull.get("body"),
+            head_ref=head_ref,
+        )
+
+    async def _link_pull_request(
+        self,
+        connection: asyncpg.Connection,
+        scope: WorkspaceScope,
+        *,
+        repository_id: int,
+        number: int,
+        title: str,
+        body: Any,
+        head_ref: str | None,
+    ) -> None:
+        """Point this pull request at the issues its text asks for, per source.
+
+        This is the method migrations/017_github_development.sql was written
+        around, so the rule is worth stating where it is implemented: the
+        identifier is text somebody wrote in a pull request, and on a public
+        repository that somebody is anybody at all. It is a REQUEST to link
+        and never a proof of one.
+
+        The single line that makes it safe is that `scope` is the workspace
+        that owns the repository this delivery came from, and it is the only
+        workspace `resolve_issue_ids` is given. An identifier naming another
+        tenant's team therefore resolves to nothing -- not to a row this code
+        then declines to write, but to no id at all. 017's composite foreign
+        keys are the floor under that rather than the mechanism: they make a
+        mistake here unstorable, and this makes it unmade.
+
+        Nothing about `body` is trusted for its content either. It is scanned
+        by the same bounded parser as the title, and its links are stored
+        under their own source, so a body edited by a commenter can add and
+        remove only what a body may.
+
+        All three sources are written on every delivery, including the ones
+        that resolved to nothing -- that empty write is the retraction. A
+        title edited to drop "ENG-142" makes `set_pull_request_links` delete
+        the title's row, while the branch's row for the same issue survives
+        because `source` is inside the key.
+        """
+        by_source = {
+            LINK_SOURCE_TITLE: issue_identifiers(title),
+            LINK_SOURCE_BODY: issue_identifiers(
+                body if isinstance(body, str) else None
+            ),
+            LINK_SOURCE_BRANCH: issue_identifiers(head_ref),
+        }
+
+        # One resolution for the union rather than three: the three sources
+        # routinely name the same issue, and this runs inside the delivery's
+        # transaction where a round trip costs a lock held longer.
+        resolved = await self._repository.resolve_issue_ids(
+            connection,
+            scope=scope,
+            identifiers=tuple(
+                dict.fromkeys(
+                    identifier
+                    for identifiers in by_source.values()
+                    for identifier in identifiers
+                )
+            ),
+        )
+
+        for source, identifiers in by_source.items():
+            await self._repository.set_pull_request_links(
+                connection,
+                scope=scope,
+                repository_id=repository_id,
+                number=number,
+                source=source,
+                issue_ids=[
+                    resolved[identifier]
+                    for identifier in identifiers
+                    if identifier in resolved
+                ],
+            )
+
+    async def _apply_push(
+        self,
+        connection: asyncpg.Connection,
+        scope: WorkspaceScope,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """Record the commits a push reported, and what they say they are about.
+
+        Additive and never retracting, which is the difference from the pull
+        request above and follows from the data rather than from a policy: a
+        commit message is immutable, so there is no source to re-derive and no
+        edit that could withdraw a link. `github_commit_issues` carries no
+        `source` column for the same reason.
+
+        The same tenancy rule applies in full. A commit message is text its
+        author wrote, the identifiers in it are resolved only within the
+        workspace that owns the repository the push came from, and a message
+        naming another tenant's ENG-142 resolves to nothing.
+
+        A push that reports no usable commit -- a branch deletion, a tag, a
+        payload whose entries are all malformed -- writes nothing and asks the
+        database nothing.
+        """
+        repository_id = _payload_repository_id(payload)
+        commits = _pushed_commits(payload)
+
+        if repository_id is None or not commits:
+            return
+
+        if not await self._repository.repository_exists(
+            connection,
+            scope=scope,
+            repository_id=repository_id,
+        ):
+            return
+
+        resolved = await self._repository.resolve_issue_ids(
+            connection,
+            scope=scope,
+            identifiers=tuple(
+                dict.fromkeys(
+                    identifier
+                    for commit in commits
+                    for identifier in commit.identifiers
+                )
+            ),
+        )
+
+        for commit in commits:
+            await self._repository.add_commit(
+                connection,
+                scope=scope,
+                repository_id=repository_id,
+                sha=commit.sha,
+                message=commit.message,
+                url=commit.url,
+                committed_at=commit.committed_at,
+            )
+            await self._repository.add_commit_links(
+                connection,
+                scope=scope,
+                repository_id=repository_id,
+                sha=commit.sha,
+                issue_ids=[
+                    resolved[identifier]
+                    for identifier in commit.identifiers
+                    if identifier in resolved
+                ],
+            )
+
+    async def development_for_issue(
+        self,
+        scope: WorkspaceScope,
+        *,
+        issue_id: UUID,
+        identifier: str,
+        title: str,
+    ) -> GithubDevelopmentEntity:
+        """What one issue's Development section shows.
+
+        Takes a plain `WorkspaceScope` and checks no role, unlike every other
+        read here. That is deliberate and is the difference between the two
+        halves of this feature: connecting a GitHub organisation is an admin's
+        act and `require_workspace_admin` guards it, but the pull requests
+        attached to an issue are part of the issue, and every member who can
+        open the issue can see them. The caller's scope is what authorises
+        this, and it comes from the resolver that already authorised the issue.
+
+        The scope leads both statements, so an `issue_id` from another
+        workspace answers with two empty lists -- the same answer an issue
+        with no activity gets, which is what stops this confirming that a
+        leaked id is real.
+
+        `branch_name` is computed whatever the lists hold, because an issue
+        with no development activity is exactly the one that needs it: the
+        panel's first job is to offer the branch to start. It needs no GitHub
+        permission and creates nothing -- it is a string to copy.
+
+        A single read needs no write transaction, so this acquires a
+        connection without opening one.
+        """
+        async with self._pool.acquire() as connection:
+            pull_requests = await self._repository.list_pull_requests_for_issue(
+                connection,
+                scope=scope,
+                issue_id=issue_id,
+                limit=DEVELOPMENT_LIMIT,
+            )
+            commits = await self._repository.list_commits_for_issue(
+                connection,
+                scope=scope,
+                issue_id=issue_id,
+                limit=DEVELOPMENT_LIMIT,
+            )
+
+        return GithubDevelopmentEntity(
+            branch_name=branch_name_for(identifier, title),
+            pull_requests=tuple(pull_requests),
+            commits=tuple(commits),
+        )
 
     async def _resolve_workspace(
         self,
@@ -913,12 +1535,23 @@ class GithubService:
         `installation.created` carries the whole set; the other actions of
         that event carry none, and then `_repositories` answers None and the
         stored set is left alone rather than emptied.
+
+        The development rows go with the repositories, and they have to: the
+        set is replaced by a delete and an insert, and
+        `github_pull_requests_repository_fk` is RESTRICT, so a repository with
+        a pull request attached cannot be deleted while one exists. A
+        repository that is in the new set as well as the old one loses its
+        history here, which is the cost of replace-rather-than-merge; the
+        alternative -- diffing the two sets to spare the survivors -- is more
+        code on the path of an event that carries the whole set precisely so
+        nobody has to.
         """
         repositories = _repositories(payload.get("repositories"))
 
         if repositories is None:
             return
 
+        await self._repository.delete_development(connection, scope=scope)
         await self._repository.delete_repositories(connection, scope=scope)
         await self._repository.add_repositories(
             connection,
@@ -939,6 +1572,21 @@ class GithubService:
         an at-least-once delivery is the only kind there is -- land on the
         same state instead of a primary key violation, and it is also how a
         rename in the same payload rewrites `full_name`.
+
+        A repository REMOVED from the installation takes its development
+        history with it, and that is the point rather than a side effect: the
+        app no longer has access to that repository, so Vector must not go on
+        showing the pull request titles and commit messages it collected while
+        it did. This is the "access changed" case, and it is the one that
+        actually fires -- an organisation narrowing an installation's
+        repository list sends `installation_repositories.removed` and nothing
+        else.
+
+        The development delete covers the added ids too, for the plainer
+        reason that they are being deleted and re-inserted: RESTRICT would
+        refuse the repository delete otherwise. An id that was already there
+        is one this payload is re-stating, so there is nothing being lost that
+        the next delivery does not restore.
         """
         added = _repositories(payload.get("repositories_added")) or ()
         removed = _repositories(payload.get("repositories_removed")) or ()
@@ -946,6 +1594,11 @@ class GithubService:
         stale = [repository.repository_id for repository in (*added, *removed)]
 
         if stale:
+            await self._repository.delete_development(
+                connection,
+                scope=scope,
+                repository_ids=stale,
+            )
             await self._repository.delete_repositories(
                 connection,
                 scope=scope,
