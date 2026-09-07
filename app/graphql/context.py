@@ -46,7 +46,7 @@ from app.services.passwords import Argon2PasswordHasher
 from app.services.projects import ProjectService
 from app.services.relations import RelationService
 from app.services.search import SearchService
-from app.services.slack import DatabaseTokenStore, SlackService
+from app.services.slack import DatabaseTokenStore, SlackService, SlackWebClient
 from app.services.teams import TeamService
 
 
@@ -340,6 +340,12 @@ async def get_context() -> VectorContext:
             # request cannot answer one field as configured and another as
             # not. `settings` is already resolved above for `environment`.
             configured=settings.slack_configured,
+            # The two Web API calls the channel and notification resolvers
+            # make. Stateless and credential-free: the bot token is passed per
+            # call, so this object holds nothing worth printing. Built here
+            # and not in app/rest/slack.py, because no REST route talks to the
+            # Web API -- the OAuth callback only exchanges a code.
+            web=SlackWebClient(),
         ),
         # One service over both tables, because a history row and an inbox
         # item are two records of one moment: the event that happened, and

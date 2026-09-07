@@ -30,7 +30,7 @@ from app.graphql.viewer import UNAUTHENTICATED_MESSAGE
 from app.repositories.slack import SlackRepository
 from app.services.slack import DatabaseTokenStore, SlackService
 
-from tests.conftest import ExplodingPool, FakeConnection, FakePool
+from tests.conftest import ExplodingPool, FakeConnection, FakePool, normalize
 
 
 schema = build_schema("test")
@@ -168,6 +168,16 @@ async def run(document, *, slug=SLUG_A, **kwargs):
         variable_values={"slug": slug},
         context_value=context(**kwargs),
     )
+
+
+def _deleted_table(query: str) -> str:
+    """The table a `DELETE FROM x WHERE ...` names.
+
+    Read out of the statement rather than matched against a whole normalised
+    string, so the assertion below is about the ORDER of the deletes and does
+    not also become a pin on their whitespace.
+    """
+    return normalize(query).split("DELETE FROM ", 1)[1].split()[0]
 
 
 def only_error(result):
@@ -420,9 +430,24 @@ async def test_disconnect_removes_the_installation_and_reports_the_new_state():
         call for call in connection.queries if "DELETE FROM" in call["query"].upper()
     ]
 
-    assert len(deletes) == 1
-    # Scoped to the caller's own workspace, and by nothing the client sent.
-    assert deletes[0]["args"] == (WORKSPACE_A,)
+    # Four tables, in dependency order, and the order is the assertion.
+    #
+    # Every foreign key in migration 018 is RESTRICT, so `slack_installations`
+    # can only go last and `slack_notification_settings` -- the one table that
+    # points at `slack_channels` -- can only go first. A disconnect that got
+    # this wrong would fail against a real database on a workspace that had
+    # configured anything, and would pass every behavioural test written
+    # against a fake. Pinning the order is what makes that unshippable.
+    assert [_deleted_table(call["query"]) for call in deletes] == [
+        "slack_notification_settings",
+        "slack_notification_preferences",
+        "slack_channels",
+        "slack_installations",
+    ]
+
+    # Every one of them scoped to the caller's own workspace, and by nothing
+    # the client sent.
+    assert [call["args"] for call in deletes] == [(WORKSPACE_A,)] * 4
 
 
 async def test_disconnect_on_an_unconfigured_deployment_still_answers_unconfigured():

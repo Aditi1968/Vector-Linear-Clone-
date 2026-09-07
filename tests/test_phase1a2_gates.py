@@ -81,6 +81,7 @@ EXPECTED_MIGRATIONS = [
     "015_issue_list_indexes.sql",
     "016_github_installation_trust.sql",
     "017_github_development.sql",
+    "018_slack_channels.sql",
 ]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the

@@ -5,7 +5,11 @@ from strawberry.types import Info
 from app.domain.errors import WorkspaceAccessDeniedError
 from app.domain.tenancy import AuthorizedWorkspaceScope
 from app.graphql.queries.memberships import WORKSPACE_NOT_FOUND_MESSAGE
-from app.graphql.types.slack import SlackIntegrationType
+from app.graphql.types.slack import (
+    SlackChannelType,
+    SlackIntegrationType,
+    SlackNotificationSettingsType,
+)
 from app.graphql.viewer import viewer_user_id
 
 
@@ -68,8 +72,15 @@ class SlackQuery:
     """Root query fields for the Slack integration.
 
     A class of its own, merged into the schema's root `Query` in
-    app.graphql.schema. One field, and it is scoped to the viewer: the
-    workspace slug selects what is being asked about and never who is asking.
+    app.graphql.schema. Every field here is scoped to the viewer: the workspace
+    slug selects what is being asked about and never who is asking, and all
+    three go through `slack_admin_scope` before touching anything.
+
+    None of them calls Slack. Refreshing the channel list is
+    `slackChannelsSync`, a mutation, because it writes -- and because a query
+    that reached a third party would make a settings page's render time depend
+    on Slack's, and would spend a workspace's rate limit on people looking at a
+    page.
     """
 
     @strawberry.field
@@ -94,3 +105,45 @@ class SlackQuery:
         view = await info.context.slack_service.status(scope=scope)
 
         return SlackIntegrationType.from_view(view)
+
+    @strawberry.field
+    async def slack_channels(
+        self,
+        info: Info,
+        workspace_slug: str,
+    ) -> list[SlackChannelType]:
+        """The channels this workspace last saw, for an admin of it.
+
+        A cache read, not a call to Slack. An empty list is the honest answer
+        for a workspace that has connected but never refreshed, and for one
+        that is not connected at all -- the two are told apart by
+        `slackIntegration.status`, which is the field whose job that is.
+
+        Inaccessible channels are included, flagged. A picker filters them; a
+        settings screen explaining why notifications stopped needs them.
+        """
+        scope = await slack_admin_scope(info, workspace_slug)
+
+        channels = await info.context.slack_service.channels(scope=scope)
+
+        return [SlackChannelType.from_entity(channel) for channel in channels]
+
+    @strawberry.field
+    async def slack_notification_settings(
+        self,
+        info: Info,
+        workspace_slug: str,
+    ) -> SlackNotificationSettingsType:
+        """Where this workspace posts and what it announces, for an admin.
+
+        Non-null, and it answers for a workspace that has configured nothing
+        rather than returning null -- for the reason `slackIntegration` is
+        non-null. "No channel chosen, everything off" is a real state with a
+        real screen behind it, and a null here would make a client infer it
+        from an absence.
+        """
+        scope = await slack_admin_scope(info, workspace_slug)
+
+        settings = await info.context.slack_service.notification_settings(scope=scope)
+
+        return SlackNotificationSettingsType.from_entity(settings)

@@ -572,7 +572,11 @@ export type Mutation = {
   projectTeamRemove: ProjectPayload;
   projectUpdate: ProjectPayload;
   register: RegisterPayload;
+  slackChannelsSync: SlackChannelsSyncPayload;
+  slackDefaultChannelSet: SlackNotificationSettingsPayload;
   slackDisconnect: SlackDisconnectPayload;
+  slackNotificationPreferenceSet: SlackNotificationSettingsPayload;
+  slackTestNotification: SlackTestNotificationPayload;
   /** Create a team, seeded with the default workflow states. Requires the admin or owner role. */
   teamCreate: TeamPayload;
   /** Create a workspace. The authenticated caller becomes its owner. */
@@ -768,8 +772,28 @@ export type MutationRegisterArgs = {
 };
 
 
+export type MutationSlackChannelsSyncArgs = {
+  input: SlackChannelsSyncInput;
+};
+
+
+export type MutationSlackDefaultChannelSetArgs = {
+  input: SlackDefaultChannelSetInput;
+};
+
+
 export type MutationSlackDisconnectArgs = {
   input: SlackDisconnectInput;
+};
+
+
+export type MutationSlackNotificationPreferenceSetArgs = {
+  input: SlackNotificationPreferenceSetInput;
+};
+
+
+export type MutationSlackTestNotificationArgs = {
+  input: SlackTestNotificationInput;
 };
 
 
@@ -968,7 +992,9 @@ export type Query = {
   project?: Maybe<Project>;
   projects: ProjectConnection;
   search: SearchResults;
+  slackChannels: Array<SlackChannel>;
   slackIntegration: SlackIntegration;
+  slackNotificationSettings: SlackNotificationSettings;
   /** The teams in a workspace, each with the workflow states its issues can occupy. */
   teams: Array<Team>;
   /** Everyone in a workspace, with the role each holds. Members only. */
@@ -1064,7 +1090,17 @@ export type QuerySearchArgs = {
 };
 
 
+export type QuerySlackChannelsArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
 export type QuerySlackIntegrationArgs = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QuerySlackNotificationSettingsArgs = {
   workspaceSlug: Scalars['String']['input'];
 };
 
@@ -1096,6 +1132,31 @@ export type SearchResults = {
   projects: Array<Project>;
 };
 
+export type SlackChannel = {
+  __typename?: 'SlackChannel';
+  id: Scalars['String']['output'];
+  isAccessible: Scalars['Boolean']['output'];
+  isArchived: Scalars['Boolean']['output'];
+  isMember: Scalars['Boolean']['output'];
+  isPrivate: Scalars['Boolean']['output'];
+  name: Scalars['String']['output'];
+};
+
+export type SlackChannelsSyncInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type SlackChannelsSyncPayload = {
+  __typename?: 'SlackChannelsSyncPayload';
+  channels: Array<SlackChannel>;
+  failure?: Maybe<SlackFailure>;
+};
+
+export type SlackDefaultChannelSetInput = {
+  channelId: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
 export type SlackDisconnectInput = {
   workspaceSlug: Scalars['String']['input'];
 };
@@ -1104,6 +1165,14 @@ export type SlackDisconnectPayload = {
   __typename?: 'SlackDisconnectPayload';
   integration: SlackIntegration;
 };
+
+export type SlackFailure =
+  | 'CHANNEL_UNAVAILABLE'
+  | 'MISSING_SCOPE'
+  | 'NOT_CONNECTED'
+  | 'NO_DEFAULT_CHANNEL'
+  | 'SLACK_REFUSED'
+  | 'SLACK_UNREACHABLE';
 
 export type SlackIntegration = {
   __typename?: 'SlackIntegration';
@@ -1116,6 +1185,49 @@ export type SlackIntegrationStatus =
   | 'CONNECTED'
   | 'DISCONNECTED'
   | 'UNCONFIGURED';
+
+export type SlackNotificationEvent =
+  | 'ISSUE_ASSIGNED'
+  | 'ISSUE_COMPLETED'
+  | 'ISSUE_PRIORITY_URGENT'
+  | 'PROJECT_HEALTH_CHANGED'
+  | 'PROJECT_UPDATE_PUBLISHED'
+  | 'PULL_REQUEST_MERGED';
+
+export type SlackNotificationPreference = {
+  __typename?: 'SlackNotificationPreference';
+  enabled: Scalars['Boolean']['output'];
+  event: SlackNotificationEvent;
+};
+
+export type SlackNotificationPreferenceSetInput = {
+  enabled: Scalars['Boolean']['input'];
+  event: SlackNotificationEvent;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type SlackNotificationSettings = {
+  __typename?: 'SlackNotificationSettings';
+  defaultChannelId?: Maybe<Scalars['String']['output']>;
+  defaultChannelName?: Maybe<Scalars['String']['output']>;
+  preferences: Array<SlackNotificationPreference>;
+};
+
+export type SlackNotificationSettingsPayload = {
+  __typename?: 'SlackNotificationSettingsPayload';
+  errors: Array<ValidationErrorType>;
+  settings?: Maybe<SlackNotificationSettings>;
+};
+
+export type SlackTestNotificationInput = {
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type SlackTestNotificationPayload = {
+  __typename?: 'SlackTestNotificationPayload';
+  delivered: Scalars['Boolean']['output'];
+  failure?: Maybe<SlackFailure>;
+};
 
 export type Team = {
   __typename?: 'Team';
