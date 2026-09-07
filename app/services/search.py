@@ -2,6 +2,7 @@ from uuid import UUID
 
 import asyncpg
 
+from app.domain.embedding_jobs import IndexingState
 from app.domain.errors import ValidationError, ValidationIssue
 from app.domain.search import (
     QUERY_MAX_LENGTH,
@@ -16,6 +17,7 @@ from app.domain.semantic_search import (
     embedding_text,
 )
 from app.domain.tenancy import WorkspaceScope
+from app.repositories.embedding_jobs import EmbeddingJobRepository
 from app.repositories.embeddings import EmbeddingRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.projects import ProjectRepository
@@ -95,12 +97,14 @@ class SearchService:
         project_repository: ProjectRepository,
         embedding_repository: EmbeddingRepository | None = None,
         embedder: Embedder | None = None,
+        job_repository: EmbeddingJobRepository | None = None,
     ):
         self._pool = pool
         self._issues = issue_repository
         self._projects = project_repository
         self._embeddings = embedding_repository
         self._embedder = embedder
+        self._jobs = job_repository
 
     async def search(
         self,
@@ -344,6 +348,51 @@ class SearchService:
                         written += 1
 
         return written
+
+    async def indexing_state(self, *, scope: WorkspaceScope) -> IndexingState:
+        """How much of this workspace's semantic index actually exists.
+
+        THE FIELD THAT LETS A CLIENT STOP GUESSING. `suggest_duplicates` answers
+        with an empty list both when nothing is similar and when nothing is
+        indexed, and on a fresh install it is always the second -- so every
+        interface built on it has been rendering "no possible duplicates" over a
+        workspace that has never been embedded. This is the read that says which
+        of the two it is, so the answer can be "index building, N pending".
+
+        It is the ONE place in the search feature that reports whether this
+        deployment has an embedder at all, and that is a deliberate departure
+        from what `suggest_duplicates` and `refresh_embeddings` do. Those two
+        keep "no model" and "nothing found" indistinguishable, because for them
+        a client could only use the difference to read the server's
+        configuration off a result. Here the difference IS the question: a UI
+        that cannot tell "still building" from "this deployment does not do
+        this" has to guess, and it guesses wrong on exactly the fresh installs
+        where getting it right matters. The caller is an authorized member of
+        the workspace either way.
+
+        Disabled -- and all three counts zero -- when either the embedder or the
+        job repository is missing, without a round trip. That is honest rather
+        than evasive: freshness is defined against the model doing the asking,
+        so with no model there is no question to answer, and a count of zero
+        beside `enabled: false` cannot be mistaken for a fully indexed
+        workspace.
+
+        No `first`, no bounds, nothing to validate: the arguments are a scope
+        the caller has already been authorized for and a model name that came
+        from this process's own configuration.
+        """
+        jobs = self._jobs
+        embedder = self._embedder
+
+        if jobs is None or embedder is None:
+            return IndexingState(indexed=0, pending=0, failed=0, enabled=False)
+
+        async with self._pool.acquire() as connection:
+            return await jobs.indexing_state(
+                connection,
+                scope=scope,
+                model=embedder.name,
+            )
 
     @staticmethod
     def _validate(*, query: str, first: int) -> None:

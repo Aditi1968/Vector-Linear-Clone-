@@ -1,17 +1,69 @@
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
-from app.config import get_settings
-from app.db import connect, disconnect
+from app.config import Settings, get_settings
+from app.db import connect, disconnect, get_pool
 from app.graphql.router import build_graphql_router
 from app.graphql.schema import build_schema
 from app.http_limits import add_request_body_limit
+from app.repositories.embedding_jobs import EmbeddingJobRepository
+from app.repositories.embeddings import EmbeddingRepository
 from app.rest.github import router as github_router
 from app.rest.health import router as health_router
 from app.rest.slack import router as slack_router
+from app.services.embedding_jobs import EmbeddingWorker
+from app.services.embeddings import load_embedder
 from app.services.passwords import warm_password_hashing
+
+
+def _start_embedding_worker(settings: Settings) -> "asyncio.Task[None] | None":
+    """The embedding worker, if this deployment asked for one. THE SCHEDULER.
+
+    There isn't one, and this is the honest replacement rather than a stand-in
+    for a missing dependency. Semantic search needs `issue_embeddings` filled
+    in; migration 025 builds every read over it and PostgreSQL has no model, so
+    something in application space has to run the embedder on a timer. The
+    options were a cron container, a queue broker, or a task on the process that
+    is already running -- and the first two are infrastructure a deployment has
+    to operate, bought to call a coroutine every thirty seconds.
+
+    So: an asyncio task, behind one boolean. `EMBEDDING_WORKER_ENABLED=true` on
+    a deployment of this image makes that process drain the queue as well as
+    serve requests. Setting it on more than one is safe and intended -- the
+    claim is `FOR UPDATE SKIP LOCKED`, so N workers split the backlog instead of
+    duplicating it -- and setting it on a deployment with no traffic routed to
+    it is how model work is kept off the request path without a second image, a
+    second entrypoint, or a second thing to keep in step with this one.
+
+    Returns None when the flag is off, which is the whole of the "off" path:
+    nothing is constructed, no embedder is loaded, and the process behaves
+    exactly as it did before this existed.
+
+    Built here rather than in `app.graphql.context`, because that function runs
+    per REQUEST and this object is per PROCESS. The pool is `get_pool()` and not
+    a new one: the worker releases its connection across the model run precisely
+    so that sharing the request path's pool is safe.
+    """
+    if not settings.embedding_worker_enabled:
+        return None
+
+    worker = EmbeddingWorker(
+        pool=get_pool(),
+        jobs=EmbeddingJobRepository(),
+        embeddings=EmbeddingRepository(),
+        # Never fails and never blocks startup on a model that is not there:
+        # `load_embedder` falls back to the in-tree hashing embedder when no
+        # sentence-transformers install is present, so a deployment with the
+        # flag on and no model still indexes -- with a weaker embedder that
+        # names itself differently, which re-queues every vector by itself the
+        # day a real model is installed.
+        embedder=load_embedder(),
+    )
+
+    return asyncio.create_task(worker.run_forever())
 
 
 @asynccontextmanager
@@ -25,9 +77,29 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # which is exactly the timing difference the decoy exists to erase.
     await warm_password_hashing()
 
+    # After `connect()`, because it takes the pool; the flag is read from the
+    # same cached settings `connect()` resolved.
+    worker = _start_embedding_worker(get_settings())
+
     try:
         yield
     finally:
+        if worker is not None:
+            worker.cancel()
+
+            # Awaited rather than merely cancelled, and before `disconnect()`.
+            # `cancel()` only schedules the cancellation; returning without
+            # awaiting would close the pool underneath a task still inside a
+            # statement, which surfaces as an InterfaceError logged during
+            # shutdown from a coroutine nobody is watching.
+            #
+            # The CancelledError is the task acknowledging the cancel we asked
+            # for, so suppressing it here is reading the reply rather than
+            # swallowing a failure -- `run_forever` lets it through untouched
+            # for exactly this.
+            with suppress(asyncio.CancelledError):
+                await worker
+
         await disconnect()
 
 
