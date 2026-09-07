@@ -34,6 +34,7 @@ from app.domain.activity import (
     changes,
 )
 from app.domain.errors import ValidationError, ValidationIssue
+from app.domain.events import URGENT_PRIORITY, DomainEventKind
 from app.domain.notifications import (
     NotificationEntity,
     NotificationKind,
@@ -50,6 +51,7 @@ from app.domain.tenancy import AuthorizedWorkspaceScope, WorkspaceScope
 from app.repositories.activity import ActivityRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.subscribers import SubscriberRepository
+from app.services.events import record_issue_event
 
 
 FIRST_MIN = 1
@@ -159,6 +161,27 @@ async def record_changes(
     becomes noise. The two notifications are independent, so a write that moves
     both the assignee and the state produces two items -- which is two things
     that happened, and collapsing them would mean choosing which one to hide.
+
+    Three DOMAIN EVENTS are emitted alongside those notifications, and they are
+    a different question with a different audience. A notification is addressed
+    to one person's inbox; an event is a fact a workspace may want announced
+    outside Vector, in a channel a whole team reads. So the vocabularies do not
+    match and should not: `STATUS_CHANGED` reaches every watcher of every move,
+    while `ISSUE_COMPLETED` is only the move that finishes something, and there
+    is an urgency event with no inbox counterpart at all because "this became
+    urgent" is exactly the kind of thing a channel is for and an inbox is not.
+
+    They are emitted HERE for the reason the notifications are: this is the
+    module that already knows what a write moved, and the alternative is
+    fifteen call sites each deciding for themselves what is worth announcing --
+    which is fifteen places for one of them to stop. Nothing about Slack is
+    visible from this module or from the one it calls; see
+    `app.services.events`.
+
+    Whether a state move is a COMPLETION is decided inside the emitting
+    statement rather than here, because `IssueSnapshot` carries state ids and
+    not state types, and the join costs nothing this function does not already
+    pay. A move to a state that is not a completed one simply writes no row.
     """
     moved = changes(before, after)
 
@@ -189,6 +212,13 @@ async def record_changes(
             kind=NotificationKind.ASSIGNED,
         )
 
+        await record_issue_event(
+            connection,
+            scope=scope,
+            kind=DomainEventKind.ISSUE_ASSIGNED,
+            issue_id=issue_id,
+        )
+
     if before.workflow_state_id != after.workflow_state_id:
         await notify(
             connection,
@@ -196,6 +226,27 @@ async def record_changes(
             issue_id=issue_id,
             actor_id=actor_id,
             kind=NotificationKind.STATUS_CHANGED,
+        )
+
+        await record_issue_event(
+            connection,
+            scope=scope,
+            kind=DomainEventKind.ISSUE_COMPLETED,
+            issue_id=issue_id,
+        )
+
+    # A TRANSITION and not a state, which is what migration 018 says the event
+    # is for: the message is worth sending when something BECOMES urgent, and a
+    # channel that re-announced every urgent issue on every edit of it would be
+    # the noise that vocabulary is short to avoid. `changes` has already
+    # established the priority moved; this adds only that it moved TO the top of
+    # the scale.
+    if before.priority != after.priority and after.priority == URGENT_PRIORITY:
+        await record_issue_event(
+            connection,
+            scope=scope,
+            kind=DomainEventKind.ISSUE_PRIORITY_URGENT,
+            issue_id=issue_id,
         )
 
 
