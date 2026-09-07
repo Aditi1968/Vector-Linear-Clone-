@@ -67,7 +67,10 @@ query TeamBoards($workspaceSlug: String!) {
 query TeamIssueList($workspaceSlug: String!, $teamId: UUID!, $after: String) {
   issues(
     workspaceSlug: $workspaceSlug
-    teamId: $teamId
+    # `teamId` moved onto the filter input when the other issue filters
+    # landed; it is the same server-side filter, spelled where its siblings
+    # live.
+    filter: { teamId: $teamId }
     # 25 is a LITERAL and must stay one -- see the note at the top.
     first: 25
     after: $after
