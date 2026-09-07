@@ -31,7 +31,9 @@ from app.repositories.projects import ProjectRepository
 from app.repositories.relations import RelationRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.slack import SlackRepository
+from app.repositories.subscribers import SubscriberRepository
 from app.repositories.teams import TeamRepository
+from app.repositories.templates import TemplateRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.activity import ActivityService
@@ -48,6 +50,7 @@ from app.services.relations import RelationService
 from app.services.search import SearchService
 from app.services.slack import DatabaseTokenStore, SlackService
 from app.services.teams import TeamService
+from app.services.templates import TemplateService
 
 
 class VectorContext(BaseContext):
@@ -68,6 +71,7 @@ class VectorContext(BaseContext):
         github_service: GithubService,
         slack_service: SlackService,
         activity_service: ActivityService,
+        template_service: TemplateService,
         environment: Environment,
     ):
         super().__init__()
@@ -95,14 +99,25 @@ class VectorContext(BaseContext):
         # over the same pool.
         self.slack_service = slack_service
 
-        # The READ half of activity and notifications only. Nothing writes
-        # through this object: an activity row and an inbox item are written
-        # by the service that causes them, on that service's own connection
-        # and inside its transaction, through the module-level functions in
-        # app/services/activity.py. A writable service here would be a way to
-        # record history for a change that had not happened yet -- or that
-        # was about to be rolled back.
+        # Activity, notifications and subscriptions. Every WRITE reachable
+        # through this object is one a person performs on their own row --
+        # marking an item read, watching or unwatching an issue -- and each
+        # holds a transaction of its own. Nothing here records that something
+        # happened TO an issue: an activity row, an inbox item and an
+        # auto-subscribe are written by the service that causes them, on that
+        # service's own connection and inside its transaction, through the
+        # module-level functions in app/services/activity.py. A service here
+        # that could do that would be a way to record history for a change
+        # that had not happened yet -- or that was about to be rolled back.
         self.activity_service = activity_service
+
+        # Reads templates and files issues from them, which is why it holds
+        # the issue and label services rather than their repositories: every
+        # rule an apply has to respect -- which state a new issue starts in,
+        # which number it gets, how many labels one may wear -- already lives
+        # in a service, and reaching past them would grow a second
+        # `issueCreate` nobody would think to keep in step.
+        self.template_service = template_service
 
         # Built here rather than in `get_context` so that a context assembled
         # by hand -- a test, a worker -- gets working loaders from the service
@@ -261,16 +276,33 @@ async def get_context() -> VectorContext:
     # any caching either one grows later would then be per copy.
     team_service = TeamService(pool=pool, repository=TeamRepository())
 
+    # Named rather than built inline, because `TemplateService` needs both:
+    # applying a template files an issue and puts labels on it, through the
+    # services that own those rules. One instance each per request, for the
+    # reason `team_service` above is one -- two would be two objects answering
+    # the same question over the same pool, and any caching either grows later
+    # would then be per copy.
+    issue_service = IssueService(
+        pool=pool,
+        repository=IssueRepository(),
+        # Creating an issue allocates a number off the team's counter and
+        # resolves the state it starts in, both inside the issue service's own
+        # transaction. Same instance as below: one request gets one team
+        # service.
+        teams=team_service,
+    )
+
+    label_service = LabelService(
+        pool=pool,
+        repository=LabelRepository(),
+        # One service owns both tables, because applying a label is one
+        # operation over two of them: the join row is meaningless without
+        # the label, and the per-issue cap is a rule about the pair.
+        issue_label_repository=IssueLabelRepository(),
+    )
+
     return VectorContext(
-        issue_service=IssueService(
-            pool=pool,
-            repository=IssueRepository(),
-            # Creating an issue allocates a number off the team's counter and
-            # resolves the state it starts in, both inside the issue
-            # service's own transaction. Same instance as below: one request
-            # gets one team service.
-            teams=team_service,
-        ),
+        issue_service=issue_service,
         membership_service=MembershipService(
             pool=pool,
             repository=MembershipRepository(),
@@ -298,14 +330,7 @@ async def get_context() -> VectorContext:
             sessions=SessionRepository(),
             hasher=Argon2PasswordHasher(),
         ),
-        label_service=LabelService(
-            pool=pool,
-            repository=LabelRepository(),
-            # One service owns both tables, because applying a label is one
-            # operation over two of them: the join row is meaningless without
-            # the label, and the per-issue cap is a rule about the pair.
-            issue_label_repository=IssueLabelRepository(),
-        ),
+        label_service=label_service,
         comment_service=CommentService(pool=pool, repository=CommentRepository()),
         cycle_service=CycleService(pool=pool, repository=CycleRepository()),
         team_service=team_service,
@@ -351,6 +376,22 @@ async def get_context() -> VectorContext:
             pool=pool,
             repository=ActivityRepository(),
             notifications=NotificationRepository(),
+            # The third table of the same question. A subscription is the
+            # standing answer to "whose problem is this", which the
+            # notification half asks on every write, so the two are read
+            # together by every screen that shows an issue.
+            subscribers=SubscriberRepository(),
+        ),
+        template_service=TemplateService(
+            pool=pool,
+            repository=TemplateRepository(),
+            # Services, not repositories: applying a template must go through
+            # the same rules `issueCreate` and `issueLabelAttach` enforce, and
+            # through the same composite foreign keys, so a stored id is
+            # re-checked against the applying caller's workspace rather than
+            # trusted because it was checked once when it was saved.
+            issues=issue_service,
+            labels=label_service,
         ),
         environment=environment,
     )

@@ -16,6 +16,8 @@ without a database precisely because it must be settled before any data is
 read.
 """
 
+import re
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -88,25 +90,62 @@ def test_the_published_enum_says_what_the_domain_enum_says(domain, published):
     }
 
 
-def test_every_activity_kind_is_one_the_migration_admits():
-    """The third copy of the vocabulary is `issue_activity_kind_known`.
+# `CONSTRAINT <name>_kind_known CHECK (kind IN ('a', 'b'))`, however it is laid
+# out. Both spellings in the tree are matched: 012 writes the activity one with
+# the vocabulary on twelve indented lines, and 020 writes the notification one
+# on one line inside an ALTER TABLE.
+_KIND_CHECK = re.compile(
+    r"CONSTRAINT\s+(\w+_kind_known)\s+CHECK\s*\(\s*kind\s+IN\s*\(([^)]*)\)",
+    re.IGNORECASE,
+)
+
+
+def _admitted_kinds() -> dict[str, set[str]]:
+    """The vocabulary each `*_kind_known` CHECK admits, as the schema now is.
+
+    Every migration in filename order, keeping the LAST declaration of each
+    constraint name, because a CHECK is widened by dropping and re-adding it --
+    which is how 020 added 'status_changed' to `notifications_kind_known`, and
+    how the next kind will arrive too. Reading only the file that first
+    declared a constraint would make this gate fail on every widening, for a
+    reason that has nothing to do with the vocabulary being out of step.
 
     Read out of the migration text rather than restated here, so this test
     cannot drift into agreeing with itself.
     """
-    from pathlib import Path
+    migrations = Path(__file__).resolve().parent.parent / "migrations"
+    admitted: dict[str, set[str]] = {}
 
-    sql = (
-        Path(__file__).resolve().parent.parent
-        / "migrations"
-        / "012_activity_notifications.sql"
-    ).read_text(encoding="utf-8")
+    for path in sorted(migrations.glob("*.sql")):
+        for name, values in _KIND_CHECK.findall(path.read_text(encoding="utf-8")):
+            admitted[name.lower()] = set(re.findall(r"'([^']*)'", values))
 
-    for kind in ActivityKind:
-        assert f"'{kind.value}'" in sql, f"{kind.value} is not in migration 012"
+    return admitted
 
-    for kind in NotificationKind:
-        assert f"'{kind.value}'" in sql, f"{kind.value} is not in migration 012"
+
+@pytest.mark.parametrize(
+    ("constraint", "enum"),
+    [
+        ("issue_activity_kind_known", ActivityKind),
+        ("notifications_kind_known", NotificationKind),
+    ],
+)
+def test_every_kind_is_exactly_what_the_schema_admits(constraint, enum):
+    """The third copy of each vocabulary is the CHECK in the migrations.
+
+    Equality rather than membership, in both directions. A kind this code can
+    write and the column refuses is a runtime failure on whichever path first
+    produces it; a kind the column admits and no enum names is a value that can
+    reach the table by hand and then fail to convert when it is read back --
+    `ActivityRepository._to_entity` raises on one.
+    """
+    admitted = _admitted_kinds()
+
+    assert constraint in admitted, (
+        f"no migration declares {constraint}; the regex in this file has "
+        "stopped matching the schema it is meant to read"
+    )
+    assert admitted[constraint] == {kind.value for kind in enum}
 
 
 # --- what an update is worth recording --------------------------------

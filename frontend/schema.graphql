@@ -241,6 +241,18 @@ type IssueConnection {
   totalCount: Int!
 }
 
+input IssueCreateFromTemplateInput {
+  workspaceSlug: String!
+  templateId: UUID!
+  teamId: UUID!
+  title: String = null
+}
+
+type IssueCreateFromTemplatePayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
+}
+
 input IssueCreateInput {
   workspaceSlug: String!
   teamId: UUID!
@@ -373,6 +385,25 @@ type IssueSetProjectPayload {
   errors: [ValidationErrorType!]!
 }
 
+type IssueSubscriber {
+  userId: UUID!
+
+  """
+  When this person started watching, which does not move if they are auto-subscribed again.
+  """
+  createdAt: DateTime!
+}
+
+input IssueSubscriptionInput {
+  workspaceSlug: String!
+  issueId: UUID!
+}
+
+type IssueSubscriptionPayload {
+  subscribed: Boolean!
+  errors: [ValidationErrorType!]!
+}
+
 type IssueSummary {
   id: UUID!
 
@@ -391,6 +422,61 @@ type IssueSummary {
 type IssueSummaryConnection {
   nodes: [IssueSummary!]!
   pageInfo: PageInfo!
+}
+
+type IssueTemplate {
+  id: UUID!
+  teamId: UUID
+  name: String!
+  title: String
+  description: String
+  priority: Int
+  estimate: Int
+  assigneeId: UUID
+  projectId: UUID
+  cycleId: UUID
+  labelIds: [UUID!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input IssueTemplateCreateInput {
+  workspaceSlug: String!
+  template: IssueTemplateFieldsInput!
+}
+
+input IssueTemplateDeleteInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type IssueTemplateDeletePayload {
+  id: UUID
+  errors: [ValidationErrorType!]!
+}
+
+input IssueTemplateFieldsInput {
+  name: String!
+  teamId: UUID = null
+  title: String = null
+  description: String = null
+  priority: Int = null
+  estimate: Int = null
+  assigneeId: UUID = null
+  projectId: UUID = null
+  cycleId: UUID = null
+  labelIds: [UUID!]! = []
+}
+
+type IssueTemplateSavePayload {
+  template: IssueTemplate
+  errors: [ValidationErrorType!]!
+}
+
+input IssueTemplateUpdateInput {
+  workspaceSlug: String!
+  id: UUID!
+  template: IssueTemplateFieldsInput!
 }
 
 input IssueUpdateInput {
@@ -543,6 +629,12 @@ type Mutation {
   slackDisconnect(input: SlackDisconnectInput!): SlackDisconnectPayload!
   notificationMarkRead(input: NotificationMarkReadInput!): NotificationMarkReadPayload!
   notificationMarkAllRead(input: NotificationMarkAllReadInput!): NotificationMarkAllReadPayload!
+  issueSubscribe(input: IssueSubscriptionInput!): IssueSubscriptionPayload!
+  issueUnsubscribe(input: IssueSubscriptionInput!): IssueSubscriptionPayload!
+  issueTemplateCreate(input: IssueTemplateCreateInput!): IssueTemplateSavePayload!
+  issueTemplateUpdate(input: IssueTemplateUpdateInput!): IssueTemplateSavePayload!
+  issueTemplateDelete(input: IssueTemplateDeleteInput!): IssueTemplateDeletePayload!
+  issueCreateFromTemplate(input: IssueCreateFromTemplateInput!): IssueCreateFromTemplatePayload!
 }
 
 type Notification {
@@ -568,6 +660,7 @@ enum NotificationKind {
   ASSIGNED
   COMMENTED
   BLOCKED
+  STATUS_CHANGED
 }
 
 input NotificationMarkAllReadInput {
@@ -736,6 +829,10 @@ type Query {
   slackIntegration(workspaceSlug: String!): SlackIntegration!
   notifications(workspaceSlug: String!, unreadOnly: Boolean! = false, first: Int! = 50, after: String = null): NotificationConnection!
   notificationUnreadCount(workspaceSlug: String!): Int!
+  issueSubscribers(workspaceSlug: String!, issueId: UUID!): [IssueSubscriber!]!
+  issueViewerIsSubscribed(workspaceSlug: String!, issueId: UUID!): Boolean!
+  issueTemplates(workspaceSlug: String!, teamId: UUID = null): [IssueTemplate!]!
+  issueTemplate(workspaceSlug: String!, id: UUID!): IssueTemplate
 }
 
 input RegisterInput {
