@@ -426,9 +426,9 @@ VERIFY_TIMEOUT_SECONDS: Final = 10.0
 
 
 class InstallationOwnershipCheck(Protocol):
-    """Whether the person finishing this flow can reach this installation."""
+    """Which installations the person finishing this flow can administer."""
 
-    async def installed_for_user(self, *, code: str, installation_id: int) -> bool: ...
+    async def installations_for_user(self, *, code: str) -> list[int]: ...
 
 
 class GithubUserInstallations:
@@ -461,7 +461,20 @@ class GithubUserInstallations:
         self._client_secret = client_secret
         self._redirect_uri = redirect_uri
 
-    async def installed_for_user(self, *, code: str, installation_id: int) -> bool:
+    async def installations_for_user(self, *, code: str) -> list[int]:
+        """Every installation of this App the consenting account administers.
+
+        Returns ids rather than answering a yes/no about one, because the
+        redirect does not always name an installation. GitHub sends
+        `installation_id` when the click INSTALLED the app; for an app already
+        installed there is nothing to install, so the redirect carries only
+        `code` -- and the list is then the only way to learn which
+        installation the person just authorised against.
+
+        The code is single-use, so this must be called at most once per
+        callback and its result reused for both questions the caller has:
+        which installation, and whether a named one is really theirs.
+        """
         fields = {
             "client_id": self._client_id,
             "client_secret": self._client_secret,
@@ -480,12 +493,12 @@ class GithubUserInstallations:
             )
 
             if granted.status_code != 200:
-                return False
+                return []
 
             token = granted.json().get("access_token")
 
             if not isinstance(token, str) or not token:
-                return False
+                return []
 
             # One page is enough for the question being asked; an account with
             # more than a hundred installations is not a case this flow has,
@@ -501,12 +514,13 @@ class GithubUserInstallations:
             )
 
         if listed.status_code != 200:
-            return False
+            return []
 
-        return any(
-            entry.get("id") == installation_id
+        return [
+            entry["id"]
             for entry in (listed.json().get("installations") or [])
-        )
+            if isinstance(entry.get("id"), int)
+        ]
 
 
 class GithubService:
@@ -583,13 +597,31 @@ class GithubService:
 
         return self._view(installation, repositories)
 
-    async def confirm_with_user_grant(
-        self,
-        *,
-        installation_id: int,
-        code: str,
-    ) -> bool:
-        """Promote a claim when GitHub says this installer owns it.
+    async def installations_for_grant(self, *, code: str) -> list[int]:
+        """Which installations the consenting account administers, or none.
+
+        Exposed on the service so the callback asks GitHub exactly once: the
+        OAuth code is single-use, and the callback has two questions for it --
+        which installation this authorisation is about, and whether an id the
+        redirect named is genuinely the caller's.
+
+        Fails closed to an empty list, so every caller treats a provider that
+        is down, slow, or answering nonsense the same way it treats an account
+        with nothing installed.
+        """
+        if self._ownership is None:
+            return []
+
+        try:
+            return await self._ownership.installations_for_user(code=code)
+        except Exception:
+            # A provider failure must not become a 500 in the middle of an
+            # OAuth callback. PENDING is an honest state; the webhook path and
+            # the claim TTL both still apply.
+            return []
+
+    async def confirm_claim(self, *, installation_id: int) -> bool:
+        """Promote a claim GitHub has confirmed belongs to the installer.
 
         The second route to `confirmed_at`, and the one that makes connecting
         to an ALREADY-INSTALLED app possible at all: GitHub emits
@@ -597,38 +629,17 @@ class GithubService:
         installation would otherwise wait for a delivery that never arrives
         and sit at PENDING until the claim expired.
 
-        The evidence is different from the webhook's but no weaker. A signed
-        delivery is GitHub telling us an installation happened; the OAuth code
-        is GitHub telling us that THIS browser's account can administer THIS
-        installation. The second is a closer answer to the question the claim
-        actually poses -- who clicked -- and the id is compared against a list
-        GitHub returns rather than anything the client supplied.
+        The evidence differs from the webhook's but is not weaker. A signed
+        delivery is GitHub saying an installation happened; the OAuth grant is
+        GitHub saying THIS account administers THIS installation, which is a
+        closer answer to the question a claim actually poses -- who clicked.
 
-        Fails closed everywhere: no checker configured, a refused exchange, a
-        token that does not list the id, or any transport failure all leave
-        the claim exactly as it was, for the webhook to confirm or the TTL to
-        expire. It never writes `confirmed_at` on its own authority --
-        `confirm_installation` is still the only writer, with the same three
-        predicates, so a claim that is already confirmed, already expired or
-        belongs to nobody is untouched.
+        Callers must have established that from `installations_for_grant`
+        before calling this; it is the write, not the check.
+        `confirm_installation` remains the only writer of `confirmed_at`, with
+        all three of its predicates, so a claim already confirmed, already
+        expired, or belonging to nobody is untouched.
         """
-        if self._ownership is None:
-            return False
-
-        try:
-            owned = await self._ownership.installed_for_user(
-                code=code, installation_id=installation_id
-            )
-        except Exception:
-            # A provider that is slow, down or answering nonsense must not
-            # turn into a 500 in the middle of an OAuth callback. The claim
-            # survives; PENDING is an honest state and the webhook path and
-            # the TTL both still apply.
-            return False
-
-        if not owned:
-            return False
-
         async with self._pool.acquire() as connection:
             async with connection.transaction():
                 workspace_id = await self._repository.confirm_installation(

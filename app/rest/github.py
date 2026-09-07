@@ -138,6 +138,23 @@ CLAIMED_MESSAGE = "GitHub install received. Waiting for GitHub to confirm it."
 # which is one query short of the enumeration the claim window exists to make
 # expensive. It does say the refusal may not be permanent, because an
 # unconfirmed claim expires and the honest owner needs to know to try again.
+# What the callback says when the authorisation named no installation and the
+# grant showed none either -- an organisation owner has yet to approve, or the
+# app was never installed at all.
+NOTHING_INSTALLED_MESSAGE = (
+    "GitHub has not completed an installation for this account yet. If an "
+    "organisation owner still has to approve it, connect again once they have."
+)
+
+# And when the account administers several. The redirect does not say which
+# one this authorisation was about, and choosing would attach a workspace to
+# an installation nobody picked.
+AMBIGUOUS_INSTALLATION_MESSAGE = (
+    "This account administers more than one installation of Vector. Open the "
+    "installation you want from GitHub and use its Configure link, so the "
+    "redirect names which one to connect."
+)
+
 CLAIMED_ELSEWHERE_DETAIL = (
     "This GitHub installation is already spoken for. If you have just "
     "installed the app, wait a few minutes and try again."
@@ -573,14 +590,34 @@ async def _complete_install(
             detail="Invalid state",
         )
 
+    # Asked at most once. The OAuth code is single-use, and this answers both
+    # questions the callback has: which installation this authorisation is
+    # about, and whether an id the redirect named is genuinely the caller's.
+    grant_installations = (
+        await services.github.installations_for_grant(code=code) if code else []
+    )
+
     if installation_id is None or installation_id <= 0:
-        # GitHub sends `setup_action=request` with no installation when an
-        # organisation owner still has to approve. Nothing to record yet, and
-        # recording something would report a connection that does not exist.
-        return PlainTextResponse(
-            "No GitHub installation was completed.",
-            status_code=status.HTTP_400_BAD_REQUEST,
-        )
+        # No `installation_id` does NOT mean nothing happened. GitHub sends
+        # one when the click INSTALLED the app; for an app that is already
+        # installed there is nothing to install, so an ordinary, successful
+        # authorisation comes back carrying only `code` -- and answering "no
+        # installation was completed" was wrong for the most common case there
+        # is, connecting a second workspace to an app already on the account.
+        #
+        # Exactly one is the only case that can be resolved without guessing.
+        # With several, the redirect genuinely does not say which was meant,
+        # and picking one would attach a workspace to an installation nobody
+        # chose.
+        if len(grant_installations) == 1:
+            installation_id = grant_installations[0]
+        else:
+            return PlainTextResponse(
+                NOTHING_INSTALLED_MESSAGE
+                if not grant_installations
+                else AMBIGUOUS_INSTALLATION_MESSAGE,
+                status_code=status.HTTP_400_BAD_REQUEST,
+            )
 
     workspace = _string_or_none(stored.get("workspace"))
 
@@ -595,24 +632,16 @@ async def _complete_install(
     try:
         await services.github.connect(scope, installation_id=installation_id)
 
-        # The claim is recorded. Now ask GitHub whether the account that just
-        # consented can actually administer the installation it named -- the
-        # one question the redirect itself cannot answer, and the reason
-        # `code` is read here at all.
+        # Confirm only what GitHub said this account administers. An id the
+        # redirect named but the grant does not list is a guess, and a guess
+        # stays PENDING -- where a signed `installation` delivery can still
+        # promote it, and the TTL expires it if nothing does.
         #
-        # It is deliberately AFTER the claim rather than instead of it. The
-        # claim is what a second workspace collides with, so recording it
-        # first keeps the refusal for a contested id identical whether or not
-        # the verification then succeeds. A failure here leaves PENDING,
-        # which a signed `installation` delivery can still promote.
-        #
-        # This is what makes connecting to an app that is ALREADY installed
-        # work: GitHub emits `installation.created` once, so that route is
-        # closed for every installation after the first.
-        if code:
-            await services.github.confirm_with_user_grant(
-                installation_id=installation_id, code=code
-            )
+        # Deliberately AFTER the claim rather than instead of it: the claim is
+        # what a second workspace collides with, so recording it first keeps
+        # the refusal for a contested id identical either way.
+        if installation_id in grant_installations:
+            await services.github.confirm_claim(installation_id=installation_id)
     except GithubNotConfiguredError:
         raise _not_found() from None
     except GithubInstallationClaimedError:

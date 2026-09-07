@@ -29,6 +29,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Annotated, Any, Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -220,22 +221,36 @@ OAUTH_STATE_COOKIE_SAMESITE: Literal["lax"] = "lax"
 # that has to be got right.
 #
 # Add the workspace settings path here when the frontend grows one.
-ALLOWED_RETURN_PATHS = frozenset({"/", "/issues"})
-DEFAULT_RETURN_PATH = "/"
+# Where a finished flow may land, as a template rather than a fixed path.
+#
+# `/` was the default and it is the PUBLIC landing page: a successful connect
+# dropped the admin on a marketing page with a Sign In button, which reads as
+# having been signed out. `/issues` is worse -- it predates workspace-scoped
+# routing and now resolves to a workspace whose slug is "issues".
+#
+# The workspace is known here (the state cookie recorded it), so the flow
+# returns to the screen it started from. `{slug}` is substituted from that
+# recorded value and never from anything in the request.
+RETURN_PATH_TEMPLATES = frozenset({"/{slug}/settings", "/{slug}/issues"})
+DEFAULT_RETURN_TEMPLATE = "/{slug}/settings"
 
 
 def resolve_return_path(requested: str | None) -> str:
-    """The path to send a browser to after the flow, from the allowlist.
+    """The template to send a browser to after the flow, from the allowlist.
 
     A request naming anything else is not an error: it lands on the default.
     Erroring would make an unrecognised path a dead end at the very end of a
     successful OAuth grant, which is the worst moment to fail -- the
     installation has already happened.
+
+    Returns a TEMPLATE, not a path. The workspace is filled in by
+    `_redirect_to` from the value the state cookie recorded, so nothing a
+    request supplies can steer where the browser ends up.
     """
-    if requested is not None and requested in ALLOWED_RETURN_PATHS:
+    if requested is not None and requested in RETURN_PATH_TEMPLATES:
         return requested
 
-    return DEFAULT_RETURN_PATH
+    return DEFAULT_RETURN_TEMPLATE
 
 
 def _session_digest(request: Request) -> str:
@@ -692,7 +707,9 @@ async def slack_oauth_callback(
         # is not a failure of this server -- so the admin is returned to the
         # product rather than shown an error page. The value is not echoed
         # anywhere: it is a string from a query parameter.
-        return consumed(_redirect_to(pending.return_path))
+        return consumed(
+            _redirect_to(pending.return_path, workspace_slug=pending.workspace_slug)
+        )
 
     try:
         grant = await services.oauth.exchange(code=code)
@@ -714,7 +731,9 @@ async def slack_oauth_callback(
             )
         )
 
-    return consumed(_redirect_to(pending.return_path))
+    return consumed(
+        _redirect_to(pending.return_path, workspace_slug=pending.workspace_slug)
+    )
 
 
 @router.post("/events")
@@ -881,13 +900,24 @@ def _acknowledged() -> Response:
     return JSONResponse({"ok": True})
 
 
-def _redirect_to(path: str) -> Response:
+def _redirect_to(template: str, *, workspace_slug: str) -> Response:
     """A redirect to an allowlisted path. The only redirect this module makes.
 
-    Takes a path that has already been through `resolve_return_path`; there is
-    no route from a request parameter to this function that skips it.
+    Takes a template that has already been through `resolve_return_path`, and
+    the workspace the state cookie recorded. There is no route from a request
+    parameter to this function that skips either: the template comes from a
+    fixed set and the slug from the cookie this server wrote.
+
+    The slug is quoted before substitution. It is confined to lowercase
+    letters, digits and hyphens by `workspaces_slug_format` in
+    migrations/002_tenancy.sql, so quoting changes nothing today -- and is
+    still where the rule belongs, because a Location header built by
+    concatenation is how an open redirect is introduced later.
     """
-    return RedirectResponse(path, status_code=status.HTTP_303_SEE_OTHER)
+    return RedirectResponse(
+        template.format(slug=quote(workspace_slug, safe="")),
+        status_code=status.HTTP_303_SEE_OTHER,
+    )
 
 
 def _problem(status_code: int, detail: str) -> Response:

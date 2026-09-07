@@ -112,18 +112,38 @@ class ClaimedGithubRepository(FakeGithubRepository):
         raise GithubInstallationClaimedError()
 
 
+class FakeOwnership:
+    """Stands in for GitHub's answer about what this account administers.
+
+    Records how many times it was asked, because the OAuth code is single-use
+    and asking twice would spend it -- a fault no assertion about the response
+    would notice.
+    """
+
+    def __init__(self, installations=()):
+        self.installations = list(installations)
+        self.calls = 0
+
+    async def installations_for_user(self, *, code):
+        self.calls += 1
+
+        return list(self.installations)
+
+
 def build_services_for(
     *,
     config=None,
     role="admin",
     tokens=None,
     repository=None,
+    ownership=None,
 ) -> GithubHttpServices:
     return GithubHttpServices(
         github=GithubService(
             pool=FakePool(),
             repository=repository if repository is not None else FakeGithubRepository(),
             config=config if config is not None else configured(),
+            ownership=ownership,
         ),
         auth=FakeAuthService(tokens),
         memberships=FakeMembershipService(role=role),
@@ -849,3 +869,92 @@ def test_the_application_boots_and_mounts_the_routes_with_no_github_settings(
     assert "get" in paths["/github/install"]
     assert "get" in paths["/github/callback"]
     assert "post" in paths["/github/webhook"]
+
+
+# --- an app that is ALREADY installed ----------------------------------
+#
+# GitHub sends `installation_id` when the click INSTALLED the app. For an app
+# already on the account there is nothing to install, so an ordinary
+# successful authorisation returns only `code` -- and the callback used to
+# answer "No GitHub installation was completed", which was wrong for the most
+# common case there is: connecting another workspace to an existing
+# installation.
+
+
+async def test_an_authorisation_with_no_installation_id_uses_the_only_grant():
+    repository = FakeGithubRepository()
+    ownership = FakeOwnership([4242])
+
+    async with build_client(
+        build_services_for(repository=repository, ownership=ownership)
+    ) as client:
+        state = state_from(await start_install(client, return_to=ALLOWED_RETURN))
+        response = await client.get(
+            "/github/callback",
+            params={"state": state, "code": "the-code"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code in (302, 303, 200)
+
+    inserted = [c for c in repository.calls if c[0] == "insert_installation"]
+
+    assert [c[2] for c in inserted] == [4242], (
+        "the installation the grant named should be the one claimed"
+    )
+
+    confirmed = [c for c in repository.calls if c[0] == "confirm_installation"]
+
+    assert [c[1] for c in confirmed] == [4242], "and it should be confirmed"
+    assert ownership.calls == 1, "the single-use code must be spent exactly once"
+
+
+async def test_no_installation_and_no_grant_says_nothing_was_installed():
+    ownership = FakeOwnership([])
+
+    async with build_client(build_services_for(ownership=ownership)) as client:
+        state = state_from(await start_install(client, return_to=ALLOWED_RETURN))
+        response = await client.get(
+            "/github/callback",
+            params={"state": state, "code": "the-code"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 400
+    assert "not completed an installation" in response.text
+
+
+async def test_several_installations_refuses_rather_than_guessing():
+    """Picking one would attach a workspace to an installation nobody chose."""
+    ownership = FakeOwnership([1, 2])
+
+    async with build_client(build_services_for(ownership=ownership)) as client:
+        state = state_from(await start_install(client, return_to=ALLOWED_RETURN))
+        response = await client.get(
+            "/github/callback",
+            params={"state": state, "code": "the-code"},
+            follow_redirects=False,
+        )
+
+    assert response.status_code == 400
+    assert "more than one installation" in response.text
+
+
+async def test_an_id_the_grant_does_not_list_is_claimed_but_never_confirmed():
+    """The cross-tenant guess, which must stay PENDING."""
+    repository = FakeGithubRepository()
+    ownership = FakeOwnership([4242])
+
+    async with build_client(
+        build_services_for(repository=repository, ownership=ownership)
+    ) as client:
+        state = state_from(await start_install(client, return_to=ALLOWED_RETURN))
+        await client.get(
+            "/github/callback",
+            params={"state": state, "installation_id": 9999, "code": "the-code"},
+            follow_redirects=False,
+        )
+
+    confirmed = [c for c in repository.calls if c[0] == "confirm_installation"]
+
+    assert confirmed == [], "an unlisted installation must not be confirmed"

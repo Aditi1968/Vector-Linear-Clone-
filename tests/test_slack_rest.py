@@ -37,10 +37,10 @@ from app.domain.slack import (
 )
 from app.domain.tenancy import AuthorizedWorkspaceScope
 from app.rest.slack import (
-    ALLOWED_RETURN_PATHS,
-    DEFAULT_RETURN_PATH,
+    DEFAULT_RETURN_TEMPLATE,
     MAX_TIMESTAMP_AGE_SECONDS,
     OAUTH_STATE_COOKIE_NAME,
+    RETURN_PATH_TEMPLATES,
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
     SlackRequestServices,
@@ -429,8 +429,8 @@ async def test_a_return_path_outside_the_allowlist_never_reaches_the_cookie(
     pending = _parse_state_cookie(cookie)
 
     assert pending is not None
-    assert pending.return_path == DEFAULT_RETURN_PATH
-    assert pending.return_path in ALLOWED_RETURN_PATHS
+    assert pending.return_path == DEFAULT_RETURN_TEMPLATE
+    assert pending.return_path in RETURN_PATH_TEMPLATES
 
 
 # --- OAuth callback: state validation ----------------------------------
@@ -457,7 +457,9 @@ async def test_a_matching_state_completes_the_flow():
         )
 
     assert response.status_code == 303
-    assert response.headers["location"] == DEFAULT_RETURN_PATH
+    assert response.headers["location"] == DEFAULT_RETURN_TEMPLATE.format(
+        slug=WORKSPACE_SLUG
+    )
     assert exchange.codes == ["auth-code"]
     assert slack.connects and slack.connects[0].slack_team_id == SLACK_TEAM_ID
 
@@ -584,7 +586,9 @@ async def test_a_declined_installation_returns_the_admin_to_the_product():
         )
 
     assert response.status_code == 303
-    assert response.headers["location"] == DEFAULT_RETURN_PATH
+    assert response.headers["location"] == DEFAULT_RETURN_TEMPLATE.format(
+        slug=WORKSPACE_SLUG
+    )
     assert slack.connects == []
 
 
