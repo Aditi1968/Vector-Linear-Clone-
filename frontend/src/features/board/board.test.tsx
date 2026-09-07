@@ -21,7 +21,7 @@ import type { IssueRowFields, IssueValidationError } from '../issues/api'
 /**
  * The board, against the real router, the real cache and a controlled network.
  *
- * The four claims worth a test here, chosen because each fails silently:
+ * The five claims worth a test here, chosen because each fails silently:
  *
  *   1. **Columns are the team's own workflow states, in `position` order.**
  *      The fixture's team calls them Icebox, Building and Shipped and returns
@@ -36,6 +36,11 @@ import type { IssueRowFields, IssueValidationError } from '../issues/api'
  *      would notice.
  *   4. **The view is in the URL, in both directions.** See ./lib/viewState.test.ts
  *      for the parsing; this is the half that proves the screen is wired to it.
+ *   5. **The view reaches the server, and a filter nobody set is absent from
+ *      the request.** Filtering and ordering are arguments now, so the request
+ *      is where the view either works or quietly asks for something else --
+ *      `assigneeId: null` is the unassigned issues, not all of them.
+ *      ./lib/viewState.test.ts pins the mapping; this pins the wiring.
  *
  * There is deliberately no test that each card renders each of its fields.
  */
@@ -117,7 +122,16 @@ const BRAVO = issueRow(2, {
 })
 const CHARLIE = issueRow(3, { title: 'Charlie', workflowStateId: ICEBOX, priority: 0 })
 
-const CARDS: readonly IssueRowFields[] = [ALPHA, BRAVO, CHARLIE]
+/**
+ * One page, in the order the server would return it.
+ *
+ * The default sort is priority, which the server orders by
+ * `NULLIF(priority, 0)` ascending: Bravo (1), Alpha (3), then Charlie (0 --
+ * untriaged, and so last). Written in that order because nothing re-sorts it
+ * here any more: the board groups these into columns and keeps the order they
+ * arrived in.
+ */
+const CARDS: readonly IssueRowFields[] = [BRAVO, ALPHA, CHARLIE]
 
 /** A successful `BoardIssueMove`: the card, echoed back with its new state. */
 function moved(issue: IssueRowFields): BoardIssueMoveMutation {
@@ -148,8 +162,13 @@ interface OpenBoardOptions {
  * The board, with the workspace lookups and the first page answered.
  *
  * The context is answered first because the board cannot ask for issues until
- * it has a team: `issues(teamId:)` takes a `UUID!`, so `useBoardIssues` skips
- * the query rather than sending a placeholder.
+ * it has a team: the filter carries a `UUID!`, so `useBoardIssues` skips the
+ * query rather than sending a placeholder.
+ *
+ * `BoardLabels` and `TeamCycles` -- the two picker sources the workspace
+ * context does not already hold -- are deliberately left unanswered. No test
+ * here is about the pickers' options, and leaving them pending keeps "how many
+ * requests were sent" a question about the board's own query.
  */
 async function openBoard({ search = '', issues = CARDS }: OpenBoardOptions = {}) {
   const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/board${search}` })
@@ -199,20 +218,82 @@ describe('board columns', () => {
     expect(screen.queryByText('Done')).toBeNull()
   })
 
-  it('puts each card in its state’s column and counts only what is loaded', async () => {
+  it('puts each card in its state’s column and states a count it can stand behind', async () => {
     await openBoard()
 
     expect(cards('Icebox')).toEqual(['Alpha', 'Charlie'])
     expect(cards('Building')).toEqual(['Bravo'])
     expect(cards('Shipped')).toEqual([])
 
-    // "loaded", never a bare number: the query has no aggregate, so a count
-    // that read as a total would be a claim the API cannot support.
-    expect(column('Icebox')).toHaveTextContent('2 loaded')
-    expect(column('Shipped')).toHaveTextContent('0 loaded')
+    // Every matching issue is loaded, so the count is what it looks like and
+    // an empty column is empty rather than possibly-empty. Neither sentence
+    // hedges, because neither has anything left to hedge about.
+    expect(column('Icebox')).toHaveTextContent('2')
+    expect(column('Icebox')).not.toHaveTextContent('loaded')
+    expect(column('Shipped')).toHaveTextContent('Nothing here.')
+    expect(main()).not.toHaveTextContent('There may be more on later pages')
+  })
 
-    // And an empty column says which of the two reasons it is empty for.
+  it('qualifies the counts, and only then, while a page is outstanding', async () => {
+    const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/board` })
+
+    await view.link.resolve('IssueWorkspaceContext', { data: boardContext() })
+    await view.link.resolve('BoardIssues', {
+      data: issueListData(CARDS, { hasNextPage: true, endCursor: 'c1', totalCount: 9 }),
+    })
+
+    // Filtering on the server does not make a keyset-paginated list complete,
+    // so this is the caveat that survives -- written around `totalCount`,
+    // which is a fact rather than a count of what happened to be fetched.
+    expect(main()).toHaveTextContent('Showing 3 of 9 issues')
+    expect(column('Icebox')).toHaveTextContent('2 loaded')
     expect(column('Shipped')).toHaveTextContent('There may be more on later pages')
+  })
+})
+
+describe('what the board asks the server for', () => {
+  it('sends the team, and no filter for a control nobody touched', async () => {
+    const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/board` })
+
+    await view.link.resolve('IssueWorkspaceContext', { data: boardContext() })
+
+    // The whole variables object, because the claim is about what is NOT in
+    // it: an `assigneeId: null` here would ask for the unassigned issues, and
+    // the board would render a plausible answer to a question nobody asked.
+    await expect(view.link.waitForRequest('BoardIssues')).resolves.toEqual({
+      workspaceSlug: WORKSPACE_SLUG,
+      filter: { teamId: TEAM_ID },
+      orderBy: { field: 'PRIORITY', direction: 'ASC' },
+      after: null,
+    })
+  })
+
+  it('sends the filters and the sort the address arrived with', async () => {
+    const view = renderApp({
+      initialPath: `/${WORKSPACE_SLUG}/board?assignee=none&priority=1&sort=due`,
+    })
+
+    await view.link.resolve('IssueWorkspaceContext', { data: boardContext() })
+
+    // "Unassigned" is the one filter value that IS a null, and the only one.
+    await expect(view.link.waitForRequest('BoardIssues')).resolves.toEqual({
+      workspaceSlug: WORKSPACE_SLUG,
+      filter: { teamId: TEAM_ID, assigneeId: null, priority: 1 },
+      orderBy: { field: 'DUE_DATE', direction: 'ASC' },
+      after: null,
+    })
+  })
+
+  it('asks again when a filter changes, rather than sifting what it has', async () => {
+    const { link, user } = await openBoard()
+
+    expect(link.countOf('BoardIssues')).toBe(1)
+
+    await user.selectOptions(screen.getByLabelText('Priority'), '1')
+
+    await expect(link.waitForRequest('BoardIssues')).resolves.toMatchObject({
+      filter: { teamId: TEAM_ID, priority: 1 },
+    })
   })
 })
 
@@ -318,22 +399,14 @@ describe('moving a card', () => {
 })
 
 describe('the view in the URL', () => {
-  it('applies the filters, sort and grouping the address arrived with', async () => {
-    const { link } = await openBoard({ search: '?team=ENG&group=priority&priority=1' })
+  it('groups what the address asked for, over what the server sent back', async () => {
+    // The server answered the priority filter, so the page is Bravo alone.
+    // Grouping is the half of the view that is still this screen's job.
+    await openBoard({ search: '?team=ENG&group=priority&priority=1', issues: [BRAVO] })
 
-    // Grouped by priority, so the columns are the five priorities and not the
-    // team's states -- and filtered to one, so only Bravo survives.
     expect(columnNames()).toEqual(['Urgent', 'High', 'Medium', 'Low', 'No priority'])
     expect(cards('Urgent')).toEqual(['Bravo'])
     expect(cards('Medium')).toEqual([])
-
-    // The filter is applied here, not asked for: the request carries the team
-    // and the page size, and nothing else.
-    expect(link.operationsNamed('BoardIssues')[0]?.variables).toEqual({
-      workspaceSlug: WORKSPACE_SLUG,
-      teamId: TEAM_ID,
-      after: null,
-    })
 
     // And the controls show what the URL said, so the view is editable from
     // where it landed rather than only from the default.
@@ -342,7 +415,7 @@ describe('the view in the URL', () => {
   })
 
   it('writes a control change back into the address', async () => {
-    const { currentSearch, user } = await openBoard()
+    const { currentSearch, link, user } = await openBoard()
 
     await user.selectOptions(screen.getByLabelText('Group by'), 'assignee')
 
@@ -354,17 +427,32 @@ describe('the view in the URL', () => {
     expect(columnNames()).toEqual(['Ada Lovelace', 'Unassigned'])
     expect(cards('Ada Lovelace')).toEqual(['Bravo'])
 
+    // Grouping is not a server argument and must not become a request: every
+    // grouping of a board is the same cards in different columns.
+    expect(link.countOf('BoardIssues')).toBe(1)
+
     // Sorting is a separate parameter, and the default is omitted from the
     // URL rather than written out.
     expect(currentSearch()).not.toContain('sort=')
   })
 
-  it('drops a filter from the address when it is cleared', async () => {
-    const { currentSearch, user } = await openBoard({ search: '?priority=1' })
+  it('drops a filter from the address when it is cleared, and asks again without it', async () => {
+    const { currentSearch, link, user } = await openBoard({
+      search: '?priority=1',
+      issues: [BRAVO],
+    })
 
     await user.click(screen.getByRole('button', { name: 'Clear filters' }))
 
     expect(currentSearch()).not.toContain('priority')
+
+    // A different filter is a different list, so the unfiltered board is a
+    // fresh request rather than a re-render of what was already loaded.
+    await expect(link.waitForRequest('BoardIssues')).resolves.toMatchObject({
+      filter: { teamId: TEAM_ID },
+    })
+    await link.resolve('BoardIssues', { data: issueListData(CARDS) })
+
     expect(cards('Icebox')).toEqual(['Alpha', 'Charlie'])
   })
 })

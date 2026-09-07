@@ -11,13 +11,13 @@
  * costs this module and buys all of that -- and it is the reason the round
  * trip through here is the most heavily tested thing in the feature.
  *
- * ## Nothing here is a server argument
+ * ## Almost everything here is a server argument
  *
- * `issues(workspaceSlug:, teamId:, first:, after:)` is the whole contract. It
- * has no status, assignee, label, priority, project or cycle filter, no sort
- * and no grouping. Every value below is applied in the browser to the pages
- * already loaded, which is a real limitation and is stated on screen rather
- * than hidden behind controls that look like they reach the database.
+ * `toIssueFilter` and `toIssueOrder` at the foot of this file translate a
+ * view into `IssueFilterInput` and `IssueOrderInput`, which is where the
+ * board's filters and sorting are applied. Only `group` stays in the browser:
+ * there is no grouping argument, and there should not be -- a grouped board
+ * needs every matching issue anyway, whichever column each lands in.
  *
  * ## Every value is validated on the way in
  *
@@ -32,6 +32,11 @@
 
 import { statusCategoryFrom } from '../../../components'
 import type { StatusCategory } from '../../../components'
+import type {
+  IssueFilterInput,
+  IssueOrderInput,
+  WorkflowStateCategory,
+} from '../../issues/api'
 import { PRIORITY_VALUES } from '../../issues/lib/priority'
 
 /** What the columns are. */
@@ -221,5 +226,91 @@ export function clearFilters(view: BoardView): BoardView {
     priority: null,
     project: null,
     cycle: null,
+  }
+}
+
+/** This build's lowercase category, as the schema spells it. */
+const STATE_CATEGORY: Record<StatusCategory, WorkflowStateCategory> = {
+  backlog: 'BACKLOG',
+  unstarted: 'UNSTARTED',
+  started: 'STARTED',
+  completed: 'COMPLETED',
+  canceled: 'CANCELED',
+}
+
+/**
+ * A view, as the filter the server takes.
+ *
+ * ## The one rule this function exists to keep
+ *
+ * A filter that is not being applied must be an ABSENT KEY, never a null.
+ * `IssueFilterInput` spends null on a *meaning* for the three nullable
+ * columns: `assigneeId: null` is the unassigned issues, `projectId: null` the
+ * unfiled ones, `cycleId: null` the backlog. So the object is built by adding
+ * keys rather than by declaring them all and filling some in, and the board's
+ * `NONE` sentinel -- which is exactly how a user asks for "the ones with
+ * none" -- is the only thing that puts a null in.
+ *
+ * The failure this prevents is silent: `{ assigneeId: view.assignee }` with
+ * no assignee filter is a valid request that returns a plausible board of the
+ * wrong issues.
+ *
+ * `teamId` is always present. A board is one team's workflow states, so
+ * another team's issues would arrive carrying a `workflowStateId` that
+ * matches no column on screen and would simply vanish.
+ */
+export function toIssueFilter(view: BoardView, teamId: string): IssueFilterInput {
+  const filter: IssueFilterInput = { teamId }
+
+  if (view.status !== null) {
+    filter.stateCategory = STATE_CATEGORY[view.status]
+  }
+
+  if (view.assignee !== null) {
+    filter.assigneeId = view.assignee === NONE ? null : view.assignee
+  }
+
+  if (view.label !== null) {
+    filter.labelId = view.label
+  }
+
+  if (view.priority !== null) {
+    filter.priority = view.priority
+  }
+
+  if (view.project !== null) {
+    filter.projectId = view.project === NONE ? null : view.project
+  }
+
+  if (view.cycle !== null) {
+    filter.cycleId = view.cycle === NONE ? null : view.cycle
+  }
+
+  return filter
+}
+
+/**
+ * A view, as the ordering the server takes.
+ *
+ * The directions are the ones each field is worth reading in, and they agree
+ * with what the server does at the null end (`app/repositories/issues.py`:
+ * ascending is NULLS LAST). Priority ascending is urgent first with the
+ * untriaged work at the end, because the server sorts on
+ * `NULLIF(priority, 0)` rather than on the column -- 0 means "no priority",
+ * not "the lowest one". Due ascending is soonest first, with the undated
+ * issues after every dated one: an issue with no due date is not due at the
+ * end of time, it is simply not an answer to "what is due next".
+ */
+export function toIssueOrder(view: BoardView): IssueOrderInput {
+  switch (view.sort) {
+    case 'priority':
+      return { field: 'PRIORITY', direction: 'ASC' }
+    case 'created':
+      return { field: 'CREATED_AT', direction: 'DESC' }
+    case 'due':
+      return { field: 'DUE_DATE', direction: 'ASC' }
+    case 'updated':
+    default:
+      return { field: 'UPDATED_AT', direction: 'DESC' }
   }
 }

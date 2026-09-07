@@ -1,5 +1,5 @@
 /**
- * The two documents the board sends.
+ * The three documents the board sends.
  *
  * Written in ./operations.graphql and compiled by `npm run graphql:codegen`.
  * This module is the seam between the generated output and the feature, so
@@ -11,4 +11,5 @@
 export {
   BoardIssueMoveDocument,
   BoardIssuesDocument,
+  BoardLabelsDocument,
 } from '../../../generated/operations'

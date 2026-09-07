@@ -3,7 +3,7 @@ import { NetworkStatus } from '@apollo/client'
 import { useQuery } from '@apollo/client/react'
 
 import { useWorkspaceSlug } from '../../../app/routes'
-import type { IssueRowFields } from '../../issues/api'
+import type { IssueFilterInput, IssueOrderInput, IssueRowFields } from '../../issues/api'
 import { describeError } from '../lib/errors'
 import { BoardIssuesDocument } from './documents'
 
@@ -13,7 +13,9 @@ const NO_ISSUES: readonly IssueRowFields[] = []
 export interface UseBoardIssuesResult {
   /** Every card loaded so far. Accumulated by the cache's field policy, not here. */
   issues: readonly IssueRowFields[]
-  /** Whether the team has more issues than have been paged in. */
+  /** How many issues match the filter, paging ignored. */
+  totalCount: number
+  /** Whether more issues match than have been paged in. */
   hasNextPage: boolean
   isLoadingFirstPage: boolean
   isLoadingMore: boolean
@@ -26,24 +28,33 @@ export interface UseBoardIssuesResult {
 }
 
 /**
- * One team's issues, by cursor.
+ * The issues a board's filter and ordering select, by cursor.
  *
  * Deliberately close to `features/issues/api/useIssueList.ts` and not a
- * generalisation of it: the two differ in exactly one argument (`teamId`) and
- * the shared machinery -- page accumulation, the `after: null` reset, the
- * dedupe -- already lives in one place, the cache's field policy in
- * `src/lib/graphql/cache.ts`. Nothing here concatenates pages, and a hook that
- * did would double every card the moment a second page arrived.
+ * generalisation of it: the shared machinery -- page accumulation, the
+ * `after: null` reset, the dedupe -- already lives in one place, the cache's
+ * field policy in `src/lib/graphql/cache.ts`. Nothing here concatenates
+ * pages, and a hook that did would double every card the moment a second page
+ * arrived.
  *
- * ## The team may not be known yet
+ * ## The filter may not be known yet
  *
- * `teamId` is `UUID!`, so there is no "all teams" value to send. Until the
- * workspace context has answered with the teams there is no question to ask,
- * and the query is skipped rather than sent with a placeholder -- an empty
- * string coerced into a `UUID!` is a top-level GraphQL error, which would
- * report "still loading" to the user as "something went wrong".
+ * It carries the team, and `teamId` has no "all teams" value to send. Until
+ * the workspace context has answered there is no question to ask, so the
+ * query is skipped rather than sent with a placeholder -- an empty string
+ * coerced into a `UUID!` is a top-level GraphQL error, which would report
+ * "still loading" as "something went wrong".
+ *
+ * ## The filter and ordering must be stable values
+ *
+ * They are query variables, so a fresh object every render is a fresh set of
+ * variables every render. The screen memoises them on the view it parsed from
+ * the URL.
  */
-export function useBoardIssues(teamId: string | undefined): UseBoardIssuesResult {
+export function useBoardIssues(
+  filter: IssueFilterInput | undefined,
+  orderBy: IssueOrderInput,
+): UseBoardIssuesResult {
   const workspaceSlug = useWorkspaceSlug()
   const [loadMoreErrorMessage, setLoadMoreErrorMessage] = useState<string | null>(null)
 
@@ -63,8 +74,8 @@ export function useBoardIssues(teamId: string | undefined): UseBoardIssuesResult
     {
       // `after: null` rather than omitted: the merge policy reads `args.after`
       // to decide whether a result starts the list or extends it.
-      variables: { workspaceSlug, teamId: teamId ?? '', after: null },
-      skip: teamId === undefined,
+      variables: { workspaceSlug, filter: filter ?? {}, orderBy, after: null },
+      skip: filter === undefined,
       notifyOnNetworkStatusChange: true,
     },
   )
@@ -112,6 +123,7 @@ export function useBoardIssues(teamId: string | undefined): UseBoardIssuesResult
 
   return {
     issues,
+    totalCount: connection?.totalCount ?? 0,
     hasNextPage,
     isLoadingFirstPage: networkStatus === NetworkStatus.loading,
     isLoadingMore: networkStatus === NetworkStatus.fetchMore,

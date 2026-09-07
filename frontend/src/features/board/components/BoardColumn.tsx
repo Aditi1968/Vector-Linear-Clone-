@@ -22,6 +22,8 @@ export interface BoardColumnProps {
   onDrop: (issueId: string, workflowStateId: string) => void
   /** The id of the card whose move is in flight, if any. */
   movingId: string | null
+  /** Whether matching issues exist on a page the board has not loaded. */
+  isPartial: boolean
 }
 
 /**
@@ -32,13 +34,12 @@ export interface BoardColumnProps {
  * without seeing it. The cards are a real `<ul>`, so the count is announced
  * and the whole column can be skipped.
  *
- * ## The count says "loaded", every time
+ * ## The count says "loaded" only while it has to
  *
- * Not decoration and not hedging. `issues(workspaceSlug:, teamId:, first:,
- * after:)` has no filter and no aggregate, so the only number this screen can
- * honestly show is how many of the cards it has fetched are in this column.
  * A bare "12" beside a heading reads as "there are twelve", and on a board
- * whose second page has not loaded that is false.
+ * whose second page has not arrived that is false -- so while `isPartial` the
+ * number is qualified. Once every matching issue is loaded it is a plain
+ * count of what is in the column, which is exactly what it claims to be.
  *
  * ## Dropping
  *
@@ -59,6 +60,7 @@ export function BoardColumn({
   onDragEnd,
   onDrop,
   movingId,
+  isPartial,
 }: BoardColumnProps) {
   const headingId = useId()
   const state = column.state
@@ -109,16 +111,19 @@ export function BoardColumn({
         <span className={styles.columnName} id={headingId}>
           {column.name}
         </span>
-        <span className={styles.columnCount}>{count} loaded</span>
+        <span className={styles.columnCount}>
+          {count}
+          {isPartial ? ' loaded' : ''}
+        </span>
       </h2>
 
       {count === 0 ? (
         /* Not an error and not an empty state illustration -- a column with
-         * nothing in it is the ordinary condition of half of every board. The
-         * sentence says which of the two reasons it might be, because from
-         * inside the browser they are indistinguishable. */
+         * nothing in it is the ordinary condition of half of every board. */
         <p className={styles.columnEmpty}>
-          No loaded issues here. There may be more on later pages.
+          {isPartial
+            ? 'Nothing here yet. There may be more on later pages.'
+            : 'Nothing here.'}
         </p>
       ) : (
         <ul aria-label={column.name} className={styles.cards} role="list">

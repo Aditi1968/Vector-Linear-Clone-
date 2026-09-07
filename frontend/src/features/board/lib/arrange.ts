@@ -1,21 +1,32 @@
 /**
- * Filtering, sorting and grouping, over the cards that have been loaded.
+ * Grouping, over the cards the server sent.
  *
  * Pure functions on plain data: no hooks, no Apollo, no React. That is what
  * makes the board's one genuinely fiddly piece testable without rendering
- * anything, and it is why the screen above reads as a sequence of three calls.
+ * anything.
  *
- * ## "Among those loaded" is not a disclaimer, it is the contract
+ * ## Why grouping is the only thing left here
  *
- * The `issues` query takes a team and a cursor and nothing else. Everything
- * here therefore describes the pages already in the cache, and a column can be
- * empty because the matching issues have not been paged in yet -- not because
- * there are none. Every count this module produces is a count of loaded cards,
- * the screen says so in words, and nothing here is named `total`.
+ * Filtering and ordering are `IssueFilterInput` and `IssueOrderInput` now
+ * (../lib/viewState.ts translates the view into both), so the cards arrive
+ * already narrowed and already in order and this module neither re-filters
+ * nor re-sorts them. Grouping stays because there is no grouping argument --
+ * correctly: a grouped board needs every matching issue anyway, whichever
+ * column each lands in, so a server that grouped would return the same rows
+ * in a different envelope.
+ *
+ * The cards are still one *page* of the matching issues. That is the screen's
+ * sentence to write, not this module's, and nothing here is named `total`.
  */
 
-import { statusCategoryFrom } from '../../../components'
-import type { IssueRowFields, WorkflowState, WorkspaceMember } from '../../issues/api'
+import type { BoardLabel } from '../api'
+import type {
+  IssueRowFields,
+  TeamCycle,
+  WorkflowState,
+  WorkspaceMember,
+  WorkspaceProject,
+} from '../../issues/api'
 import { memberLabel } from '../../issues/api'
 import { describePriority } from '../../issues/lib/priority'
 import { NONE } from './viewState'
@@ -52,138 +63,16 @@ export interface BoardContext {
 }
 
 /**
- * Whether one card survives the filters.
- *
- * `states` resolves an issue's `workflowStateId` for the status filter, which
- * is a filter on the state's *category* rather than on the state: a team may
- * call its started state anything, and "show me what is in progress" is a
- * question about meaning. A card whose state is not among the team's -- which
- * would mean the issue moved teams underneath us -- fails a status filter
- * rather than passing one it was never checked against.
- */
-export function matchesView(
-  issue: IssueRowFields,
-  view: BoardView,
-  states: readonly WorkflowState[],
-): boolean {
-  if (view.status !== null) {
-    const state = states.find((candidate) => candidate.id === issue.workflowStateId)
-
-    if (state === undefined || statusCategoryFrom(state.category) !== view.status) {
-      return false
-    }
-  }
-
-  if (view.assignee !== null) {
-    const matches =
-      view.assignee === NONE
-        ? issue.assigneeId === null
-        : issue.assigneeId === view.assignee
-
-    if (!matches) {
-      return false
-    }
-  }
-
-  if (view.label !== null && !issue.labels.some((label) => label.id === view.label)) {
-    return false
-  }
-
-  if (view.priority !== null && issue.priority !== view.priority) {
-    return false
-  }
-
-  if (view.project !== null) {
-    const matches =
-      view.project === NONE
-        ? issue.project === null
-        : issue.project?.id === view.project
-
-    if (!matches) {
-      return false
-    }
-  }
-
-  if (view.cycle !== null) {
-    const matches =
-      view.cycle === NONE ? issue.cycle === null : issue.cycle?.id === view.cycle
-
-    if (!matches) {
-      return false
-    }
-  }
-
-  return true
-}
-
-/**
- * Priority as a sortable rank.
+ * Priority as a sortable rank, for laying the priority columns out.
  *
  * The wire values do not sort: 0 is "no priority" and 1..4 run from most to
  * least urgent (see `features/issues/lib/priority.ts`, which owns that
- * convention). Sorting on the integer would put the unprioritised work at the
- * top of every column. 0 becomes 5, which is the whole trick.
+ * convention). Ordering columns by the integer would put the unprioritised
+ * column first. 0 becomes 5, which is the whole trick -- and it is the same
+ * rule the server sorts *cards* by, where it is spelled `NULLIF(priority, 0)`.
  */
 function priorityRank(priority: number): number {
   return priority === 0 ? 5 : priority
-}
-
-/** Newest first, and a value that will not parse sorts last rather than first. */
-function byTimestampDesc(left: string, right: string): number {
-  return right.localeCompare(left)
-}
-
-/**
- * Order the cards in a column.
- *
- * Returns a new array: the input comes from Apollo, which freezes its results,
- * and `Array.prototype.sort` mutates in place.
- *
- * Every comparator falls back to `updatedAt` newest-first, so cards that tie
- * -- three unprioritised issues, two with no due date -- still come out in a
- * stable, meaningful order rather than in cursor order.
- */
-export function sortIssues(
-  issues: readonly IssueRowFields[],
-  sort: BoardView['sort'],
-): IssueRowFields[] {
-  const sorted = [...issues]
-
-  sorted.sort((left, right) => {
-    switch (sort) {
-      case 'priority': {
-        const difference = priorityRank(left.priority) - priorityRank(right.priority)
-
-        return difference === 0
-          ? byTimestampDesc(left.updatedAt, right.updatedAt)
-          : difference
-      }
-
-      case 'created':
-        return byTimestampDesc(left.createdAt, right.createdAt)
-
-      case 'due': {
-        // Soonest first, and a card with no due date sorts after every card
-        // that has one -- an undated issue is not "due at the end of time",
-        // it is simply not in the answer to "what is due next".
-        if (left.dueDate === null || right.dueDate === null) {
-          return left.dueDate === right.dueDate
-            ? byTimestampDesc(left.updatedAt, right.updatedAt)
-            : left.dueDate === null
-              ? 1
-              : -1
-        }
-
-        return left.dueDate.localeCompare(right.dueDate)
-      }
-
-      case 'updated':
-      default:
-        return byTimestampDesc(left.updatedAt, right.updatedAt)
-    }
-  })
-
-  return sorted
 }
 
 /** Cards into columns, keyed by whatever the grouping is. */
@@ -208,7 +97,13 @@ function bucket(
 }
 
 /**
- * The board's columns, filtered, grouped and sorted.
+ * The board's columns.
+ *
+ * The cards arrive filtered and ordered from the server, so this only decides
+ * which column each belongs in. Order *within* a column is the order the
+ * cards came in, preserved by the bucketing rather than recomputed: the
+ * server's ordering is total (it ends in the issue's id), so re-sorting here
+ * could only disagree with it.
  *
  * ## Status columns come from the team, every other grouping from the cards
  *
@@ -218,21 +113,18 @@ function bucket(
  * not a board at all. Nothing here invents a Todo/Doing/Done: if a team calls
  * its states "Icebox" and "Shipped", those are the columns.
  *
- * Every other grouping derives its columns from the cards that survived the
- * filters, because the alternatives are worse: a column per workspace member
- * is forty empty columns in a real workspace, and a column per project is
- * every project the workspace has ever had.
+ * Every other grouping derives its columns from the cards, because the
+ * alternatives are worse: a column per workspace member is forty empty
+ * columns in a real workspace, and a column per project is every project the
+ * workspace has ever had.
  */
 export function buildColumns(
   issues: readonly IssueRowFields[],
   view: BoardView,
   { states, memberById }: BoardContext,
 ): BoardColumn[] {
-  const visible = issues.filter((issue) => matchesView(issue, view, states))
-  const order = (grouped: readonly IssueRowFields[]) => sortIssues(grouped, view.sort)
-
   if (view.group === 'status') {
-    const byState = bucket(visible, (issue) => issue.workflowStateId)
+    const byState = bucket(issues, (issue) => issue.workflowStateId)
 
     // Copied before sorting: this array is Apollo's, and `sort` mutates.
     // `position` is the team's own ordering of its board and is what the
@@ -244,12 +136,12 @@ export function buildColumns(
         id: state.id,
         name: state.name,
         state,
-        issues: order(byState.get(state.id) ?? []),
+        issues: byState.get(state.id) ?? [],
       }))
   }
 
   if (view.group === 'assignee') {
-    const byAssignee = bucket(visible, (issue) => issue.assigneeId ?? NONE)
+    const byAssignee = bucket(issues, (issue) => issue.assigneeId ?? NONE)
 
     return [...byAssignee.entries()]
       .map(([assigneeId, grouped]) => {
@@ -265,14 +157,14 @@ export function buildColumns(
                 // name, so the column says what it can.
                 (member === undefined ? 'Unknown member' : memberLabel(member)),
           state: null,
-          issues: order(grouped),
+          issues: grouped,
         }
       })
       .sort(unassignedLast)
   }
 
   if (view.group === 'priority') {
-    const byPriority = bucket(visible, (issue) => String(issue.priority))
+    const byPriority = bucket(issues, (issue) => String(issue.priority))
 
     // Every priority, not only the ones present: unlike people and projects,
     // there are exactly five and they are a scale. A gap in a scale is
@@ -286,19 +178,19 @@ export function buildColumns(
           id: String(priority),
           name: name ?? `Priority ${String(priority)}`,
           state: null,
-          issues: order(byPriority.get(String(priority)) ?? []),
+          issues: byPriority.get(String(priority)) ?? [],
         }
       })
   }
 
-  const byProject = bucket(visible, (issue) => issue.project?.id ?? NONE)
+  const byProject = bucket(issues, (issue) => issue.project?.id ?? NONE)
 
   return [...byProject.entries()]
     .map(([projectId, grouped]) => ({
       id: projectId,
       name: projectId === NONE ? NO_PROJECT : (grouped[0]?.project?.name ?? NO_PROJECT),
       state: null,
-      issues: order(grouped),
+      issues: grouped,
     }))
     .sort(unassignedLast)
 }
@@ -331,80 +223,61 @@ export interface BoardFilterOptions {
   cycles: readonly FilterOption[]
 }
 
-/** Collect distinct `{id, name}` pairs, in name order, with `NONE` last. */
-function options(entries: readonly FilterOption[], hasNone: boolean, noneName: string) {
-  const byId = new Map(entries.map((entry) => [entry.id, entry]))
-  const sorted = [...byId.values()].sort((left, right) =>
-    left.name.localeCompare(right.name),
-  )
+/** In name order, with the "has none" option -- when there is one -- last. */
+function options(entries: readonly FilterOption[], noneName?: string) {
+  const sorted = [...entries].sort((left, right) => left.name.localeCompare(right.name))
 
-  return hasNone ? [...sorted, { id: NONE, name: noneName }] : sorted
+  return noneName === undefined ? sorted : [...sorted, { id: NONE, name: noneName }]
+}
+
+/** What the four pickers are built from. */
+export interface BoardFilterSources {
+  members: readonly WorkspaceMember[]
+  projects: readonly WorkspaceProject[]
+  labels: readonly BoardLabel[]
+  /** The selected team's cycles: a cycle belongs to a team, so a board has a set. */
+  cycles: readonly TeamCycle[]
 }
 
 /**
  * What the filter pickers offer.
  *
- * Derived from the loaded cards rather than from the workspace, and that is a
- * deliberate rule applied to all four: every option a picker offers can match
- * something currently on the board. `labels(workspaceSlug:)` and
- * `projects(workspaceSlug:)` exist and would give the complete sets -- at the
- * cost of two more requests and of pickers full of options that select
- * nothing, since the filtering happens over loaded pages either way. There is
- * no workspace-wide cycle query at all, so a cycle picker could not be
- * complete even in principle.
+ * The workspace's own lists, not the loaded cards'. It was the other way
+ * around while the filtering happened in the browser, on the argument that an
+ * option matching nothing on the board was noise. Server-side filtering
+ * inverts that argument: once a filter is applied the loaded cards are only
+ * the ones that match it, so a picker built from them would offer the option
+ * already selected and nothing else -- a control that cannot be changed
+ * without first being cleared.
  *
- * Computed from ALL loaded cards, never from the filtered ones: pickers that
- * emptied each other as filters were applied would make a second filter
- * impossible to reach.
+ * The "has none" option is offered unconditionally by the three filters that
+ * have one, because it is a question the server can always answer -- an
+ * explicit null on a nullable column -- rather than a value that has to be
+ * present among the cards before it can be asked for.
  */
-export function filterOptions(
-  issues: readonly IssueRowFields[],
-  memberById: ReadonlyMap<string, WorkspaceMember>,
-): BoardFilterOptions {
-  const assignees: FilterOption[] = []
-  const labels: FilterOption[] = []
-  const projects: FilterOption[] = []
-  const cycles: FilterOption[] = []
-  let hasUnassigned = false
-  let hasNoProject = false
-  let hasNoCycle = false
-
-  for (const issue of issues) {
-    if (issue.assigneeId === null) {
-      hasUnassigned = true
-    } else {
-      const member = memberById.get(issue.assigneeId)
-
-      if (member !== undefined) {
-        assignees.push({ id: issue.assigneeId, name: memberLabel(member) })
-      }
-    }
-
-    for (const label of issue.labels) {
-      labels.push({ id: label.id, name: label.name })
-    }
-
-    if (issue.project === null) {
-      hasNoProject = true
-    } else {
-      projects.push({ id: issue.project.id, name: issue.project.name })
-    }
-
-    if (issue.cycle === null) {
-      hasNoCycle = true
-    } else {
-      cycles.push({
-        id: issue.cycle.id,
-        // `Cycle.name` is nullable -- most cycles are known by their number.
-        name: issue.cycle.name ?? `Cycle ${String(issue.cycle.number)}`,
-      })
-    }
-  }
-
+export function filterOptions({
+  members,
+  projects,
+  labels,
+  cycles,
+}: BoardFilterSources): BoardFilterOptions {
   return {
-    assignees: options(assignees, hasUnassigned, NO_ASSIGNEE),
-    labels: options(labels, false, ''),
-    projects: options(projects, hasNoProject, NO_PROJECT),
-    cycles: options(cycles, hasNoCycle, 'No cycle'),
+    assignees: options(
+      members.map((member) => ({ id: member.userId, name: memberLabel(member) })),
+      NO_ASSIGNEE,
+    ),
+    labels: options(labels.map((label) => ({ id: label.id, name: label.name }))),
+    projects: options(
+      projects.map((project) => ({ id: project.id, name: project.name })),
+      NO_PROJECT,
+    ),
+    cycles: options(
+      cycles.map((cycle) => ({
+        id: cycle.id,
+        // `Cycle.name` is nullable -- most cycles are known by their number.
+        name: cycle.name ?? `Cycle ${String(cycle.number)}`,
+      })),
+      'No cycle',
+    ),
   }
 }

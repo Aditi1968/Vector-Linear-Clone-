@@ -20,24 +20,34 @@
 # limiter cannot read a variable at validation time and charges the field at
 # `ASSUMED_PAGE_SIZE = 100` instead of at 25.
 
-# One page of a team's issues.
+# One page of a team's issues, filtered and ordered as the board is.
 #
-# `teamId` is required here where `IssueList` omits it entirely, and that is
-# the whole reason this document exists rather than the board reusing the
-# list's. Columns are the selected team's `workflowStates`, and a workspace-
-# wide page would fill them with issues belonging to teams whose boards have
-# entirely different states -- an issue would arrive with a `workflowStateId`
-# that matches no column on screen and would simply vanish.
+# `$filter` carries the team and every filter the controls offer, and
+# `$orderBy` carries the sort. Both are whole input objects rather than one
+# variable per control, because the filter has a rule a per-argument document
+# could not keep: an absent filter must be an ABSENT KEY, since
+# `IssueFilterInput` spells "unassigned", "unfiled" and "no cycle" as explicit
+# nulls. ../lib/viewState.ts builds the object and is where that is enforced.
 #
-# The cache keys this field on `['workspaceSlug', 'teamId']`
-# (`src/lib/graphql/cache.ts`), so switching teams reads a different list
-# rather than merging two, and pages accumulate per team.
+# The team is inside the filter and is never omitted: columns are the selected
+# team's `workflowStates`, and a workspace-wide page would fill them with
+# issues whose `workflowStateId` matches no column on screen.
 #
-# Cost: 25 x (20 per node + 2 on pageInfo) = 550 of 1000.
-query BoardIssues($workspaceSlug: String!, $teamId: UUID!, $after: String) {
+# The cache keys this field on `['workspaceSlug', 'filter', 'orderBy']`
+# (`src/lib/graphql/cache.ts`), so each filtered board is its own list rather
+# than pages of one, and switching a filter cannot interleave two orderings.
+#
+# Cost: 25 x (20 per node + 2 on pageInfo + 1) = 575 of 1000.
+query BoardIssues(
+  $workspaceSlug: String!
+  $filter: IssueFilterInput!
+  $orderBy: IssueOrderInput!
+  $after: String
+) {
   issues(
     workspaceSlug: $workspaceSlug
-    filter: { teamId: $teamId }
+    filter: $filter
+    orderBy: $orderBy
     first: 25
     after: $after
   ) {
@@ -47,6 +57,27 @@ query BoardIssues($workspaceSlug: String!, $teamId: UUID!, $after: String) {
     pageInfo {
       hasNextPage
       endCursor
+    }
+    totalCount
+  }
+}
+
+# Every label in the workspace, for the label picker.
+#
+# The pickers used to be built from the loaded cards, on the argument that an
+# option that matched nothing on the board was noise. Server-side filtering
+# turns that argument inside out: once a filter is applied the loaded cards
+# are only the matching ones, so a picker built from them offers the filter
+# already selected and nothing else -- a control that cannot be changed
+# without being cleared first. The other three pickers read lists the screen
+# already loads (members, projects, the team's cycles); this is the one label
+# list, and it reads the same cache entry as the issue inspector's own label
+# picker. Cost: 50 x 2 = 100 of 1000.
+query BoardLabels($workspaceSlug: String!) {
+  labels(workspaceSlug: $workspaceSlug, first: 50) {
+    nodes {
+      id
+      name
     }
   }
 }

@@ -14,7 +14,14 @@
 export { useBoardIssues } from './useBoardIssues'
 export type { UseBoardIssuesResult } from './useBoardIssues'
 
+export { useBoardLabels } from './useBoardLabels'
+export type { BoardLabel } from './useBoardLabels'
+
 export { useMoveIssue } from './useMoveIssue'
 export type { UseMoveIssueResult } from './useMoveIssue'
 
-export { BoardIssueMoveDocument, BoardIssuesDocument } from './documents'
+export {
+  BoardIssueMoveDocument,
+  BoardIssuesDocument,
+  BoardLabelsDocument,
+} from './documents'
