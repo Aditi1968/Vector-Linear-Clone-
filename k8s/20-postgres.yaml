@@ -1,0 +1,152 @@
+# PostgreSQL, IN THE CLUSTER, and for development clusters only.
+#
+# Say the limitation plainly rather than in a footnote: this is a single
+# Deployment with a single PersistentVolumeClaim and `strategy: Recreate`.
+# There is no replication, no failover, no backup, no point-in-time
+# recovery, and a node that goes away takes the database with it. It exists
+# so that `kubectl apply -f k8s/` on kind, k3d or minikube produces a stack
+# that actually answers, instead of one whose readiness probe has never once
+# passed because there was nothing to connect to.
+#
+# A production cluster does not apply this file. It runs a managed
+# PostgreSQL (the project already develops against Neon), and the only thing
+# that changes is the DATABASE_URL inside the Secret -- 30-api.yaml reads a
+# key, not a hostname, so nothing else in this directory knows the
+# difference.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-data
+  namespace: vector
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: postgres
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 2Gi
+  # No storageClassName, on purpose: the cluster's default provisioner is
+  # used. Naming one would tie the file to a particular distribution --
+  # `standard` on minikube, `local-path` on k3d, `hostpath` elsewhere -- and
+  # a PVC that names a class the cluster does not have stays Pending forever
+  # with no error anyone sees except in `describe`.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: vector
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: postgres
+spec:
+  replicas: 1
+  # Recreate, never RollingUpdate. The default rolling strategy would start
+  # the new pod before terminating the old one, and both would try to attach
+  # the same ReadWriteOnce volume: the new pod hangs in ContainerCreating
+  # until the old one dies, which is a rollout that looks stuck rather than
+  # one that failed. Two PostgreSQL processes over one data directory is the
+  # worse outcome the lock file prevents; a stuck rollout is merely
+  # confusing, and this avoids both.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vector
+        app.kubernetes.io/component: postgres
+    spec:
+      containers:
+        - name: postgres
+          # The tag tests/conftest.py pins, CI warms and docker-compose.yml
+          # runs. It is two pins in one: uuidv7() in 001_issues.sql is native
+          # to PostgreSQL 18 and rejected by 16 and 17, and the `vector`
+          # extension 025_semantic_search.sql creates is not in stock
+          # postgres:18. This image is the official postgres:18 with pgvector
+          # compiled in.
+          image: pgvector/pgvector:pg18
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              value: vector
+            - name: POSTGRES_DB
+              value: vector
+            # Referenced, never written down. `kubectl create secret generic
+            # vector-secrets --from-literal=POSTGRES_PASSWORD=... ` is what
+            # supplies it; see the README. The password in the DSN the api
+            # reads has to be the same value, which is why one Secret holds
+            # both keys.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: vector-secrets
+                  key: POSTGRES_PASSWORD
+            # /var/lib/postgresql is the mount point from 18 onwards, and
+            # PGDATA is a versioned subdirectory of it. Stated explicitly
+            # because the pre-18 spelling (/var/lib/postgresql/data) is what
+            # everyone reaches for and the 18 image refuses to start on it.
+            - name: PGDATA
+              value: /var/lib/postgresql/18/docker
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql
+          # -h 127.0.0.1 so the probe goes over TCP. The entrypoint runs the
+          # server on a unix socket first, to execute initdb scripts, and a
+          # socket-only pg_isready answers "ready" during that window -- which
+          # is precisely the window a client connecting over TCP cannot use.
+          readinessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -U, vector, -d, vector]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: [pg_isready, -h, 127.0.0.1, -U, vector, -d, vector]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 5
+            # Higher than readiness on purpose. A busy server can miss a
+            # probe; restarting a database for one slow answer turns a
+            # hiccup into an outage, so liveness only fires on a server that
+            # has been unresponsive for a minute.
+            failureThreshold: 4
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: vector
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: postgres
+spec:
+  # ClusterIP: reachable from the api pods and from nothing outside the
+  # cluster. `kubectl port-forward svc/postgres` is the deliberate way in,
+  # and is how the migrations are applied -- see the README.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

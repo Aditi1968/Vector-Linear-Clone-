@@ -1,0 +1,15 @@
+# Applied first, and the numeric filename prefix is the reason it is a file
+# of its own: `kubectl apply -f k8s/` reads a directory in lexical order, so
+# 00 is what guarantees the namespace exists before anything asks to be
+# created inside it.
+#
+# A namespace rather than `default` so that `kubectl delete namespace vector`
+# is a complete uninstall -- Deployments, Services, ConfigMap, Secret and
+# PersistentVolumeClaim all go with it, and nothing of this stack is left
+# tangled up with whatever else the cluster runs.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vector
+  labels:
+    app.kubernetes.io/name: vector

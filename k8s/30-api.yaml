@@ -1,0 +1,180 @@
+# The FastAPI application: two replicas behind one ClusterIP Service.
+#
+# TWO REPLICAS IS A CLAIM, so it is worth making the claim explicit rather
+# than leaving `replicas: 2` to be read as a default.
+#
+# Every pod of this Deployment starts two background tasks on the
+# application's lifespan, and both of them are queue drainers rather than
+# singletons:
+#
+#   * the Slack delivery loop, always on, draining `domain_events`
+#     (migrations/027_domain_events.sql);
+#   * the embedding worker, gated by EMBEDDING_WORKER_ENABLED, draining
+#     `embedding_jobs` (migrations/028_embedding_jobs.sql).
+#
+# Both claim their rows with SELECT ... FOR UPDATE SKIP LOCKED, so two
+# replicas take disjoint work: they share the backlog rather than each doing
+# all of it, and neither sends a Slack message twice. That is what makes
+# horizontal scaling safe here, and it is a property of those two migrations
+# rather than of this file -- so if either ever stops claiming that way,
+# `replicas` has to come back to 1 on the same day.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: vector
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: api
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vector
+        app.kubernetes.io/component: api
+    spec:
+      # Pod-level, so it applies to the container and to anything added
+      # beside it later. The image already creates and selects uid 10001, so
+      # `runAsNonRoot` is a check on the image rather than a change to it:
+      # the kubelet refuses to start a pod whose image would run as root,
+      # which turns a Dockerfile that silently loses its USER line into a
+      # failed rollout instead of a root process nobody notices.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: vector-api:local
+          # IfNotPresent, because `vector-api:local` is not in any registry.
+          # It is built by the repository's own Dockerfile and side-loaded
+          # (`minikube image load`, `kind load docker-image`). `Always` --
+          # the default for a tag ending in :latest, and easy to reach for --
+          # would make every pod ImagePullBackOff against a registry that has
+          # never heard of this image. A real deployment replaces the tag
+          # with a registry reference and a digest.
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          env:
+            # DATABASE_URL is the only secret this process needs, and this is
+            # the whole of how it arrives: a reference to a key in a Secret
+            # that no file in this repository contains. Create it with
+            #
+            #   kubectl create secret generic vector-secrets -n vector \
+            #     --from-literal=POSTGRES_PASSWORD=... \
+            #     --from-literal=DATABASE_URL=postgresql://vector:...@postgres:5432/vector
+            #
+            # so the value exists in the cluster and in a shell's history,
+            # never in git. In a real deployment it comes from External
+            # Secrets, Sealed Secrets or the platform's own store; what stays
+            # the same is that this manifest names a key and never a value.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: vector-secrets
+                  key: DATABASE_URL
+          # ENVIRONMENT, EMBEDDING_WORKER_ENABLED and PUBLIC_BASE_URL, all
+          # from the ConfigMap. envFrom rather than three `valueFrom` entries
+          # because the ConfigMap holds exactly this application's
+          # configuration and nothing else, so there is no key here that
+          # should not become an environment variable.
+          envFrom:
+            - configMapRef:
+                name: vector-config
+          # Three probes, three different questions. Getting them confused is
+          # how a slow start becomes a crash loop.
+          #
+          # startupProbe: "has it finished booting?" Until this passes the
+          # other two are not run at all, so a cold start -- pool connect,
+          # argon2 warm-up, two background tasks -- has 60s (30 x 2s) without
+          # liveness counting failures against it. Without this, either
+          # liveness has to carry a long initialDelaySeconds (and then a
+          # genuine hang goes unnoticed for that long forever after) or a
+          # slow boot is restarted halfway through, repeatedly.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          # livenessProbe: "is the process still there?" /healthz touches no
+          # database on purpose. Pointing liveness at /readyz instead is a
+          # classic and expensive mistake: a database blip would then restart
+          # every replica at once, turning a recoverable outage into a
+          # thundering herd of cold starts against a server already in
+          # trouble.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # readinessProbe: "can it serve a request?" -- which for this
+          # application means reaching PostgreSQL. A failure here takes the
+          # pod out of the Service's endpoints and leaves it running, which
+          # is exactly the right response to a database that is briefly away.
+          #
+          # timeoutSeconds is 3 against the handler's own 2s budget
+          # (READINESS_TIMEOUT_SECONDS in app/rest/health.py), so the
+          # application always gets to answer 503 itself rather than having
+          # the probe time out first. A probe timeout and a 503 are the same
+          # verdict here, but only one of them leaves a log line saying why.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            # The image is a virtualenv and an application package; nothing
+            # in it writes to its own filesystem, and PYTHONDONTWRITEBYTECODE
+            # keeps the interpreter from trying. Verified against a running
+            # pod rather than assumed.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: vector
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: api
+spec:
+  # ClusterIP. The API is not published: the browser reaches it through the
+  # web pod's nginx, on the same origin as the page, which is what lets the
+  # session cookie work without SameSite=None and without a credentialed
+  # CORS allow-list. See frontend/nginx.conf.
+  type: ClusterIP
+  # NAME IS LOAD-BEARING. frontend/nginx.conf proxies to `http://api:8000`,
+  # and docker-compose.yml calls the same service `api`, so one web image
+  # runs unmodified in both. Renaming this Service breaks the frontend with
+  # an nginx that will not start.
+  selector:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: api
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http

@@ -1,0 +1,28 @@
+# Allowlist would be wrong here and a denylist is right, which is the
+# opposite of the repository root's .dockerignore -- worth saying why.
+#
+# The backend image needs two paths out of a tree that also holds a .env, so
+# there the safe default is "nothing, then add back". This build needs almost
+# the whole package: every source file, both tsconfigs, the eslint and vite
+# configs, the SDL and the generated types. Listing those by hand would be a
+# second inventory to keep in step with the build, and forgetting an entry
+# fails as a TypeScript error three minutes into a build rather than as an
+# obviously missing file.
+#
+# What is excluded is what the build produces or reinstalls for itself.
+
+# Installed by `npm ci` inside the builder. Copying a host node_modules would
+# ship Windows-resolved optional dependencies into a Linux image -- esbuild
+# and rollup pick platform-specific binaries -- and would make the build
+# depend on whatever is on the developer's disk rather than on the lockfile.
+node_modules
+
+# The previous build's output. `vite build` writes it; copying a stale one in
+# would let a successful-looking image serve the bundle from last week.
+dist
+
+# Never any use to a build, and .env is the one file in this repository that
+# holds a real credential.
+.env
+.env.*
+.git
