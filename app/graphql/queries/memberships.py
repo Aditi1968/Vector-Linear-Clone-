@@ -143,11 +143,22 @@ class MembershipQuery:
         address belonging to someone who has not joined, so the service
         refuses an ordinary member -- with the same refusal a stranger gets,
         which is why both arrive here as one exception.
-        """
-        scope = await authorized_scope(info, workspace_slug)
 
-        invitations = await info.context.membership_service.list_invitations(
-            scope=scope
-        )
+        Both calls sit inside the `try`, and that is the whole point rather
+        than tidiness. `authorized_scope` translates the membership refusal
+        itself, but `list_invitations` raises the SAME domain error for an
+        insufficient role and used to raise it uncaught -- so a member of a
+        real workspace got a masked "Internal server error" while a stranger
+        got NOT_FOUND, and the difference between the two answers reported
+        which of them the caller was.
+        """
+        try:
+            scope = await authorized_scope(info, workspace_slug)
+
+            invitations = await info.context.membership_service.list_invitations(
+                scope=scope
+            )
+        except WorkspaceAccessDeniedError:
+            raise workspace_not_found() from None
 
         return [WorkspaceInvitationType.from_entity(entity) for entity in invitations]

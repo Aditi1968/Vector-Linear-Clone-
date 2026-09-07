@@ -299,11 +299,14 @@ class IssueType:
         id -- the page comes back empty, exactly as it does for an issue
         nothing has happened to.
         """
-        scope = await info.context.tenant.scope()
-
         try:
             page = await info.context.activity_service.list_for_issue(
-                scope=scope,
+                # The scope this issue was resolved under, like every sibling
+                # resolver here. It used to come from a per-request "current
+                # tenant" on the context; that object is gone, because a scope
+                # a resolver can reach without having been authorized for it
+                # is a scope a resolver can forget to authorize.
+                scope=self.scope,
                 issue_id=self.id,
                 first=first,
                 after=after,

@@ -46,7 +46,6 @@ from app.services.relations import RelationService
 from app.services.search import SearchService
 from app.services.slack import DatabaseTokenStore, SlackService
 from app.services.teams import TeamService
-from app.services.workspaces import WorkspaceService
 
 
 class VectorContext(BaseContext):
@@ -57,7 +56,6 @@ class VectorContext(BaseContext):
         issue_service: IssueService,
         auth_service: AuthService,
         team_service: TeamService,
-        workspace_service: WorkspaceService,
         membership_service: MembershipService,
         label_service: LabelService,
         comment_service: CommentService,
@@ -118,11 +116,19 @@ class VectorContext(BaseContext):
             project_service
         )
 
-        # Teams and workspaces as entities, for the resolvers that ask about
-        # them rather than about this request's scope. Shared instances, not
-        # second copies: one request gets one of each.
+        # Teams as entities, for the resolvers that ask about them rather
+        # than about this request's scope.
+        #
+        # WorkspaceService is deliberately NOT published here. Its
+        # `scope_for_slug` resolves a slug to a bare `WorkspaceScope` --
+        # identity, with no membership checked -- and a `WorkspaceScope`
+        # satisfies every signature that takes one, including the ones meant
+        # to require an `AuthorizedWorkspaceScope`. Reachable from the
+        # context, it is a way for a future resolver to obtain a tenant
+        # without authorizing it, and for the type system to say nothing.
+        # Workspaces are resolved through `app.graphql.scope.authorized_scope`
+        # and nowhere else.
         self.team_service = team_service
-        self.workspace_service = workspace_service
 
         # Built here rather than taken as an argument, which is the one
         # place in this class where construction beats injection. A
@@ -232,11 +238,9 @@ async def get_context() -> VectorContext:
     settings = get_settings()
     environment = settings.environment
 
-    # Constructed once and shared by every resolver that needs one. Two
-    # instances would be two objects answering the same question over the
-    # same pool, and any caching either one grows later would then be per
-    # copy rather than per request.
-    workspace_service = WorkspaceService(pool=pool, repository=WorkspaceRepository())
+    # One per request, shared by every resolver that needs one. Two instances
+    # would be two objects answering the same question over the same pool, and
+    # any caching either one grows later would then be per copy.
     team_service = TeamService(pool=pool, repository=TeamRepository())
 
     return VectorContext(
@@ -287,7 +291,6 @@ async def get_context() -> VectorContext:
         comment_service=CommentService(pool=pool, repository=CommentRepository()),
         cycle_service=CycleService(pool=pool, repository=CycleRepository()),
         team_service=team_service,
-        workspace_service=workspace_service,
         relation_service=RelationService(
             pool=pool,
             repository=RelationRepository(),

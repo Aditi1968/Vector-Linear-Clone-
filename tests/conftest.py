@@ -325,7 +325,6 @@ def graphql_context(**services) -> VectorContext:
     slots = {
         "issue_service",
         "team_service",
-        "workspace_service",
         "auth_service",
         "membership_service",
         "label_service",

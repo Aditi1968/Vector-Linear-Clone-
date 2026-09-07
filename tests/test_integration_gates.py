@@ -367,3 +367,70 @@ async def test_get_context_constructs_every_service_it_declares(monkeypatch):
         f"get_context built a VectorContext with nothing in {missing}. "
         "Every declared collaborator must be constructed there."
     )
+
+
+# --------------------------------------------------------------------------
+# 5. Every `info.context.<name>` a resolver reads actually exists
+# --------------------------------------------------------------------------
+
+
+async def test_resolvers_only_read_context_attributes_that_exist(monkeypatch):
+    """No resolver reaches for a collaborator the context does not have.
+
+    Gate 4 above proves `get_context` BUILDS everything it declares. This
+    proves the other direction: that what the resolvers ASK FOR is what it
+    built. Neither implies the other, and the gap between them is where a
+    real defect lived.
+
+    `Issue.activity` called `info.context.tenant.scope()`. `tenant` was
+    removed from the context when workspace scoping landed -- deliberately,
+    because a scope reachable without authorization is a scope a resolver can
+    forget to authorize -- and that one resolver was the only caller left
+    behind. It type-checked (the context is untyped at the point of use), it
+    passed every gate, and it raised AttributeError on the first request that
+    selected the field, which the schema then masked as "Internal server
+    error". Nothing selected it yet, so it stayed latent.
+
+    The existing gates could not see it. Gate 2 checks the ROOT fields reach
+    the merged root; this was a nested resolver on `Issue`. Gate 1 only
+    imports the module, and the attribute is read at call time.
+
+    Found by source rather than by exercising every resolver, because
+    exercising them needs a database, a scope and a row -- and the failure is
+    reachable from any document that merely selects the field, so a test that
+    had to construct the right state would not be the check this needs to be.
+    """
+    import app.db
+    from app.graphql.context import get_context
+
+    monkeypatch.setattr(app.db, "_pool", object())
+    context = await get_context()
+
+    graphql_root = Path(app.__file__).parent / "graphql"
+    missing: list[str] = []
+
+    for path in sorted(graphql_root.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+
+        for node in ast.walk(tree):
+            # Match `<something>.context.<name>` -- `info.context.x`, and also
+            # `self.info.context.x` or any other spelling, since what matters
+            # is the attribute read off `context` and not what held it.
+            if not isinstance(node, ast.Attribute):
+                continue
+
+            parent = node.value
+
+            if not (isinstance(parent, ast.Attribute) and parent.attr == "context"):
+                continue
+
+            if not hasattr(context, node.attr):
+                relative = path.relative_to(Path(app.__file__).parent.parent)
+                missing.append(f"{relative.as_posix()}:{node.lineno} .{node.attr}")
+
+    assert not missing, (
+        "resolvers read context attributes that do not exist: "
+        f"{missing}. Either the attribute was removed from VectorContext and "
+        "this caller was missed, or it is a typo -- both fail only at request "
+        "time, as a masked 'Internal server error'."
+    )
