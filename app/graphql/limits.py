@@ -34,7 +34,6 @@ from graphql import (
 )
 from strawberry.extensions import AddValidationRules
 from strawberry.extensions.base_extension import SchemaExtension
-from strawberry.extensions.utils import is_introspection_key
 
 
 # Nesting levels of composite fields. The product schema is two deep
@@ -287,7 +286,20 @@ def _measure(
             # __schema and __type describe the schema, not the data; their
             # subtrees are deep and wide by nature and cost the database
             # nothing. Introspection is refused outright in production.
-            if is_introspection_key(node.name.value):
+            #
+            # Named exactly, NOT `is_introspection_key`, which is
+            # `startswith("__")` and therefore also matches `__typename`.
+            # That is a meta field on every object, and exempting it made a
+            # whole fan-out free: a composite field is priced
+            # `page_size * inner_complexity`, so a leaf costing 0 zeroed its
+            # parent, and the zero propagated to the root. A 4KB document
+            # selecting `__typename` under four unbatched connections scored
+            # 0 and would have run 6,030 statements; the same document
+            # selecting `id` scores 10,000 and is refused. `__typename` is
+            # answered from the schema rather than the database, but it is
+            # only ever reached by resolving the object it sits on, so it
+            # must be priced like the leaf it is.
+            if node.name.value in ("__schema", "__type"):
                 continue
 
             if node.selection_set is None:

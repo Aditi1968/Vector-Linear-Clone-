@@ -44,6 +44,7 @@ from app.rest.slack import (
     SIGNATURE_HEADER,
     TIMESTAMP_HEADER,
     SlackRequestServices,
+    _parse_state_cookie,
     slack_services,
 )
 from app.rest.slack import (
@@ -421,10 +422,15 @@ async def test_a_return_path_outside_the_allowlist_never_reaches_the_cookie(
 
     assert cookie is not None
 
-    _, _, return_path = cookie.split(":")
+    # Read back through the module's own parser rather than by splitting on
+    # colons here: the cookie gained a session-digest field, and a test that
+    # unpacks a fixed number of parts fails on the shape rather than on the
+    # thing it is about.
+    pending = _parse_state_cookie(cookie)
 
-    assert return_path == DEFAULT_RETURN_PATH
-    assert return_path in ALLOWED_RETURN_PATHS
+    assert pending is not None
+    assert pending.return_path == DEFAULT_RETURN_PATH
+    assert pending.return_path in ALLOWED_RETURN_PATHS
 
 
 # --- OAuth callback: state validation ----------------------------------

@@ -55,6 +55,7 @@ from app.services.slack import (
     SlackService,
     authorize_url,
 )
+from app.services.tokens import hash_session_token
 
 
 router = APIRouter(prefix="/slack", tags=["slack"])
@@ -133,7 +134,18 @@ def verify_slack_signature(
     except ValueError:
         return False
 
-    if abs(now - signed_at) > MAX_TIMESTAMP_AGE_SECONDS:
+    try:
+        outside_window = abs(now - signed_at) > MAX_TIMESTAMP_AGE_SECONDS
+    except OverflowError:
+        # `now` is a float, so the comparison converts `signed_at` to one, and
+        # a Python int is unbounded where a float is not: a header of a few
+        # hundred digits raises here rather than comparing. Uncaught, that is
+        # an unauthenticated 500 on a public endpoint -- a header anyone can
+        # send, before any signature is checked. A timestamp too large to be a
+        # float is not within five minutes of now.
+        return False
+
+    if outside_window:
         return False
 
     # Assembled as bytes rather than by formatting a string and encoding it.
@@ -220,12 +232,33 @@ def resolve_return_path(requested: str | None) -> str:
     return DEFAULT_RETURN_PATH
 
 
+def _session_digest(request: Request) -> str:
+    """A fingerprint of the session this request is presenting.
+
+    Hex of the same SHA-256 the sessions table stores, so a state is bound to
+    a session without this module ever holding, logging or comparing the token
+    itself. An empty string for a request with no session, which is a value the
+    comparison can never match against a real one -- and must not, because a
+    state minted under a session has to be finished under that same session.
+
+    The same helper app/rest/github.py has, for the same reason, spelled the
+    same way. Slack shipped without it and that was the gap: the session cookie
+    carries no `__Host-` prefix, so a compromised sibling subdomain can write
+    cookies into the victim's browser, and a state cookie an attacker can plant
+    is not a state at all.
+    """
+    token = read_session_token(request)
+
+    return "" if token is None else hash_session_token(token).hex()
+
+
 @dataclass(frozen=True, slots=True)
 class PendingOAuth:
     """The flow this browser started, as the state cookie recorded it."""
 
     state: str
     workspace_slug: str
+    session: str
     return_path: str
 
 
@@ -235,10 +268,14 @@ def _format_state_cookie(pending: PendingOAuth) -> str:
     Colon-separated, which is unambiguous rather than lucky: the state is
     `secrets.token_urlsafe` output (base64url, so no colon), and a workspace
     slug is confined to lowercase letters, digits and hyphens by
-    `workspaces_slug_format` in migrations/002_tenancy.sql. Only the return
-    path could ever contain one, and it is last, so a three-way split is exact.
+    `workspaces_slug_format` in migrations/002_tenancy.sql, and the session
+    digest is hex. Only the return path could ever contain one, and it is
+    last, so a bounded split is exact.
     """
-    return f"{pending.state}:{pending.workspace_slug}:{pending.return_path}"
+    return (
+        f"{pending.state}:{pending.workspace_slug}:"
+        f"{pending.session}:{pending.return_path}"
+    )
 
 
 def _parse_state_cookie(raw: str | None) -> PendingOAuth | None:
@@ -258,12 +295,14 @@ def _parse_state_cookie(raw: str | None) -> PendingOAuth | None:
     if not raw:
         return None
 
-    parts = raw.split(":")
+    # Bounded, so a return path containing colons stays intact in the last
+    # field rather than turning a valid cookie into a malformed one.
+    parts = raw.split(":", 3)
 
-    if len(parts) != 3:
+    if len(parts) != 4:
         return None
 
-    state, workspace_slug, return_path = parts
+    state, workspace_slug, session, return_path = parts
 
     if not state or not workspace_slug:
         return None
@@ -271,6 +310,7 @@ def _parse_state_cookie(raw: str | None) -> PendingOAuth | None:
     return PendingOAuth(
         state=state,
         workspace_slug=workspace_slug,
+        session=session,
         return_path=resolve_return_path(return_path),
     )
 
@@ -542,6 +582,16 @@ async def slack_oauth_start(
             # not carried in the cookie because the callback re-authorizes
             # from scratch rather than trusting anything a browser held.
             workspace_slug=workspace,
+            # Binds the state to the browser session that started the flow,
+            # exactly as app/rest/github.py does. Without it the cookie is
+            # something an attacker who can write cookies into the victim's
+            # browser -- a compromised sibling subdomain, since the session
+            # cookie carries no __Host- prefix -- can plant alongside a
+            # matching `?state=` and their own `code`, completing an install
+            # into the victim's workspace. Forging this too would require the
+            # victim's session token, which is HttpOnly and never leaves the
+            # browser.
+            session=_session_digest(request),
             return_path=resolve_return_path(return_to),
         ),
         environment=services.environment,
@@ -592,6 +642,16 @@ async def slack_oauth_callback(
     if not hmac.compare_digest(
         state.encode("utf-8"),
         pending.state.encode("utf-8"),
+    ):
+        raise _state_rejected()
+
+    # The state must be finished under the session that started it. Checked
+    # with the same refusal as a wrong state, so a planted cookie and a forged
+    # state are one answer, and an empty digest -- a request with no session --
+    # matches nothing a real flow ever wrote.
+    if not hmac.compare_digest(
+        _session_digest(request).encode("utf-8"),
+        pending.session.encode("utf-8"),
     ):
         raise _state_rejected()
 
