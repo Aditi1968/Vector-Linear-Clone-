@@ -1,7 +1,11 @@
 import strawberry
+from graphql import GraphQLError
 from strawberry.types import Info
 
-from app.domain.errors import WorkspaceAccessDeniedError
+from app.domain.errors import (
+    GithubRepositoriesInUseError,
+    WorkspaceAccessDeniedError,
+)
 from app.graphql.inputs.github import GithubDisconnectInput
 
 # Imported from the query module rather than copied, because both are the same
@@ -51,5 +55,14 @@ class GithubMutation:
             integration = await info.context.github_service.disconnect(scope)
         except WorkspaceAccessDeniedError:
             raise not_found_error() from None
+        except GithubRepositoriesInUseError as exc:
+            # The one failure here that IS correctable, which is why it is
+            # published rather than masked: the admin deletes the releases and
+            # tries again. BAD_USER_INPUT rather than an errors list, because
+            # this mutation deliberately returns the integration itself -- see
+            # the docstring above.
+            raise GraphQLError(
+                str(exc), extensions={"code": "BAD_USER_INPUT"}
+            ) from None
 
         return GithubIntegrationType.from_entity(integration)

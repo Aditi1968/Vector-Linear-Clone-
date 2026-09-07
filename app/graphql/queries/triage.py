@@ -78,7 +78,13 @@ class TriageQuery:
         """
         scope = await authorized_scope(info, workspace_slug)
 
-        return await info.context.triage_service.waiting_count(
+        # Annotated rather than returned inline, the same move the repositories
+        # make around `fetchval`. `info.context` is untyped, so awaiting a
+        # method off it yields Any -- which would satisfy this resolver's `int`
+        # silently, and satisfy any other return type it were later given.
+        waiting: int = await info.context.triage_service.waiting_count(
             scope=scope,
             team_id=team_id,
         )
+
+        return waiting

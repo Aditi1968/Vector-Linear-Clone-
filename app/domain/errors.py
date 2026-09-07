@@ -147,6 +147,35 @@ class GithubInstallationClaimedError(Exception):
         super().__init__("GitHub installation is already connected")
 
 
+class GithubRepositoriesInUseError(Exception):
+    """Something outside the integration still points at its repositories.
+
+    Both `connect` and `disconnect` clear this workspace's repository rows --
+    disconnect because the integration is over, connect because reconnecting
+    replaces rather than merges. Migration 024 then hung `releases` off
+    `github_repositories` with a RESTRICT foreign key, on the argument that
+    destroying shipping history as a side effect of toggling an integration is
+    worse than refusing the toggle.
+
+    That argument is right and the refusal was arriving as a
+    RestrictViolationError nobody caught, which GraphQL masks as "Internal
+    server error". So an admin pressing Disconnect -- or Connect, which is the
+    same delete -- was told the server had broken, for a refusal the schema
+    made on purpose and that they can act on by removing the releases.
+
+    Names no release and no count. Which repositories a workspace holds is
+    already admin-only, and a message that enumerated them would be a second
+    place that decides who may read them. Pure application code -- no
+    Strawberry, FastAPI, asyncpg or PostgreSQL.
+    """
+
+    def __init__(self):
+        super().__init__(
+            "This workspace still has releases recorded against its GitHub "
+            "repositories. Delete them before changing the integration."
+        )
+
+
 class WorkspaceAccessDeniedError(Exception):
     """A (slug, user) pair yields no workspace the user may act in.
 

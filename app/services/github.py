@@ -27,6 +27,7 @@ from pydantic import SecretStr
 from app.config import Settings
 from app.domain.errors import (
     GithubNotConfiguredError,
+    GithubRepositoriesInUseError,
     WorkspaceAccessDeniedError,
 )
 from app.domain.github import (
@@ -1069,7 +1070,14 @@ class GithubService:
         async with self._pool.acquire() as connection:
             async with connection.transaction():
                 await self._repository.delete_development(connection, scope=scope)
-                await self._repository.delete_repositories(connection, scope=scope)
+
+                try:
+                    await self._repository.delete_repositories(connection, scope=scope)
+                except asyncpg.RestrictViolationError:
+                    # Reconnecting replaces rather than merges, so it runs the
+                    # same delete disconnect does and earns the same refusal.
+                    raise GithubRepositoriesInUseError() from None
+
                 await self._repository.delete_installation(connection, scope=scope)
                 await self._repository.delete_expired_claim(
                     connection,
@@ -1116,7 +1124,17 @@ class GithubService:
         async with self._pool.acquire() as connection:
             async with connection.transaction():
                 await self._repository.delete_development(connection, scope=scope)
-                await self._repository.delete_repositories(connection, scope=scope)
+
+                try:
+                    await self._repository.delete_repositories(connection, scope=scope)
+                except asyncpg.RestrictViolationError:
+                    # Something outside this integration still references the
+                    # repositories -- 024's releases are the first, and are
+                    # RESTRICT on purpose. Uncaught, that reached the client as
+                    # "Internal server error" for a refusal the schema made
+                    # deliberately and the admin can act on.
+                    raise GithubRepositoriesInUseError() from None
+
                 await self._repository.delete_installation(connection, scope=scope)
 
         return self._view(None, ())

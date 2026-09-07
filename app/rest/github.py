@@ -41,6 +41,7 @@ from app.db import get_pool
 from app.domain.errors import (
     GithubInstallationClaimedError,
     GithubNotConfiguredError,
+    GithubRepositoriesInUseError,
     WorkspaceAccessDeniedError,
 )
 from app.domain.github import NO_GRANT
@@ -681,6 +682,15 @@ async def _complete_install(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=CLAIMED_ELSEWHERE_DETAIL,
+        ) from None
+    except GithubRepositoriesInUseError as exc:
+        # Reconnecting replaces this workspace's repositories, so it runs the
+        # same delete disconnect does and hits the same RESTRICT. 409 rather
+        # than 400: the request is well-formed and the conflict is with state
+        # this server holds, which is the same reading CLAIMED_ELSEWHERE gets.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
         ) from None
     except WorkspaceAccessDeniedError:
         raise _not_found() from None

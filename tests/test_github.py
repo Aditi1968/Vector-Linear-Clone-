@@ -23,10 +23,12 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID
 
+import asyncpg
 import pytest
 
 from app.domain.errors import (
     GithubNotConfiguredError,
+    GithubRepositoriesInUseError,
     WorkspaceAccessDeniedError,
 )
 from app.domain.github import (
@@ -546,6 +548,20 @@ class FakeGithubRepository:
         return [call for call in self.calls if call[0] == name]
 
 
+def build_service_over(repository, config=None) -> GithubService:
+    """A service over a repository the caller built, rather than kwargs.
+
+    `build_service` constructs the fake itself, which is right for almost
+    everything here and cannot express a fake that behaves differently -- one
+    that raises from a particular method, say.
+    """
+    return GithubService(
+        pool=FakePool(),
+        repository=repository,
+        config=config if config is not None else configured(),
+    )
+
+
 def build_service(config=None, **repository_kwargs) -> tuple:
     repository = FakeGithubRepository(**repository_kwargs)
     service = GithubService(
@@ -933,6 +949,53 @@ async def test_disconnecting_a_workspace_that_never_connected_is_not_an_error():
     service, _ = build_service()
 
     assert (await service.disconnect(make_scope())).status == "disconnected"
+
+
+class RepositoriesInUseRepository(FakeGithubRepository):
+    """Whose repositories something outside the integration still references.
+
+    What migration 024 made real: `releases_repository_fk` is RESTRICT, so a
+    workspace that has recorded a deploy cannot have its repository rows
+    deleted out from under it.
+    """
+
+    async def delete_repositories(self, connection, *, scope, repository_ids=None):
+        raise asyncpg.RestrictViolationError("releases_repository_fk")
+
+
+async def test_disconnecting_with_releases_recorded_is_refused_by_name():
+    """Regression: the refusal arrived as a masked "Internal server error".
+
+    024 hung releases off `github_repositories` with RESTRICT, on the argument
+    that destroying shipping history as a side effect of toggling an
+    integration is worse than refusing the toggle. That argument is right, and
+    nothing caught the RestrictViolationError it produces -- so an admin
+    pressing Disconnect was told the server had broken, for a refusal the
+    schema made deliberately and that they can act on.
+    """
+    service = build_service_over(
+        RepositoriesInUseRepository(installation=make_installation())
+    )
+
+    with pytest.raises(GithubRepositoriesInUseError):
+        await service.disconnect(make_scope())
+
+
+async def test_reconnecting_with_releases_recorded_is_refused_the_same_way():
+    """Connect runs the same delete, so it earns the same refusal.
+
+    Asserted separately rather than assumed. Reconnecting replaces rather than
+    merges -- it clears this workspace's repositories before claiming the new
+    installation -- so a fix applied only to `disconnect` would leave the other
+    half of the same flow answering 500, and that half is the one an admin
+    reaches by pressing Connect.
+    """
+    service = build_service_over(
+        RepositoriesInUseRepository(installation=make_installation())
+    )
+
+    with pytest.raises(GithubRepositoriesInUseError):
+        await service.connect(make_scope(), installation_id=INSTALLATION_ID)
 
 
 # --- webhook application ----------------------------------------------
