@@ -2,6 +2,7 @@ import type { RouteObject } from 'react-router-dom'
 
 import { RequireAuth, authRoutes } from '../../features/auth'
 import { CycleDetailPage, CycleListPage } from '../../features/cycles'
+import { InboxPage } from '../../features/inbox'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
 import { MyIssuesPage } from '../../features/myIssues'
 import { onboardingRoutes } from '../../features/onboarding'
@@ -87,12 +88,7 @@ export const routes: RouteObject[] = [
       },
       {
         path: ROUTE_SEGMENTS.inbox,
-        element: (
-          <Placeholder
-            title="Inbox"
-            description="Notifications about the issues you are following."
-          />
-        ),
+        element: <InboxPage />,
       },
       {
         path: ROUTE_SEGMENTS.team,

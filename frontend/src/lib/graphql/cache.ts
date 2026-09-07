@@ -154,6 +154,22 @@ export function createCache(): InMemoryCache {
            * only argument that selects a different list.
            */
           projects: cursorConnectionPolicy(['workspaceSlug']),
+
+          /*
+           * `notifications` is the same connection again, and needs the same
+           * merge for the same reason.
+           *
+           * Its key list carries one argument the others do not:
+           * `unreadOnly` genuinely selects a *different list*, so the inbox's
+           * filter toggle reads its own cache entry rather than merging an
+           * unread page into the list of everything. Left out, switching the
+           * toggle would append one list to the other and the read rows would
+           * never leave the unread view.
+           *
+           * `first` and `after` stay out, as everywhere: they say where in
+           * one list a page sits, not which list is being read.
+           */
+          notifications: cursorConnectionPolicy(['workspaceSlug', 'unreadOnly']),
         },
       },
       Issue: {
