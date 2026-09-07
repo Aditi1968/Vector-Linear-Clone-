@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 
 import {
+  BoardIcon,
   InboxIcon,
   IssueIcon,
   IssuesIcon,
@@ -74,6 +75,19 @@ export const primaryNavigationItems: readonly NavigationItem[] = [
     label: 'All Issues',
     icon: <IssuesIcon />,
     to: (paths) => paths.issues(),
+  },
+  {
+    /*
+     * The board takes no team in its path -- it carries one in the query
+     * string, and this entry deliberately links without it. A sidebar link
+     * that named a team would have to pick one on the user's behalf; the
+     * screen picks the workspace's first team, says which one it is, and
+     * offers the picker.
+     */
+    id: 'board',
+    label: 'Board',
+    icon: <BoardIcon />,
+    to: (paths) => paths.board(),
   },
   {
     id: 'projects',

@@ -93,6 +93,7 @@ export const ROUTE_SEGMENTS = {
   inbox: 'inbox',
   issues: 'issues',
   issueDetail: `issues/:${ISSUE_ID_PARAM}`,
+  board: 'board',
   projects: 'projects',
   projectDetail: `projects/:${PROJECT_ID_PARAM}`,
   team: `team/:${TEAM_KEY_PARAM}`,
@@ -140,6 +141,18 @@ export const paths = {
   /** One issue's detail view. */
   issue: (slug: string, issueId: string) =>
     `/${seg(slug)}/${ROUTE_SEGMENTS.issues}/${seg(issueId)}`,
+
+  /**
+   * The board.
+   *
+   * Takes no team, although a board is always one team's: workflow states
+   * belong to a team, so there is no workspace-wide board to draw. The team
+   * rides in the query string (`?team=ENG`) alongside the filters, the sort
+   * and the grouping, because those are one view and one thing to link to --
+   * and because a builder that took a team would produce an address the
+   * sidebar could not offer without choosing a team on the user's behalf.
+   */
+  board: (slug: string) => `/${seg(slug)}/${ROUTE_SEGMENTS.board}`,
 
   /** One team's overview. `teamKey` is the ENG in ENG-42. */
   team: (slug: string, teamKey: string) => `/${seg(slug)}/team/${seg(teamKey)}`,
