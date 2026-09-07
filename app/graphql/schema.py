@@ -11,6 +11,7 @@ from app.graphql.limits import operation_limit_extensions
 from app.graphql.mutations.auth import AuthMutation
 from app.graphql.mutations.comments import CommentMutation
 from app.graphql.mutations.cycles import CycleMutation
+from app.graphql.mutations.documents import DocumentMutation
 from app.graphql.mutations.github import GithubMutation
 from app.graphql.mutations.initiatives import InitiativeMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
@@ -25,6 +26,7 @@ from app.graphql.mutations.subscribers import SubscriberMutation
 from app.graphql.mutations.templates import TemplateMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.cycles import CycleQuery
+from app.graphql.queries.documents import DocumentQuery
 from app.graphql.queries.github import GithubQuery
 from app.graphql.queries.initiatives import InitiativeQuery
 from app.graphql.queries.issues import Query as IssueQuery
@@ -74,6 +76,7 @@ QUERY_TYPES = (
     CycleQuery,
     ProjectQuery,
     InitiativeQuery,
+    DocumentQuery,
     SearchQuery,
     GithubQuery,
     SlackQuery,
@@ -93,6 +96,7 @@ MUTATION_TYPES = (
     CycleMutation,
     ProjectMutation,
     InitiativeMutation,
+    DocumentMutation,
     RelationMutation,
     GithubMutation,
     SlackMutation,

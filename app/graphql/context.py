@@ -10,6 +10,10 @@ from app.domain.auth import UserEntity
 from app.domain.issues import IssueEntity
 from app.domain.labels import LabelEntity
 from app.graphql.loaders.cycles import CycleLoader
+from app.graphql.loaders.documents import (
+    build_document_content_loader,
+    build_revision_content_loader,
+)
 from app.graphql.loaders.initiatives import build_initiative_updates_loader
 from app.graphql.loaders.issues import IssueKey, build_issue_loader
 from app.graphql.loaders.labels import IssueLabelKey, issue_label_loader
@@ -23,6 +27,7 @@ from app.http_cookies import read_session_token
 from app.repositories.activity import ActivityRepository
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
+from app.repositories.documents import DocumentRepository
 from app.repositories.github import GithubRepository
 from app.repositories.initiatives import InitiativeRepository
 from app.repositories.invitations import InvitationRepository
@@ -45,6 +50,7 @@ from app.services.activity import ActivityService
 from app.services.auth import AuthService
 from app.services.comments import CommentService
 from app.services.cycles import CycleService
+from app.services.documents import DocumentService
 from app.services.github import GithubAppConfig, GithubService
 from app.services.initiatives import InitiativeService
 from app.services.issues import IssueService
@@ -74,6 +80,7 @@ class VectorContext(BaseContext):
         cycle_service: CycleService,
         project_service: ProjectService,
         initiative_service: InitiativeService,
+        document_service: DocumentService,
         relation_service: RelationService,
         saved_view_service: SavedViewService,
         favorite_service: FavoriteService,
@@ -94,6 +101,13 @@ class VectorContext(BaseContext):
         self.cycle_service = cycle_service
         self.project_service = project_service
         self.initiative_service = initiative_service
+
+        # Documents, their history and their discussion. One service over
+        # all three tables, because a version snapshot is not a separate
+        # operation from the edit that caused it -- they are two writes
+        # inside one transaction, and a second service holding the
+        # revisions would be a second connection with no way to be in it.
+        self.document_service = document_service
         self.search_service = search_service
 
         # Saved views and favorites. Two services over two tables rather
@@ -159,6 +173,13 @@ class VectorContext(BaseContext):
         self.initiative_updates_loader = build_initiative_updates_loader(
             initiative_service
         )
+
+        # `Document.content` and `DocumentRevision.content`. Loaders rather
+        # than plain fields because a body may be 200,000 characters, so a
+        # page of documents carrying them inline would be megabytes for a
+        # screen that renders titles -- see app/graphql/types/document.py.
+        self.document_content_loader = build_document_content_loader(document_service)
+        self.revision_content_loader = build_revision_content_loader(document_service)
 
         # Teams as entities, for the resolvers that ask about them rather
         # than about this request's scope.
@@ -359,6 +380,10 @@ async def get_context() -> VectorContext:
         initiative_service=InitiativeService(
             pool=pool,
             repository=InitiativeRepository(),
+        ),
+        document_service=DocumentService(
+            pool=pool,
+            repository=DocumentRepository(),
         ),
         auth_service=AuthService(
             pool=pool,

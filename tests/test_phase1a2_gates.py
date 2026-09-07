@@ -85,6 +85,7 @@ EXPECTED_MIGRATIONS = [
     "019_saved_views.sql",
     "020_subscribers_templates.sql",
     "022_initiatives.sql",
+    "023_documents.sql",
 ]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the
