@@ -423,7 +423,11 @@ export function CommandPalette({
               icon={search.loading ? <Spinner /> : <SearchIcon />}
               role="combobox"
               aria-label="Search issues and projects, or run a command"
-              aria-controls={listboxId}
+              /* Both dropped together when there is no listbox: an
+               * `aria-controls` pointing at an id that is not in the document
+               * is a broken reference, and `aria-expanded="true"` beside it
+               * would promise a popup that is a spinner. */
+              aria-controls={items.length > 0 ? listboxId : undefined}
               aria-expanded={items.length > 0}
               aria-autocomplete="list"
               aria-activedescendant={
