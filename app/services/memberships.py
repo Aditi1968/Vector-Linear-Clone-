@@ -44,6 +44,14 @@ from app.services.tokens import generate_invitation_token, hash_invitation_token
 # does approach it, this field grows a cursor the way `issues` has one; a
 # larger number here would be the wrong fix, because the problem it would be
 # papering over is an unpaginated list and not a small limit.
+#
+# ponytail: since 026 this also bounds `list_members`, which now returns former
+# members alongside current ones -- so the number it is measured against grows
+# with churn and never shrinks, where before it was the size of the team. Still
+# far above any real workspace: 200 departures is a decade of turnover for a
+# company small enough to be on one tenant. The upgrade is the cursor this note
+# already describes, on `users.email`, which the list is ordered by; reaching
+# for a bigger constant instead would be the wrong fix for the same reason.
 MEMBERSHIP_LIST_LIMIT = 200
 
 NAME_MAX_LENGTH = 200
@@ -79,7 +87,6 @@ INVITATION_LIST_LIMIT = 200
 # anything not named here is re-raised and masked rather than reported to a
 # client as a correctable mistake.
 WORKSPACE_SLUG_UNIQUE_CONSTRAINT = "workspaces_slug_key"
-MEMBERSHIP_PKEY_CONSTRAINT = "workspace_members_pkey"
 
 # What every unusable invitation token is answered with.
 #
@@ -122,24 +129,35 @@ INVITATION_NOT_FOUND = ValidationIssue(
 
 
 # What a member still holds that another member would notice losing, keyed by
-# the constraint that refuses the removal.
+# the constraint that names the policy.
 #
-# `MembershipRepository.delete_personal_rows` has already cleared everything
-# that answered to this person alone, so any RESTRICT still firing after it is
-# by definition about something shared -- a project someone else is waiting on,
-# an integration the whole workspace posts through, a list other people open.
-# 009 states the policy these constraints encode: such a removal is "refused
-# rather than silently vacating", and the caller reassigns first.
+# Every key is a name `MembershipRepository.shared_holdings` can return, and
+# the two are pinned equal by tests/test_members_invites_db.py rather than left
+# to agree by habit. Each names something the workspace shares -- a project
+# someone else is waiting on, an integration the whole workspace posts through,
+# a list other people open -- and 009 states the policy all of them encode:
+# such a removal is "refused rather than silently vacating", and the caller
+# reassigns first.
 #
-# Keyed on the constraint name rather than the exception class, for the reason
-# ProjectService gives about the same pattern: every one of these arrives as
-# the same RestrictViolationError, and they mean entirely different things. A
-# single "member still has data" would tell an admin to go looking without
-# saying where.
+# Keyed on constraint names although no constraint raises these any more, and
+# that is worth being exact about. Until 026 a removal was a DELETE and each of
+# these arrived as a RestrictViolationError carrying the name; now the row
+# survives, nothing fires, and the same names come back from a statement of
+# EXISTS probes instead. The mapping did not change, because the constraint is
+# still where the argument is written down -- a reader who wants to know why a
+# project lead cannot simply be vacated reads `projects_lead_fk` in 009.
 #
 # The code, not the message, is the contract a UI acts on: each one names a
 # screen an admin can go to and fix the thing. The field is always `userId`,
 # because that is the argument the caller sent and the only one it can change.
+#
+# Three entries this map used to have are gone, and their absence is the
+# feature. HAS_COMMENTS, HAS_PROJECT_UPDATES and HAS_INITIATIVE_UPDATES
+# reported authorship, and authorship is not a holding: there is nobody to
+# reassign a comment to, so "cannot be removed" was the literal truth and the
+# admin had no move. STILL_ASSIGNED_ISSUES is gone too -- an assignment is
+# vacated by `unassign_issues` rather than defended. 026 is the file that
+# changed all four.
 _REMOVAL_BLOCKED: dict[str, ValidationIssue] = {
     "projects_lead_fk": ValidationIssue(
         field="userId",
@@ -150,16 +168,6 @@ _REMOVAL_BLOCKED: dict[str, ValidationIssue] = {
         field="userId",
         code="STILL_OWNS_INITIATIVE",
         message="Member still owns an initiative; reassign the owner first",
-    ),
-    "issues_assignee_fk": ValidationIssue(
-        field="userId",
-        code="STILL_ASSIGNED_ISSUES",
-        message="Member is still assigned issues; reassign them first",
-    ),
-    "comments_author_fk": ValidationIssue(
-        field="userId",
-        code="HAS_COMMENTS",
-        message="Member has authored comments and cannot be removed",
     ),
     "saved_views_creator_fk": ValidationIssue(
         field="userId",
@@ -182,16 +190,6 @@ _REMOVAL_BLOCKED: dict[str, ValidationIssue] = {
         code="CONNECTED_SLACK",
         message="Member connected the Slack integration; reconnect it as "
         "someone else first",
-    ),
-    "project_updates_author_fk": ValidationIssue(
-        field="userId",
-        code="HAS_PROJECT_UPDATES",
-        message="Member has posted project updates and cannot be removed",
-    ),
-    "initiative_updates_author_fk": ValidationIssue(
-        field="userId",
-        code="HAS_INITIATIVE_UPDATES",
-        message="Member has posted initiative updates and cannot be removed",
     ),
 }
 
@@ -370,25 +368,51 @@ class MembershipService:
                         ]
                     ) from None
 
-                return await self._repository.create(
+                membership = await self._repository.create(
                     connection,
                     workspace_id=workspace_id,
                     user_id=owner_id,
                     role=WORKSPACE_OWNER_ROLE,
                 )
 
+                if membership is None:
+                    # `create` answers None only for an account that already
+                    # holds a current membership of this workspace, and the
+                    # workspace was inserted by the statement above inside this
+                    # transaction, so nobody can. Raising rather than asserting
+                    # because a None here would mean the insert returned a
+                    # workspace id it did not create, which is a defect to
+                    # surface as a masked 500 and not a field error to hand a
+                    # signup form.
+                    raise RuntimeError(
+                        "membership grant returned nothing for a new workspace"
+                    )
+
+                return membership
+
     async def list_members(
         self,
         *,
         scope: AuthorizedWorkspaceScope,
     ) -> list[WorkspaceMemberEntity]:
-        """Everyone in the workspace the caller was authorized for.
+        """Everyone in the workspace the caller was authorized for, past and
+        present.
 
         Members only, and any role is enough: this is what an assignee picker
         reads, so a workspace whose members cannot see each other has no way
         to assign work. Taking an AuthorizedWorkspaceScope rather than a
         workspace id is the check -- one of those can only be built from a row
         in `workspace_members`.
+
+        Former members are included, carrying the `removed_at` that says so.
+        The list has two readers wanting opposite halves of it -- a picker must
+        not offer somebody who has left, and a comment thread must still name
+        whoever wrote each entry -- and one list they can each filter is what
+        stops a page holding both from issuing two queries and merging them.
+        See `MembershipRepository.list_members`, and note that this is a
+        presentation distinction and not a permission one: a former member's
+        own access is refused by `find_membership`, which never returns their
+        row at all.
         """
         async with self._pool.acquire() as connection:
             return await self._repository.list_members(
@@ -456,7 +480,47 @@ class MembershipService:
         scope: AuthorizedWorkspaceScope,
         user_id: UUID,
     ) -> UUID:
-        """Revoke a membership, under the same two rules as a role change."""
+        """End a membership, under the same two rules as a role change.
+
+        What "end" means changed in 026 and is worth stating here rather than
+        only in the migration. The row is not deleted; it is stamped with a
+        `removed_at` and stops being current. Everything the person authored --
+        a comment on an issue, a project update, a document -- keeps resolving
+        to them, because seven foreign keys onto `workspace_members` are
+        authorship keys and there is nobody to reassign authorship to. What
+        they lose is access: `find_membership` filters on `removed_at IS NULL`,
+        so from the next request onward they are refused exactly as a stranger
+        is, and no AuthorizedWorkspaceScope can be built for them again.
+
+        The order below is the whole method, and each step is where it is for a
+        reason:
+
+          * the owner lock and the last-owner rule first, unchanged. Nothing
+            about departure should be able to leave a workspace nobody can
+            administer.
+
+          * `shared_holdings` next, and BEFORE anything is written. It asks
+            what the workspace would notice losing -- a project lead, an
+            initiative owner, a shared view, the account an integration is
+            connected as -- and a refusal here leaves the transaction having
+            changed nothing at all. Until 026 this check was PostgreSQL's, made
+            by RESTRICT after the personal rows had already been deleted and
+            undone by the rollback; asking first is what makes the refusal a
+            decision rather than a recovery.
+
+          * personal rows and assignments, once the removal is going to happen.
+            Notifications, subscriptions, favourites and private views leave
+            with the membership so a former member's inbox stops filling;
+            assigned issues are handed back, which is what `issues_assignee_fk`
+            did by itself while removal was still a DELETE.
+
+          * the stamp last, so a failure anywhere above leaves a member who is
+            still a member.
+
+        All of it in one transaction, because a half-departed member -- access
+        revoked, still assigned, still subscribed -- is a worse state than
+        either end of it.
+        """
         require_workspace_admin(scope)
 
         async with self._pool.acquire() as connection:
@@ -472,46 +536,45 @@ class MembershipService:
                 if user_id in owners and len(owners) == 1:
                     raise ValidationError([LAST_OWNER])
 
-                # Personal rows first, in the same transaction as the deletion
-                # they exist to unblock. A member's own notifications, watched
-                # issues, shortcuts and private views answer to nobody else, so
-                # they leave with the membership rather than preventing it --
-                # before this, a single unread notification made a member
-                # permanently unremovable and reported it as a 500.
+                blocked = await self._repository.shared_holdings(
+                    connection,
+                    workspace_id=scope.workspace_id,
+                    user_id=user_id,
+                )
+
+                if blocked:
+                    # Every blocker at once rather than the first one. An admin
+                    # clearing a departure wants the list of screens to visit,
+                    # and reporting them one removal attempt at a time turns
+                    # one job into four. The order is the repository's, so two
+                    # attempts at the same removal read the same way.
+                    raise ValidationError([_REMOVAL_BLOCKED[name] for name in blocked])
+
                 await self._repository.delete_personal_rows(
                     connection,
                     workspace_id=scope.workspace_id,
                     user_id=user_id,
                 )
 
-                try:
-                    removed = await self._repository.delete(
-                        connection,
-                        workspace_id=scope.workspace_id,
-                        user_id=user_id,
-                    )
-                except asyncpg.RestrictViolationError as error:
-                    # Everything personal is already gone, so a RESTRICT
-                    # surviving to here is about something the workspace
-                    # shares. `_REMOVAL_BLOCKED` names which, so the admin is
-                    # told what to reassign instead of reading "Internal
-                    # server error".
-                    #
-                    # An unmapped constraint is re-raised untouched, on the
-                    # same argument `ProjectService._raise_mapped` makes: a
-                    # violation nobody taught this mapping about is a defect --
-                    # a table added by a later migration whose policy was never
-                    # decided -- and dressing it as a field error would tell an
-                    # admin to fix input that was never the problem while
-                    # hiding the gap behind a 200.
-                    issue = _REMOVAL_BLOCKED.get(error.constraint_name or "")
+                await self._repository.unassign_issues(
+                    connection,
+                    workspace_id=scope.workspace_id,
+                    user_id=user_id,
+                )
 
-                    if issue is None:
-                        raise
-
-                    raise ValidationError([issue]) from None
+                removed = await self._repository.mark_removed(
+                    connection,
+                    workspace_id=scope.workspace_id,
+                    user_id=user_id,
+                )
 
                 if removed is None:
+                    # No current membership matched: no such account, an
+                    # account that was never here, or one that already left.
+                    # MEMBER_NOT_FOUND covers all three deliberately -- see the
+                    # note on the constant for why telling them apart would
+                    # answer "does this user id exist" for any id a caller can
+                    # guess.
                     raise ValidationError([MEMBER_NOT_FOUND])
 
                 return removed
@@ -635,6 +698,13 @@ class MembershipService:
         the whole proof -- so an invitation forwarded to a colleague is
         accepted by the colleague, which is the ordinary case and not an
         attack.
+
+        Somebody who was removed and is invited back is granted a membership
+        again rather than told they already have one. Since 026 their row
+        outlives their membership, so the grant would collide with a tombstone;
+        `create` revives it in place instead, and the two cases are told apart
+        by that method rather than by a constraint name here. See its docstring
+        for why a grant to a CURRENT member still refuses.
         """
         async with self._pool.acquire() as connection:
             async with connection.transaction():
@@ -646,20 +716,17 @@ class MembershipService:
                 if invitation is None:
                     raise ValidationError([INVALID_INVITATION])
 
-                try:
-                    return await self._repository.create(
-                        connection,
-                        workspace_id=invitation.workspace_id,
-                        user_id=user_id,
-                        role=invitation.role,
-                    )
-                except asyncpg.UniqueViolationError as exc:
-                    if exc.constraint_name != MEMBERSHIP_PKEY_CONSTRAINT:
-                        raise
+                membership = await self._repository.create(
+                    connection,
+                    workspace_id=invitation.workspace_id,
+                    user_id=user_id,
+                    role=invitation.role,
+                )
 
-                    # Already a member. The rollback this raise causes takes
-                    # `accepted_at` with it, so the invitation is left for
-                    # whoever it was actually meant for.
+                if membership is None:
+                    # Already a current member. The rollback this raise causes
+                    # takes `accepted_at` with it, so the invitation is left
+                    # for whoever it was actually meant for.
                     raise ValidationError(
                         [
                             ValidationIssue(
@@ -668,7 +735,9 @@ class MembershipService:
                                 message="You are already a member of this workspace",
                             )
                         ]
-                    ) from None
+                    )
+
+                return membership
 
     async def _lock_owners(
         self,

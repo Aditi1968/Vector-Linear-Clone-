@@ -51,6 +51,24 @@ class WorkspaceMemberEntity:
     role: str
     created_at: datetime
 
+    # When this membership ended, or None while it has not. See
+    # migrations/026_member_departure.sql: a former member keeps their row so
+    # that everything they authored still resolves to a person, and this is
+    # what tells a reader which of the two they are looking at.
+    #
+    # `list_members` returns former members alongside current ones rather than
+    # filtering them out, and this field is why that is safe. The list has two
+    # readers with opposite needs -- an assignee picker must not offer someone
+    # who has left, and a comment thread must still name whoever wrote each
+    # entry -- and one list carrying the distinction serves both, where an
+    # active-only list would leave attribution querying twice and merging.
+    #
+    # It is deliberately NOT how anything decides what a caller may do. That
+    # question is `find_membership`'s, which never returns a removed row at
+    # all; a permission read off a field on a list is a permission read after
+    # the list was already handed over.
+    removed_at: datetime | None
+
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceInvitationEntity:

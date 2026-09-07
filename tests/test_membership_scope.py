@@ -60,6 +60,18 @@ MIGRATION_002 = MIGRATIONS_DIR / "002_tenancy.sql"
 MIGRATION_003 = MIGRATIONS_DIR / "003_auth.sql"
 MIGRATION_004 = MIGRATIONS_DIR / "004_membership.sql"
 
+# The one migration after 004 this file has to apply, and the reason it is a
+# genealogy and not a range. Every read in MembershipRepository now carries
+# `removed_at IS NULL`, so a schema that stops at 004 cannot answer any of
+# them -- and that predicate is the load-bearing half of section E, which is
+# about who the database will and will not resolve a membership for.
+#
+# 026 alters `workspace_members` and touches nothing else, so it applies
+# straight onto 004 with 005 through 025 absent. That is the property 026's own
+# header claims ("DEPENDS ON 004"), and applying it here is what tests the
+# claim.
+MIGRATION_026 = MIGRATIONS_DIR / "026_member_departure.sql"
+
 # The tenant migrations/002_tenancy.sql seeds, as literals. 002 names it in
 # the file precisely so a test can assert against a constant rather than
 # querying for the value it is about to check.
@@ -103,6 +115,13 @@ INJECTION_SLUGS = (
 )
 
 # The whole statement MembershipRepository.find_membership sends, normalized.
+#
+# `removed_at IS NULL` is pinned here alongside the two key equalities because
+# since 026 it does the same job they do. A membership that has ended keeps its
+# row -- that is how a two-year-old comment still resolves to an author -- so
+# this predicate, and nothing else, is what stops the row from continuing to
+# produce an AuthorizedWorkspaceScope for someone who has left. Dropped from
+# this statement, every other check in this file still passes.
 FIND_MEMBERSHIP_SQL = (
     "SELECT workspaces.id AS workspace_id, "
     "workspaces.slug AS workspace_slug, "
@@ -112,10 +131,14 @@ FIND_MEMBERSHIP_SQL = (
     "workspace_members.created_at AS created_at "
     "FROM workspace_members "
     "JOIN workspaces ON workspaces.id = workspace_members.workspace_id "
-    "WHERE workspaces.slug = $1 AND workspace_members.user_id = $2"
+    "WHERE workspaces.slug = $1 "
+    "AND workspace_members.user_id = $2 "
+    "AND workspace_members.removed_at IS NULL"
 )
 
-# And the whole statement MembershipRepository.list_for_user sends.
+# And the whole statement MembershipRepository.list_for_user sends. Same
+# predicate, for the workspace switcher: a former member who kept an entry
+# would be looking at a tenant that refuses them on arrival.
 LIST_FOR_USER_SQL = (
     "SELECT workspaces.id AS workspace_id, "
     "workspaces.slug AS workspace_slug, "
@@ -126,6 +149,7 @@ LIST_FOR_USER_SQL = (
     "FROM workspace_members "
     "JOIN workspaces ON workspaces.id = workspace_members.workspace_id "
     "WHERE workspace_members.user_id = $1 "
+    "AND workspace_members.removed_at IS NULL "
     "ORDER BY workspaces.slug "
     "LIMIT $2"
 )
@@ -776,7 +800,7 @@ async def test_listing_bounds_itself_without_being_asked_to():
 
 
 async def _build_schema(connection) -> None:
-    """001, 002, users, 004 -- the genealogy an operator would produce.
+    """001, 002, users, 004, 026 -- the genealogy an operator would produce.
 
     001 goes in as its own text and the rest through
     `scripts.apply_migration`, matching tests/test_migration_002_db.py: a
@@ -807,6 +831,13 @@ async def _build_schema(connection) -> None:
 
     async with connection.transaction():
         await apply_migration(connection, MIGRATION_004, migrations_dir=MIGRATIONS_DIR)
+
+    # And the departure column, skipping 005 through 025 entirely. See
+    # MIGRATION_026 above: the ledger records what has been applied and not what
+    # depends on what, so a file whose only statement is an ALTER against a
+    # table 004 built applies here exactly as it would in order.
+    async with connection.transaction():
+        await apply_migration(connection, MIGRATION_026, migrations_dir=MIGRATIONS_DIR)
 
 
 async def _seed(connection) -> None:
