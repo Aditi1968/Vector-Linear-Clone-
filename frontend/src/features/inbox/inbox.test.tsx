@@ -192,6 +192,44 @@ describe('the inbox', () => {
     })
   })
 
+  it('accumulates a second page instead of replacing the first', async () => {
+    const view = renderApp({ initialPath: PATH, sidebar: shellSidebarData([], 2) })
+
+    await view.link.resolve('NotificationInbox', {
+      data: inboxData([notification({ id: NOTIFICATION_ID, kind: 'ASSIGNED' })], true),
+    })
+    await view.link.resolve('IssueWorkspaceContext', { data: workspaceContextData() })
+
+    await view.user.click(screen.getByRole('button', { name: 'Load more' }))
+
+    // The cursor is the first page's `endCursor`, not `null` -- `after: null`
+    // is what the merge policy reads as "start the list over".
+    await expect(view.link.waitForRequest('NotificationInbox')).resolves.toMatchObject({
+      after: cursor('inbox-1'),
+    })
+
+    await view.link.resolve('NotificationInbox', {
+      data: inboxData([
+        notification({
+          id: '00000000-0000-4000-8000-0000000000e2',
+          kind: 'COMMENTED',
+        }),
+      ]),
+    })
+
+    // Both pages, in order. Without the `notifications` field policy in
+    // `src/lib/graphql/cache.ts` this write lands under a cache key nothing
+    // is watching, the screen keeps showing one row, and Apollo reports
+    // nothing at all.
+    const rows = within(
+      within(main()).getByRole('list', { name: 'Notifications' }),
+    ).getAllByRole('listitem')
+
+    expect(rows).toHaveLength(2)
+    expect(rows[0]).toHaveTextContent('assigned an issue to you')
+    expect(rows[1]).toHaveTextContent('commented on an issue')
+  })
+
   it('links every row to the issue it is about', async () => {
     const view = await openInbox(1, [notification()])
 
