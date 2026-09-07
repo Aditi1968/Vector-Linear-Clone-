@@ -417,6 +417,8 @@ export type IssueSummary = {
   createdAt: Scalars['DateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
+  /** The name this issue is known by outside the product -- ENG-42. Costs nothing to select: it is the team's key and the issue's number, both already on the row. */
+  identifier: Scalars['String']['output'];
   priority: Scalars['Int']['output'];
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
@@ -784,6 +786,8 @@ export type Notification = {
   actorId?: Maybe<Scalars['UUID']['output']>;
   createdAt: Scalars['DateTime']['output'];
   id: Scalars['UUID']['output'];
+  /** The issue this is about, or null where it is no longer visible -- an archived issue, most often. Cheap to select: one query per page of notifications rather than one per row. */
+  issue?: Maybe<IssueSummary>;
   issueId: Scalars['UUID']['output'];
   kind: NotificationKind;
   readAt?: Maybe<Scalars['DateTime']['output']>;

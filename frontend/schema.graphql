@@ -374,6 +374,11 @@ type IssueSetProjectPayload {
 
 type IssueSummary {
   id: UUID!
+
+  """
+  The name this issue is known by outside the product -- ENG-42. Costs nothing to select: it is the team's key and the issue's number, both already on the row.
+  """
+  identifier: String!
   title: String!
   description: String
   priority: Int!
@@ -546,6 +551,11 @@ type Notification {
   kind: NotificationKind!
   readAt: DateTime
   createdAt: DateTime!
+
+  """
+  The issue this is about, or null where it is no longer visible -- an archived issue, most often. Cheap to select: one query per page of notifications rather than one per row.
+  """
+  issue: IssueSummary
 }
 
 type NotificationConnection {

@@ -7,8 +7,10 @@ from strawberry.fastapi import BaseContext
 from app.config import Environment, get_settings
 from app.db import get_pool
 from app.domain.auth import UserEntity
+from app.domain.issues import IssueEntity
 from app.domain.labels import LabelEntity
 from app.graphql.loaders.cycles import CycleLoader
+from app.graphql.loaders.issues import IssueKey, build_issue_loader
 from app.graphql.loaders.labels import IssueLabelKey, issue_label_loader
 from app.graphql.loaders.projects import (
     build_project_loader,
@@ -181,6 +183,22 @@ class VectorContext(BaseContext):
         never selects `labels` never builds one.
         """
         return issue_label_loader(self.label_service)
+
+    @functools.cached_property
+    def issue_summaries(self) -> DataLoader[IssueKey, IssueEntity | None]:
+        """Batches an issue-per-row field -- `Notification.issue` today.
+
+        Per request and never wider, for the reason `issue_labels` above
+        gives: a loader living longer than one request is a cache with no
+        invalidation, and one shared between requests answers one caller with
+        another's batch.
+
+        Built on first use rather than in `__init__`, also for that field's
+        reason. `DataLoader` binds itself to the running event loop and a
+        context is constructed where there need not be one, and a document
+        that never selects the field never builds a loader.
+        """
+        return build_issue_loader(self.issue_service)
 
     def session_token(self) -> str | None:
         """The raw token this request presented, if it presented one.

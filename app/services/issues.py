@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import date
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -210,6 +211,42 @@ class IssueService:
                 connection,
                 scope=scope,
                 issue_id=issue_id,
+            )
+
+    async def get_many_by_ids(
+        self,
+        *,
+        scope: WorkspaceScope,
+        issue_ids: Sequence[UUID],
+    ) -> list[IssueEntity]:
+        """The live issues in this workspace among these ids, in no set order.
+
+        Declared above `list`, and that is load-bearing rather than tidy:
+        inside this class the annotation `list[IssueEntity]` resolves to
+        `IssueService.list` once that method exists, and the class body stops
+        compiling. Moving this below it is a TypeError at import.
+
+        For batching a field that resolves one issue per row of some other
+        list -- `Notification.issue` today. A single SELECT needs no explicit
+        write transaction, so this acquires a connection without opening one.
+
+        An id that names nothing here is simply absent from the result, and
+        that covers an issue in another workspace, an archived one and an id
+        that exists nowhere. The caller cannot tell them apart, which is the
+        same property `get_by_id` has and is the reason this returns a list
+        rather than raising on a miss.
+        """
+        if not issue_ids:
+            # No statement for an empty batch. A DataLoader will not dispatch
+            # one, but this is a public method and `= ANY('{}')` is a round
+            # trip that can only answer nothing.
+            return []
+
+        async with self._pool.acquire() as connection:
+            return await self._repository.find_many_by_ids(
+                connection,
+                scope=scope,
+                issue_ids=issue_ids,
             )
 
     async def create(

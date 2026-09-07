@@ -423,3 +423,33 @@ async def test_a_second_workspace_binds_its_own_id():
 
     assert first_args[0] == TEST_WORKSPACE_ID
     assert second_args[0] == other
+
+
+async def test_the_batch_lookup_is_scoped_and_skips_archived():
+    """`Notification.issue` reaches this, with ids that came from ROWS.
+
+    A batch is the easy read to leave unscoped -- the ids look trustworthy
+    because the server put them there -- so the tenant predicate leads exactly
+    as it does on the single lookup, and `archived_at IS NULL` beside it, so a
+    notification about an archived issue answers the same null the issue
+    itself answers everywhere else.
+    """
+    wanted = [uuid4(), uuid4()]
+    connection = FakeConnection(rows=[])
+
+    await IssueRepository().find_many_by_ids(
+        connection,
+        scope=TEST_SCOPE,
+        issue_ids=wanted,
+    )
+
+    query = normalize(connection.queries[0]["query"])
+
+    assert "WHERE issues.workspace_id = $1" in query
+    assert "AND issues.id = ANY($2::UUID[])" in query
+    assert "AND issues.archived_at IS NULL" in query
+
+    assert connection.queries[0]["args"] == (TEST_WORKSPACE_ID, wanted)
+
+    for value in wanted:
+        assert str(value) not in query

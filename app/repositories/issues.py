@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import date
 from uuid import UUID
 
@@ -365,6 +366,51 @@ class IssueRepository:
             return None
 
         return self._to_entity(row)
+
+    async def find_many_by_ids(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        issue_ids: Sequence[UUID],
+    ) -> list[IssueEntity]:
+        """Every live issue in this workspace among these ids, in no set order.
+
+        One statement for many ids, because the alternative is one statement
+        per row on any list that resolves an issue per item --
+        `Notification.issue` is the first, and an inbox page of twenty-five
+        would otherwise be twenty-five round trips.
+
+        Ids belonging to another workspace simply do not come back: the tenant
+        predicate leads here as everywhere, so a batch cannot be used to learn
+        anything a single `get_by_id` would have withheld. That matters more
+        here than usual, because the ids arrive from ROWS rather than from a
+        client -- a notification names its issue -- and a mismatched row must
+        still not be able to surface another tenant's issue.
+
+        `archived_at IS NULL`, matching every other read on this class. A
+        notification about an issue that has since been archived resolves to
+        nothing, which is the same answer the issue itself gives everywhere
+        else in the API.
+
+        The result is a list rather than a dict keyed by the ids asked for:
+        building that mapping means deciding what an absent id means, which is
+        the caller's decision and not the repository's.
+        """
+        rows = await connection.fetch(
+            f"""
+            SELECT
+{ISSUE_COLUMNS}
+            FROM issues
+            WHERE issues.workspace_id = $1
+                AND issues.id = ANY($2::UUID[])
+                AND issues.archived_at IS NULL
+            """,
+            scope.workspace_id,
+            list(issue_ids),
+        )
+
+        return [self._to_entity(row) for row in rows]
 
     async def lock_snapshot(
         self,

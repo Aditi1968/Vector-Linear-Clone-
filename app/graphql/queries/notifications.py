@@ -63,7 +63,7 @@ class NotificationQuery:
             # error it is and is masked on the way out.
             raise bad_user_input("Invalid pagination arguments", exc) from None
 
-        return NotificationConnection.from_domain(page)
+        return NotificationConnection.from_domain(page, scope)
 
     @strawberry.field
     async def notification_unread_count(

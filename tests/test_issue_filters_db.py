@@ -1015,3 +1015,35 @@ async def test_every_ordering_can_be_served_by_an_index(wired, field, direction)
 
     assert "Index Scan" in plan or "Index Only Scan" in plan, plan
     assert "Sort" not in plan, plan
+
+
+async def test_the_batch_lookup_cannot_reach_across_the_tenant_boundary(wired):
+    """`Notification.issue` resolves ids that arrived on a row, not from a client.
+
+    That makes it the read most likely to be trusted: the server wrote the id,
+    so it looks safe to look up without a workspace. It is not -- a mismatched
+    row, or a loader keyed on the id alone, would surface another tenant's
+    issue -- so the batch carries the scope and B's ids answer nothing in A.
+    """
+    both = [_issue_id(40), _issue_id(910)]
+
+    in_a = await wired.service.get_many_by_ids(scope=SCOPE_A, issue_ids=both)
+    in_b = await wired.service.get_many_by_ids(scope=SCOPE_B, issue_ids=both)
+
+    assert [entity.id for entity in in_a] == [_issue_id(40)]
+    assert [entity.id for entity in in_b] == [_issue_id(910)]
+
+
+async def test_the_batch_lookup_omits_an_archived_issue(wired):
+    """The same null an archived issue gives on every other read."""
+    await wired.pool.execute(
+        "UPDATE issues SET archived_at = now() WHERE id = $1",
+        _issue_id(40),
+    )
+
+    found = await wired.service.get_many_by_ids(
+        scope=SCOPE_A,
+        issue_ids=[_issue_id(40), _issue_id(50)],
+    )
+
+    assert [entity.id for entity in found] == [_issue_id(50)]
