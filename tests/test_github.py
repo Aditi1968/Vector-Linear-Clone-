@@ -144,21 +144,33 @@ class FakeGithubRepository:
         installation=None,
         repositories=None,
         workspace_id=None,
+        installation_id=INSTALLATION_ID,
         confirmed=True,
         expired=False,
     ):
         self.installation = installation
         self.repositories = list(repositories or [])
 
-        # Which workspace holds the row for INSTALLATION_ID, `confirmed`
-        # whether GitHub has answered for it, and `expired` whether the claim
-        # is past `CLAIM_TTL`. `confirmed` defaults to True because that is
-        # what every delivery test in this file means by "this installation
-        # belongs to that workspace"; a test about the claim window says so.
+        # The one installation row this fake holds: which id it is, which
+        # workspace holds it, whether GitHub has answered for it, and whether
+        # the claim is past `CLAIM_TTL`.
+        #
+        # `confirmed` defaults to True because that is what every delivery
+        # test in this file means by "this installation belongs to that
+        # workspace"; a test about the claim window says otherwise.
+        #
+        # The id is compared rather than assumed, so that a delivery naming a
+        # DIFFERENT installation resolves to nothing here exactly as it does
+        # against the real statements -- which is a property worth being able
+        # to assert without a database.
         self.workspace_id = workspace_id
+        self.installation_id = installation_id
         self.confirmed = confirmed
         self.expired = expired
         self.calls: list[tuple] = []
+
+    def _holds(self, installation_id) -> bool:
+        return self.workspace_id is not None and installation_id == self.installation_id
 
     async def get_installation(self, connection, *, scope):
         self.calls.append(("get_installation", scope.workspace_id))
@@ -186,6 +198,7 @@ class FakeGithubRepository:
             confirmed_at=None,
         )
         self.workspace_id = scope.workspace_id
+        self.installation_id = installation_id
         self.confirmed = False
         self.expired = False
 
@@ -209,12 +222,15 @@ class FakeGithubRepository:
             ("find_confirmed_workspace_by_installation_id", installation_id)
         )
 
-        return self.workspace_id if self.confirmed else None
+        if not self._holds(installation_id) or not self.confirmed:
+            return None
+
+        return self.workspace_id
 
     async def confirm_installation(self, connection, *, installation_id, within):
         self.calls.append(("confirm_installation", installation_id, within))
 
-        if self.workspace_id is None or self.confirmed or self.expired:
+        if not self._holds(installation_id) or self.confirmed or self.expired:
             return None
 
         self.confirmed = True
@@ -231,7 +247,7 @@ class FakeGithubRepository:
     async def delete_expired_claim(self, connection, *, installation_id, older_than):
         self.calls.append(("delete_expired_claim", installation_id, older_than))
 
-        if self.workspace_id is None or self.confirmed or not self.expired:
+        if not self._holds(installation_id) or self.confirmed or not self.expired:
             return False
 
         self.workspace_id = None

@@ -482,10 +482,15 @@ async def test_no_allowlist_ends_the_flow_on_a_page_rather_than_a_guess():
 # --- deliveries -------------------------------------------------------
 
 
-def installation_body(action="created", login="acme", repositories=None) -> bytes:
+def installation_body(
+    action="created",
+    login="acme",
+    repositories=None,
+    installation_id=INSTALLATION_ID,
+) -> bytes:
     payload = {
         "action": action,
-        "installation": {"id": INSTALLATION_ID, "account": {"login": login}},
+        "installation": {"id": installation_id, "account": {"login": login}},
     }
 
     if repositories is not None:
@@ -647,6 +652,151 @@ async def test_a_signed_delivery_this_server_has_no_rule_for_is_accepted():
 
     assert response.status_code == 204
     assert repository.calls == []
+
+
+# --- an installation id is a claim, not proof -------------------------
+#
+# The whole defect end to end, over HTTP, with nothing faked but the database
+# and the session lookup. An admin who is entitled to every request they make
+# here still cannot take delivery of an organisation they do not own.
+
+
+VICTIM_INSTALLATION_ID = 5150
+
+
+def repositories_body(installation_id=VICTIM_INSTALLATION_ID) -> bytes:
+    """An `installation_repositories` delivery: the one that carries names."""
+    return json.dumps(
+        {
+            "action": "added",
+            "installation": {
+                "id": installation_id,
+                "account": {"login": "victim-org"},
+            },
+            "repositories_added": [{"id": 99, "full_name": "victim-org/payments"}],
+        },
+        indent=2,
+    ).encode("utf-8")
+
+
+async def test_a_valid_callback_records_a_claim_and_nothing_more():
+    """The install callback's own answer, which used to read "connected".
+
+    Everything about this request is legitimate -- the admin's own workspace,
+    their own state, their own session. It is the installation id that is
+    unproven, so what is recorded is a claim: unconfirmed and blank.
+    """
+    repository = FakeGithubRepository()
+
+    async with build_client(build_services_for(repository=repository)) as client:
+        state = state_from(await start_install(client))
+
+        response = await client.get(
+            "/github/callback",
+            params={"state": state, "installation_id": INSTALLATION_ID},
+        )
+
+    assert response.status_code == 302
+    assert repository.confirmed is False
+    assert repository.installation is not None
+    assert repository.installation.confirmed_at is None
+    assert repository.installation.account_login is None
+
+
+async def test_claiming_another_organisations_installation_yields_nothing():
+    """The attack, start to finish.
+
+    An admin of their OWN workspace starts a legitimate install, gets a valid
+    state, and finishes the callback naming an installation id belonging to
+    somebody else's organisation. Then that organisation's own delivery
+    arrives, correctly signed, as one will every time they change what the app
+    can see.
+
+    Before migrations/016_github_installation_trust.sql the claim was recorded
+    as a connection and this delivery wrote `victim-org` and
+    `victim-org/payments` into the attacker's workspace, readable through
+    `githubIntegration`. Now the claim resolves nothing:
+    `installation_repositories` cannot confirm a claim, and it is excluded for
+    exactly this reason.
+    """
+    repository = FakeGithubRepository()
+
+    async with build_client(build_services_for(repository=repository)) as client:
+        state = state_from(await start_install(client))
+
+        await client.get(
+            "/github/callback",
+            params={"state": state, "installation_id": VICTIM_INSTALLATION_ID},
+        )
+
+        body = repositories_body()
+        delivery = await client.post(
+            "/github/webhook",
+            content=body,
+            headers=signed(body) | {"X-GitHub-Event": "installation_repositories"},
+        )
+
+    # Accepted, because refusing would earn GitHub a redelivery loop for a
+    # payload that will never be handled differently. Applied to nobody.
+    assert delivery.status_code == 204
+    assert repository.confirmed is False
+    assert repository.called("set_account_login") == []
+    assert repository.repositories == []
+
+
+async def test_a_signed_installation_created_confirms_the_claim_it_names():
+    """The honest path over HTTP: claim, then GitHub says so, then connected."""
+    repository = FakeGithubRepository()
+
+    async with build_client(build_services_for(repository=repository)) as client:
+        state = state_from(await start_install(client))
+
+        await client.get(
+            "/github/callback",
+            params={"state": state, "installation_id": INSTALLATION_ID},
+        )
+
+        body = installation_body(repositories=[{"id": 7, "full_name": "acme/web"}])
+        delivery = await client.post(
+            "/github/webhook", content=body, headers=signed(body)
+        )
+
+    assert delivery.status_code == 204
+    assert repository.confirmed is True
+    assert repository.called("set_account_login") == [
+        ("set_account_login", WORKSPACE_ID, "acme")
+    ]
+    assert repository.repositories == [
+        GithubRepositoryEntity(repository_id=7, full_name="acme/web")
+    ]
+
+
+async def test_a_delivery_for_an_installation_this_workspace_did_not_claim():
+    """A signed delivery is not a licence to write into whoever is nearby.
+
+    The workspace holds a claim on one installation and the delivery names a
+    different one, so nothing resolves and nothing is written -- and in
+    particular this workspace's claim is not confirmed by somebody else's
+    installation being created.
+    """
+    repository = FakeGithubRepository()
+
+    async with build_client(build_services_for(repository=repository)) as client:
+        state = state_from(await start_install(client))
+
+        await client.get(
+            "/github/callback",
+            params={"state": state, "installation_id": INSTALLATION_ID},
+        )
+
+        body = installation_body(installation_id=VICTIM_INSTALLATION_ID)
+        delivery = await client.post(
+            "/github/webhook", content=body, headers=signed(body)
+        )
+
+    assert delivery.status_code == 204
+    assert repository.confirmed is False
+    assert repository.called("set_account_login") == []
 
 
 # --- the real composition root ----------------------------------------
