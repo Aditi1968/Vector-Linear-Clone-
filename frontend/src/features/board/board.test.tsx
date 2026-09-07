@@ -280,6 +280,29 @@ describe('moving a card', () => {
     )
   })
 
+  it('keeps the named menu, and drops the arrows, when columns are not states', async () => {
+    const { link, user } = await openBoard({ search: '?group=priority' })
+
+    // Alpha is priority 3, so it sits in the Medium column now.
+    within(column('Medium')).getByRole('link', { name: 'Alpha' }).focus()
+    await user.keyboard('{Alt>}{ArrowRight}{/Alt}')
+    await link.idle()
+
+    // The arrows are spatial: "one column to the right" cannot mean a status
+    // when the columns are priorities.
+    expect(link.countOf('BoardIssueMove')).toBe(0)
+
+    // The menu names its destination, so it still applies -- looking at the
+    // work by priority must not take away the board's one write.
+    await user.click(screen.getByRole('button', { name: 'Move ENG-1' }))
+    await user.click(screen.getByRole('menuitem', { name: 'Building' }))
+
+    expect(await link.waitForRequest('BoardIssueMove')).toEqual({
+      id: issueId(1),
+      input: { workspaceSlug: WORKSPACE_SLUG, workflowStateId: BUILDING },
+    })
+  })
+
   it('does nothing at the end of the board rather than wrapping around', async () => {
     const { link, user } = await openBoard()
 

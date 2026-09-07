@@ -9,7 +9,7 @@ import { BoardCard, CARD_MIME } from './BoardCard'
 
 export interface BoardColumnProps {
   column: BoardColumnData
-  /** Every column this board can move a card to. Empty unless grouped by status. */
+  /** Every workflow state a card here can be moved into, in the team's order. */
   moveTargets: readonly WorkflowState[]
   memberById: ReadonlyMap<string, WorkspaceMember>
   today: string
@@ -127,6 +127,10 @@ export function BoardColumn({
               assignee={
                 issue.assigneeId === null ? undefined : memberById.get(issue.assigneeId)
               }
+              // This column is a workflow state, so the columns are the states
+              // -- which is what makes dragging and the arrow keys mean
+              // something. See `BoardCardProps.columnsAreStates`.
+              columnsAreStates={state !== null}
               issue={issue}
               key={issue.id}
               moveTargets={moveTargets}

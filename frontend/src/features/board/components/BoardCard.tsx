@@ -33,14 +33,24 @@ export interface BoardCardProps {
   /** Today as `YYYY-MM-DD`, for deciding whether the due date has passed. */
   today: string
   /**
-   * Every column this card could move to, in board order.
+   * Every workflow state this card can be moved into, in the team's order.
    *
-   * Empty when the board is not grouped by status, which is what removes the
-   * move affordances entirely: a card in an assignee column has no "next
-   * column" that a status change would take it to, and offering one would move
-   * the card somewhere the user cannot see.
+   * The team's states in every grouping, not only in the status one: changing
+   * an issue's status is the board's one write, and choosing to look at the
+   * work by assignee should not take it away.
    */
   moveTargets: readonly WorkflowState[]
+  /**
+   * Whether the columns on screen ARE those states.
+   *
+   * What the two spatial affordances hang off. Dragging a card and pressing
+   * `Alt` with an arrow both say "put it there", and "there" only means
+   * something when the place the card lands is a place on screen. Grouped by
+   * priority, `Alt+Right` would change a card's status while leaving it
+   * exactly where it was, which is a worse answer than doing nothing: the
+   * menu, which names its destination out loud, stays available either way.
+   */
+  columnsAreStates: boolean
   onMove: (issue: IssueRowFields, workflowStateId: string) => void
   /** A move is in flight for this card. */
   moving: boolean
@@ -80,6 +90,7 @@ export function BoardCard({
   assignee,
   today,
   moveTargets,
+  columnsAreStates,
   onMove,
   moving,
   onDragStart,
@@ -125,7 +136,11 @@ export function BoardCard({
   })
 
   function handleKeyDown(event: KeyboardEvent<HTMLAnchorElement>) {
-    if (!event.altKey || (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')) {
+    if (
+      !columnsAreStates ||
+      !event.altKey ||
+      (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight')
+    ) {
       return
     }
 
@@ -164,7 +179,7 @@ export function BoardCard({
       // Dragging is an enhancement on top of the menu and the arrows, and it
       // is off entirely unless a drop would mean something -- which is only
       // when the columns are workflow states.
-      draggable={moveTargets.length > 0}
+      draggable={columnsAreStates}
       onDragEnd={onDragEnd}
       onDragStart={handleDragStart}
     >

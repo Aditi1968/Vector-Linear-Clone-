@@ -119,13 +119,17 @@ export function BoardScreen() {
     [issues, memberById],
   )
 
-  /** Where a card can be moved: the columns, but only when they are states. */
+  /**
+   * Where a card can be moved, in the team's own board order.
+   *
+   * The states in every grouping, not only in the status one: a status change
+   * is the board's one write and a view choice must not remove it. What the
+   * grouping does decide is whether *dragging* and the arrow keys apply, which
+   * each column answers for itself.
+   */
   const moveTargets = useMemo(
-    () =>
-      view.group === 'status'
-        ? columns.flatMap((column) => (column.state === null ? [] : [column.state]))
-        : NO_STATES,
-    [columns, view.group],
+    () => [...states].sort((left, right) => left.position - right.position),
+    [states],
   )
 
   const updateView = useCallback(
