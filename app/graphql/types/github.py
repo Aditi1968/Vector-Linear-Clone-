@@ -11,17 +11,25 @@ from app.domain.github import GithubIntegrationEntity
 class GithubIntegrationStatusType(Enum):
     """The transport's copy of app.domain.github.GITHUB_STATUSES.
 
-    Three members rather than a `connected: Boolean`, because a client has to
-    render three different things: an operator's notice for a deployment with
+    Four members rather than a `connected: Boolean`, because a client has to
+    render four different things: an operator's notice for a deployment with
     no GitHub App, a Connect button for a workspace that has not installed it,
-    and the installation itself. A boolean would make the first two identical
-    and put a button in front of a user whose click cannot work.
+    a wait for a workspace whose claim GitHub has not answered for, and the
+    installation itself. A boolean would make the first two identical and put
+    a button in front of a user whose click cannot work.
+
+    PENDING arrived with migrations/016_github_installation_trust.sql and is
+    not cosmetic. A client that renders it as CONNECTED is reporting an
+    installation *claim* as an established fact, which is the defect that
+    migration closes -- so every consumer grows a branch for it rather than
+    falling through to whichever one its `else` happens to be.
 
     tests/test_github.py pins these members equal to the domain tuple.
     """
 
     UNCONFIGURED = "unconfigured"
     DISCONNECTED = "disconnected"
+    PENDING = "pending"
     CONNECTED = "connected"
 
 

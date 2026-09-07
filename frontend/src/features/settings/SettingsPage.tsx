@@ -64,6 +64,17 @@ interface IntegrationPanelProps {
  * integration is unavailable, and says why in the only terms the client is
  * entitled to.
  *
+ * ## Why `PENDING` is a branch of its own
+ *
+ * GitHub gained a fourth status when the server stopped believing the
+ * installation id its own callback was handed. It means the workspace has
+ * claimed an installation and GitHub has not confirmed it -- so there is
+ * nothing to show about an account or a repository, and there may never be.
+ * Rendering it as CONNECTED is the defect this screen would be re-committing;
+ * rendering it as DISCONNECTED would tell a user to click Connect at a claim
+ * that is already theirs. It gets its own badge, its own sentence, and a way
+ * out in both directions: run the install again, or cancel the claim.
+ *
  * `features/onboarding` reaches the same conclusion for its setup step. This
  * is a second component rather than a shared one because it has a control
  * that step does not -- disconnecting -- and reaching across a feature
@@ -99,6 +110,8 @@ function IntegrationPanel({
 
         {status === 'CONNECTED' ? (
           <Badge tone="success">Connected</Badge>
+        ) : status === 'PENDING' ? (
+          <Badge tone="info">Waiting for {name}</Badge>
         ) : status === 'DISCONNECTED' ? (
           <Badge>Not connected</Badge>
         ) : (
@@ -124,6 +137,38 @@ function IntegrationPanel({
                 }}
               >
                 Disconnect {name}
+              </Button>
+            </div>
+          </>
+        )}
+
+        {status === 'PENDING' && (
+          <>
+            <p className={styles.panelNote}>
+              This workspace has claimed a {name} installation and {name} has
+              not confirmed it yet. Nothing is connected until it does, and
+              nothing about the account or its repositories is shown until
+              then. This usually takes a moment. If it has not cleared after a
+              few minutes, remove the app on {name} and install it again --
+              that is what makes {name} send the confirmation afresh.
+            </p>
+            <p>
+              <a href={`${startPath}?workspace=${encodeURIComponent(workspaceSlug)}`}>
+                Run the {name} installation again
+              </a>
+            </p>
+            <div className={styles.rowActions}>
+              {/* The same Disconnect the connected state offers, because
+                  cancelling a claim is the other way out and the mutation is
+                  idempotent about which state it is ending. */}
+              <Button
+                variant="danger"
+                loading={isDisconnecting}
+                onClick={() => {
+                  setConfirming(true)
+                }}
+              >
+                Cancel {name} claim
               </Button>
             </div>
           </>

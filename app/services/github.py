@@ -13,8 +13,10 @@ import hashlib
 import hmac
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Final
 from urllib.parse import urlsplit
+from uuid import UUID
 
 import asyncpg
 from pydantic import SecretStr
@@ -27,6 +29,7 @@ from app.domain.errors import (
 from app.domain.github import (
     CONNECTED,
     DISCONNECTED,
+    PENDING,
     UNCONFIGURED,
     GithubInstallationEntity,
     GithubIntegrationEntity,
@@ -55,6 +58,56 @@ SIGNATURE_PREFIX: Final = "sha256="
 # typo would read as "no signature", which fails closed but fails for every
 # delivery at once.
 SIGNATURE_HEADER: Final = "X-Hub-Signature-256"
+
+# How long an unconfirmed claim stays open.
+#
+# A claim is a workspace saying "I just installed the app, and it is
+# installation N". Nothing proves that, so the claim only becomes a connection
+# if GitHub names N in a signed delivery before this runs out -- and an
+# attacker naming somebody else's installation cannot make GitHub emit
+# anything, so their claim simply expires holding nothing.
+#
+# Fifteen minutes rather than five: `installation.created` goes through
+# GitHub's delivery queue while the browser redirect that records the claim
+# takes one hop, so the two arrive in either order and a delivery that has been
+# retried needs room. Rather than fifteen hours, because every minute is a
+# minute in which a guessed id could be confirmed by the real owner's install.
+#
+# Not a column. The deadline is a policy, so it is compared against
+# `connected_at` at read time and shortening it takes effect on claims already
+# in flight -- see migrations/016_github_installation_trust.sql.
+CLAIM_TTL: Final = timedelta(minutes=15)
+
+# The `installation` actions that accompany a live installation, and therefore
+# the only ones that may confirm a claim.
+#
+# `created` is the ordinary one. The other two are here because `created` is
+# dispatched exactly once and can lose the race with the browser redirect that
+# records the claim -- a workspace whose claim was written a second too late
+# would otherwise have no way to a connection but uninstalling and starting
+# again.
+#
+# `deleted` and `suspend` are deliberately absent: they name an installation
+# that is ending or already stopped, and confirming a claim from one would
+# hand the claimant a connection to an organisation that has just revoked the
+# app. Every `installation_repositories` action is absent for the same reason
+# and a stronger one -- those payloads carry private repository names, which
+# is exactly what an unconfirmed claim must never be able to collect.
+#
+# ponytail: a delivery that ARRIVES BEFORE the claim is dropped, so an
+# `installation.created` that beats the browser redirect leaves the workspace
+# PENDING until the window closes. It is recoverable rather than terminal --
+# removing the app on GitHub and installing it again dispatches a fresh
+# `created`, which the next claim is in time for -- and the two actions above
+# catch some of the rest. The upgrade, if that recovery turns out to be one
+# too many steps, is to record the unclaimed delivery (installation id,
+# account, repository list, witnessed_at) in a table no workspace can read and
+# let a claim landing inside the same window confirm against it. Not built
+# now: it is a second copy of another organisation's data at rest, for a race
+# that costs an admin one reinstall.
+CONFIRMING_ACTIONS: Final = frozenset(
+    {"created", "new_permissions_accepted", "unsuspend"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -389,7 +442,16 @@ class GithubService:
         *,
         installation_id: int,
     ) -> GithubIntegrationEntity:
-        """Record that this workspace has installed the app.
+        """Record this workspace's CLAIM on an installation. Answers PENDING.
+
+        `installation_id` reaches here from a query string, and this method is
+        written on the assumption that it may be a lie. It records who claimed
+        what and stops; the workspace is not connected to anything until a
+        delivery GitHub signed names the same installation while the claim is
+        still open -- see `apply_webhook` and CLAIM_TTL. Before
+        migrations/016_github_installation_trust.sql this method reported
+        CONNECTED here, which is how an admin of one workspace could take
+        delivery of another organisation's account name and repositories.
 
         `connected_by` comes from the scope and never from an argument, for
         the reason MembershipService gives about `user_id`: an argument is
@@ -402,11 +464,18 @@ class GithubService:
         transaction, so there is no instant at which the workspace is
         connected to an account and holding another one's repository names.
 
+        The expired-claim sweep is third, between this workspace's own rows
+        going and the new claim landing, and it is what stops an abandoned
+        claim locking an installation id away for good. It can only remove a
+        row that is unconfirmed and out of time, so a *live* claim by another
+        workspace survives it and the insert then raises
+        GithubInstallationClaimedError -- the clean refusal, left to propagate
+        because another workspace holding this installation is not something
+        this layer can resolve.
+
         Raises GithubNotConfiguredError before touching the database. A row
         written by a deployment that cannot verify a webhook is a row nothing
-        will ever fill in or clean up. GithubInstallationClaimedError comes
-        from the repository and is left to propagate: another workspace
-        holding this installation is not something this layer can resolve.
+        will ever confirm or clean up.
         """
         require_workspace_admin(scope)
 
@@ -417,6 +486,11 @@ class GithubService:
             async with connection.transaction():
                 await self._repository.delete_repositories(connection, scope=scope)
                 await self._repository.delete_installation(connection, scope=scope)
+                await self._repository.delete_expired_claim(
+                    connection,
+                    installation_id=installation_id,
+                    older_than=CLAIM_TTL,
+                )
 
                 installation = await self._repository.insert_installation(
                     connection,
@@ -472,6 +546,19 @@ class GithubService:
         shows: `installation` (the account, the initial repository set, and
         removal) and `installation_repositories` (the set changing later).
         Everything else is accepted and ignored.
+
+        This method is also where a claim becomes a connection, and that is
+        deliberate rather than convenient: the signature checked upstream is
+        the only evidence this deployment ever receives about who owns an
+        installation, so the confirmation has to happen where the signature
+        has just been verified and nowhere else. See `_resolve_workspace`.
+
+        `_apply_account` runs before any repository write, in one transaction,
+        and that ordering is load-bearing beyond tidiness:
+        `github_installations_unconfirmed_holds_no_account` in 016 aborts the
+        whole delivery if this ever reached an unconfirmed row, and it does so
+        before a private `full_name` from somebody else's organisation has
+        been inserted.
         """
         if event not in ("installation", "installation_repositories"):
             return
@@ -489,11 +576,13 @@ class GithubService:
         async with self._pool.acquire() as connection:
             # One transaction for the whole delivery: an event that removes
             # some repositories and adds others must not be observable
-            # half-applied, and the workspace lookup has to hold for the
-            # writes that follow it.
+            # half-applied, and the workspace lookup -- or the confirmation
+            # that produced it -- has to hold for the writes that follow it.
             async with connection.transaction():
-                workspace_id = await self._repository.find_workspace_by_installation_id(
+                workspace_id = await self._resolve_workspace(
                     connection,
+                    event=event,
+                    action=payload.get("action"),
                     installation_id=installation_id,
                 )
 
@@ -524,6 +613,52 @@ class GithubService:
                     await self._apply_full_set(connection, scope, payload)
                 else:
                     await self._apply_delta(connection, scope, payload)
+
+    async def _resolve_workspace(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        event: str,
+        action: Any,
+        installation_id: int,
+    ) -> UUID | None:
+        """Whose installation this delivery is about, if it is anybody's.
+
+        Two questions in order, and the order is the security property.
+
+        First: is there a CONFIRMED installation with this id? That is the
+        steady state and it never involves a claim, so a workspace that GitHub
+        has already vouched for keeps receiving its deliveries whatever the
+        action is.
+
+        Only if there is not does a claim come into it, and then only for the
+        actions that accompany a live installation. A claim is promoted at most
+        once, by a delivery this server has verified GitHub sent, and only
+        while the claim is young -- the repository's UPDATE carries all three
+        conditions, so two deliveries racing cannot promote two claims.
+
+        None for everything else, and the caller drops the delivery in
+        silence: an installation nobody claimed, a claim that expired, a claim
+        somebody else's workspace holds, or an action that proves nothing.
+        """
+        workspace_id = (
+            await self._repository.find_confirmed_workspace_by_installation_id(
+                connection,
+                installation_id=installation_id,
+            )
+        )
+
+        if workspace_id is not None:
+            return workspace_id
+
+        if event != "installation" or action not in CONFIRMING_ACTIONS:
+            return None
+
+        return await self._repository.confirm_installation(
+            connection,
+            installation_id=installation_id,
+            within=CLAIM_TTL,
+        )
 
     async def _apply_account(
         self,
@@ -616,17 +751,27 @@ class GithubService:
     ) -> GithubIntegrationEntity:
         """Assemble the answer, with the status decided in one place.
 
-        UNCONFIGURED wins over CONNECTED when a deployment's credentials have
+        UNCONFIGURED wins over everything when a deployment's credentials have
         been removed while a workspace still holds an installation row. The
         row is still reported -- it is real, and a user is entitled to see
         what their workspace connected -- but the status says the integration
         cannot currently work, which is the honest answer and the one that
         stops a UI offering a Disconnect flow as a fix for a missing key.
+
+        PENDING is the row existing without `confirmed_at`, and it must not
+        collapse into either neighbour. Reporting it as CONNECTED is the
+        original defect -- a claim rendered as a fact. Reporting it as
+        DISCONNECTED would be a different lie in the safe direction: the row
+        does exist, it does hold the installation id against every other
+        workspace, and a user told "not connected" would keep clicking Connect
+        at a claim that is already theirs.
         """
         if not self._config.configured:
             status = UNCONFIGURED
         elif installation is None:
             status = DISCONNECTED
+        elif installation.confirmed_at is None:
+            status = PENDING
         else:
             status = CONNECTED
 

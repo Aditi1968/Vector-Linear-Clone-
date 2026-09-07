@@ -109,12 +109,22 @@ def make_scope(*, role="admin", workspace_id=WORKSPACE_ID) -> AuthorizedWorkspac
 
 
 def make_installation(**overrides) -> GithubInstallationEntity:
+    """A CONFIRMED installation unless a test says otherwise.
+
+    `confirmed_at` defaults to set, because "connected" is what nearly every
+    test here means by an installation. An unconfirmed claim -- the state the
+    install callback now leaves behind -- is `make_installation(
+    confirmed_at=None, account_login=None)`, and the two go together: an
+    unconfirmed row may not hold an account login at all, which
+    `github_installations_unconfirmed_holds_no_account` enforces in 016.
+    """
     fields = {
         "installation_id": INSTALLATION_ID,
         "account_login": "acme",
         "connected_by": VIEWER_USER_ID,
         "connected_at": CONNECTED_AT,
         "updated_at": CONNECTED_AT,
+        "confirmed_at": CONNECTED_AT,
     }
 
     return GithubInstallationEntity(**(fields | overrides))
@@ -129,11 +139,38 @@ class FakeGithubRepository:
     real schema.
     """
 
-    def __init__(self, installation=None, repositories=None, workspace_id=None):
+    def __init__(
+        self,
+        installation=None,
+        repositories=None,
+        workspace_id=None,
+        installation_id=INSTALLATION_ID,
+        confirmed=True,
+        expired=False,
+    ):
         self.installation = installation
         self.repositories = list(repositories or [])
+
+        # The one installation row this fake holds: which id it is, which
+        # workspace holds it, whether GitHub has answered for it, and whether
+        # the claim is past `CLAIM_TTL`.
+        #
+        # `confirmed` defaults to True because that is what every delivery
+        # test in this file means by "this installation belongs to that
+        # workspace"; a test about the claim window says otherwise.
+        #
+        # The id is compared rather than assumed, so that a delivery naming a
+        # DIFFERENT installation resolves to nothing here exactly as it does
+        # against the real statements -- which is a property worth being able
+        # to assert without a database.
         self.workspace_id = workspace_id
+        self.installation_id = installation_id
+        self.confirmed = confirmed
+        self.expired = expired
         self.calls: list[tuple] = []
+
+    def _holds(self, installation_id) -> bool:
+        return self.workspace_id is not None and installation_id == self.installation_id
 
     async def get_installation(self, connection, *, scope):
         self.calls.append(("get_installation", scope.workspace_id))
@@ -151,11 +188,19 @@ class FakeGithubRepository:
         self.calls.append(
             ("insert_installation", scope.workspace_id, installation_id, connected_by)
         )
+
+        # Unconfirmed and blank, which is the whole point: the callback records
+        # a claim, and only a signed delivery turns it into a connection.
         self.installation = make_installation(
             installation_id=installation_id,
             account_login=None,
             connected_by=connected_by,
+            confirmed_at=None,
         )
+        self.workspace_id = scope.workspace_id
+        self.installation_id = installation_id
+        self.confirmed = False
+        self.expired = False
 
         return self.installation
 
@@ -170,10 +215,46 @@ class FakeGithubRepository:
     async def set_account_login(self, connection, *, scope, account_login):
         self.calls.append(("set_account_login", scope.workspace_id, account_login))
 
-    async def find_workspace_by_installation_id(self, connection, *, installation_id):
-        self.calls.append(("find_workspace_by_installation_id", installation_id))
+    async def find_confirmed_workspace_by_installation_id(
+        self, connection, *, installation_id
+    ):
+        self.calls.append(
+            ("find_confirmed_workspace_by_installation_id", installation_id)
+        )
+
+        if not self._holds(installation_id) or not self.confirmed:
+            return None
 
         return self.workspace_id
+
+    async def confirm_installation(self, connection, *, installation_id, within):
+        self.calls.append(("confirm_installation", installation_id, within))
+
+        if not self._holds(installation_id) or self.confirmed or self.expired:
+            return None
+
+        self.confirmed = True
+
+        if self.installation is not None:
+            self.installation = make_installation(
+                installation_id=self.installation.installation_id,
+                account_login=self.installation.account_login,
+                connected_by=self.installation.connected_by,
+            )
+
+        return self.workspace_id
+
+    async def delete_expired_claim(self, connection, *, installation_id, older_than):
+        self.calls.append(("delete_expired_claim", installation_id, older_than))
+
+        if not self._holds(installation_id) or self.confirmed or not self.expired:
+            return False
+
+        self.workspace_id = None
+        self.installation = None
+        self.expired = False
+
+        return True
 
     async def add_repositories(self, connection, *, scope, repositories):
         self.calls.append(
@@ -530,12 +611,13 @@ async def test_connecting_is_refused_on_an_unconfigured_deployment():
     assert repository.calls == []
 
 
-async def test_connecting_records_the_installation_against_the_caller():
+async def test_connecting_records_the_claim_against_the_caller():
+    """PENDING, not CONNECTED: see the claim section further down."""
     service, repository = build_service()
 
     integration = await service.connect(make_scope(), installation_id=INSTALLATION_ID)
 
-    assert integration.status == "connected"
+    assert integration.status == "pending"
     assert repository.called("insert_installation") == [
         ("insert_installation", WORKSPACE_ID, INSTALLATION_ID, VIEWER_USER_ID)
     ]
@@ -553,6 +635,7 @@ async def test_reconnecting_replaces_rather_than_merges():
     assert [call[0] for call in repository.calls] == [
         "delete_repositories",
         "delete_installation",
+        "delete_expired_claim",
         "insert_installation",
     ]
     assert repository.repositories == []
@@ -600,13 +683,19 @@ def installation_payload(action="created", repositories=None, login="acme"):
 
 
 async def test_a_delivery_for_an_unknown_installation_changes_nothing():
-    """Ordinary, not an error: installed on GitHub, never finished here."""
+    """Ordinary, not an error: installed on GitHub, never claimed here.
+
+    Two lookups and no write. The second is the confirmation attempt -- the
+    action is `created`, so there could have been a claim to promote -- and it
+    finds nothing either.
+    """
     service, repository = build_service(workspace_id=None)
 
     await service.apply_webhook(event="installation", payload=installation_payload())
 
     assert [call[0] for call in repository.calls] == [
-        "find_workspace_by_installation_id"
+        "find_confirmed_workspace_by_installation_id",
+        "confirm_installation",
     ]
 
 
@@ -763,6 +852,174 @@ async def test_a_malformed_repository_entry_is_skipped_not_fatal():
     assert repository.called("add_repositories") == [
         ("add_repositories", WORKSPACE_ID, ((7, "acme/web-renamed"),))
     ]
+
+
+# --- an installation id is a claim, not proof -------------------------
+#
+# The defect this section exists for, stated as the attack that reproduced it:
+#
+#   an admin of their OWN workspace starts a legitimate install, gets a valid
+#   state, and finishes the callback with `installation_id=N` for an N
+#   belonging to somebody else's organisation. Nothing in the flow proves the
+#   caller owns N. 013's unique constraint made the claim first-come, so from
+#   then on every `installation` and `installation_repositories` delivery for
+#   the victim's organisation resolved to the ATTACKER's workspace and wrote
+#   the victim's account login and private repository names there -- readable
+#   through `githubIntegration`. Installation ids are small sequential
+#   integers, so pre-claiming a range is cheap, and the real owner was
+#   permanently refused with a 409.
+#
+# The fix is that a callback-supplied id records a CLAIM and nothing more.
+# Only a delivery whose HMAC verifies -- the one thing in this system GitHub
+# has signed -- can turn a claim into a connection, and only while the claim
+# is young. See migrations/016_github_installation_trust.sql.
+
+
+def confirming_payload(action="created", **kwargs):
+    return installation_payload(action=action, **kwargs)
+
+
+async def test_a_claim_is_not_a_connection():
+    """The callback's write, read straight back: PENDING, and blank."""
+    service, _ = build_service()
+
+    integration = await service.connect(make_scope(), installation_id=INSTALLATION_ID)
+
+    assert integration.status == "pending"
+    assert integration.installation is not None
+    assert integration.installation.confirmed_at is None
+    assert integration.installation.account_login is None
+    assert integration.repositories == ()
+
+
+async def test_a_delivery_for_an_unconfirmed_claim_writes_nothing():
+    """The attack itself: the victim's repository names, going nowhere.
+
+    `installation_repositories` is the delivery an attacker is actually
+    waiting for -- it carries private `full_name`s and it fires whenever the
+    victim's organisation changes what the app can see. It is not a confirming
+    action, so a claim cannot be promoted by it and the workspace it names is
+    never resolved.
+    """
+    service, repository = build_service(workspace_id=WORKSPACE_ID, confirmed=False)
+
+    await service.apply_webhook(
+        event="installation_repositories",
+        payload={
+            "action": "added",
+            "installation": {"id": INSTALLATION_ID, "account": {"login": "victim-org"}},
+            "repositories_added": [{"id": 8, "full_name": "victim-org/secrets"}],
+        },
+    )
+
+    assert repository.called("set_account_login") == []
+    assert repository.called("add_repositories") == []
+    assert repository.repositories == []
+
+
+@pytest.mark.parametrize("action", ["suspend", "deleted", "added", "removed"])
+async def test_an_action_that_is_not_a_confirmation_confirms_nothing(action):
+    """Only the actions that accompany a live installation may confirm one.
+
+    `deleted` is in the list on purpose: an uninstall names an installation
+    GitHub is ending, and letting it confirm a claim would hand the claimant a
+    connection to an organisation that has just revoked the app.
+    """
+    service, repository = build_service(workspace_id=WORKSPACE_ID, confirmed=False)
+
+    await service.apply_webhook(
+        event="installation",
+        payload=installation_payload(action=action, repositories=[]),
+    )
+
+    assert repository.confirmed is False
+    assert repository.called("set_account_login") == []
+
+
+async def test_an_expired_claim_is_not_confirmed_by_a_late_delivery():
+    """The window is the whole defence.
+
+    A claim on an installation created months ago is never confirmed, because
+    the events that could confirm it were delivered and dropped long before it
+    existed. This is the same statement with the clock wound forward: the
+    delivery arrives, the claim is too old, and nothing is written.
+    """
+    service, repository = build_service(
+        workspace_id=WORKSPACE_ID,
+        confirmed=False,
+        expired=True,
+    )
+
+    await service.apply_webhook(
+        event="installation",
+        payload=confirming_payload(repositories=[{"id": 8, "full_name": "acme/api"}]),
+    )
+
+    assert repository.confirmed is False
+    assert repository.called("set_account_login") == []
+    assert repository.repositories == []
+
+
+@pytest.mark.parametrize("action", ["created", "new_permissions_accepted", "unsuspend"])
+async def test_a_signed_delivery_confirms_the_claim_it_names(action):
+    """The honest path, for each action that accompanies a live installation.
+
+    `new_permissions_accepted` and `unsuspend` are here because
+    `installation.created` is dispatched once and can lose the race with the
+    browser redirect that records the claim; a workspace whose claim missed it
+    still has a way through without another install.
+    """
+    service, repository = build_service(workspace_id=WORKSPACE_ID, confirmed=False)
+
+    await service.apply_webhook(
+        event="installation",
+        payload=confirming_payload(
+            action=action,
+            repositories=[{"id": 7, "full_name": "acme/web"}],
+        ),
+    )
+
+    assert repository.confirmed is True
+    assert repository.called("set_account_login") == [
+        ("set_account_login", WORKSPACE_ID, "acme")
+    ]
+    assert repository.repositories == [
+        GithubRepositoryEntity(repository_id=7, full_name="acme/web")
+    ]
+
+
+async def test_a_confirmed_installation_is_not_reconfirmed():
+    """The confirmation is asked for only when there is a claim to promote."""
+    service, repository = build_service(workspace_id=WORKSPACE_ID)
+
+    await service.apply_webhook(event="installation", payload=confirming_payload())
+
+    assert repository.called("confirm_installation") == []
+
+
+async def test_a_claim_clears_an_expired_one_before_taking_the_id():
+    """A stale claim must not lock the real owner out for good.
+
+    The refusal a live claim earns is a 409 the loser can act on; a claim that
+    nobody ever confirmed is not a refusal anyone should still be serving, so
+    the next claim on that id sweeps it. Ordered after the caller's own rows
+    go and before the insert, all inside one transaction.
+    """
+    service, repository = build_service(
+        workspace_id=OTHER_WORKSPACE_ID,
+        confirmed=False,
+        expired=True,
+    )
+
+    integration = await service.connect(make_scope(), installation_id=INSTALLATION_ID)
+
+    assert [call[0] for call in repository.calls] == [
+        "delete_repositories",
+        "delete_installation",
+        "delete_expired_claim",
+        "insert_installation",
+    ]
+    assert integration.status == "pending"
 
 
 # --- the GraphQL boundary ---------------------------------------------

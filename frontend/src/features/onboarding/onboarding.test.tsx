@@ -242,7 +242,9 @@ describe('a slug the server refuses', () => {
 
 describe('integrations the deployment cannot offer', () => {
   async function renderIntegrations(statuses: {
-    github: 'UNCONFIGURED' | 'DISCONNECTED' | 'CONNECTED'
+    // Only GitHub has PENDING: it is the one install whose callback hands the
+    // server an installation id it cannot verify on the spot.
+    github: 'UNCONFIGURED' | 'DISCONNECTED' | 'PENDING' | 'CONNECTED'
     slack: 'UNCONFIGURED' | 'DISCONNECTED' | 'CONNECTED'
   }) {
     const view = renderOnboarding('/onboarding/integrations')
@@ -292,6 +294,22 @@ describe('integrations the deployment cannot offer', () => {
       'href',
       '/slack/oauth/start?workspace=acme',
     )
+  })
+
+  it('does not read an unconfirmed GitHub claim as a connection', async () => {
+    // The card branches CONNECTED, PENDING, DISCONNECTED, else -- and the
+    // `else` is the unconfigured story. A status without a branch of its own
+    // would land there and tell the person their deployment has no GitHub
+    // credentials, which is untrue; reading it as CONNECTED would be worse,
+    // since the server reports PENDING precisely because it does not yet
+    // believe the installation is this workspace's.
+    await renderIntegrations({ github: 'PENDING', slack: 'DISCONNECTED' })
+
+    expect(
+      await screen.findByText(/GitHub has not confirmed this installation yet/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/no GitHub credentials configured/)).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Connect GitHub' })).toBeNull()
   })
 
   it('is always skippable into the workspace', async () => {

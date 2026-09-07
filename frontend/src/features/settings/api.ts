@@ -33,15 +33,24 @@ export type GithubIntegration = GithubIntegrationFieldsFragment
 export type SlackIntegration = SlackIntegrationFieldsFragment
 
 /**
- * The three states both providers report, spelled the same way.
+ * The states both providers report, taken from the wider of the two enums.
  *
- * `GithubIntegrationStatus` and `SlackIntegrationStatus` are separate enums
- * in the schema with identical members, so this is the shape both narrow to
- * rather than a claim that they are the same type.
+ * `GithubIntegrationStatus` and `SlackIntegrationStatus` are separate enums in
+ * the schema, so this is the shape both narrow to rather than a claim that
+ * they are the same type. GitHub's is the wider one: it alone has `PENDING`,
+ * and Slack's three members are assignable to these four.
  *
- * The one that matters is `UNCONFIGURED`: it means the *deployment* holds no
- * credentials for the provider -- no GitHub App id, no Slack client id -- and
- * the start route answers 404 by design. It is not "not connected yet".
+ * Two of them are easy to misread and both matter:
+ *
+ * - `UNCONFIGURED` means the *deployment* holds no credentials for the
+ *   provider -- no GitHub App id, no Slack client id -- and the start route
+ *   answers 404 by design. It is not "not connected yet".
+ * - `PENDING` means this workspace has claimed a GitHub installation that
+ *   GitHub has not confirmed. It is not a connection, and nothing about the
+ *   account or its repositories is populated while it lasts -- the server
+ *   refuses to write any, because the claim is unproven. Rendering it as
+ *   CONNECTED reports somebody else's organisation as this workspace's, which
+ *   is the defect the status was added to stop.
  */
 export type IntegrationStatus = GithubIntegration['status']
 

@@ -91,6 +91,52 @@ describe('an unconfigured integration', () => {
   })
 })
 
+describe('an unconfirmed GitHub claim', () => {
+  /**
+   * `PENDING`: the workspace has claimed an installation and GitHub has not
+   * confirmed it.
+   *
+   * The failure this pins is a fall-through. The panel used to branch on
+   * CONNECTED, then DISCONNECTED, then everything else -- so a status added to
+   * the schema would have landed in the `else` and told the user their
+   * deployment has no GitHub credentials, which is a different and untrue
+   * thing. Rendering it as CONNECTED would be worse: the whole reason the
+   * server reports PENDING is that it does not believe the installation
+   * belongs to this workspace yet.
+   */
+  it('says GitHub has not confirmed it, and claims no account', async () => {
+    await open('PENDING', 'DISCONNECTED')
+
+    expect(
+      within(main()).getByText(/GitHub has not confirmed it yet/),
+    ).toBeInTheDocument()
+
+    // Not the unconfigured story, and not a connection.
+    expect(
+      within(main()).queryByText(
+        /This Vector deployment has no GitHub credentials configured/,
+      ),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText(/Connected to/)).not.toBeInTheDocument()
+  })
+
+  it('offers a way out in both directions', async () => {
+    await open('PENDING', 'DISCONNECTED')
+
+    // Re-running the install is the fix when the confirmation is simply late,
+    // and it goes to the backend's own route like every other start.
+    expect(
+      screen.getByRole('link', { name: 'Run the GitHub installation again' }),
+    ).toHaveAttribute('href', `/github/install?workspace=${WORKSPACE_SLUG}`)
+
+    // Cancelling is the other way out: a claim nobody confirms should not have
+    // to be waited out.
+    expect(
+      screen.getByRole('button', { name: 'Cancel GitHub claim' }),
+    ).toBeInTheDocument()
+  })
+})
+
 describe('a disconnected integration', () => {
   it('points Connect at the backend’s own route, never at the provider', async () => {
     await open('DISCONNECTED', 'DISCONNECTED')

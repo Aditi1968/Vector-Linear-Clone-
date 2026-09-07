@@ -9,13 +9,20 @@ import { useOnboardingContext } from './OnboardingLayout'
 import styles from '../onboarding.module.css'
 
 /**
- * The three states both providers report, spelled the same way.
+ * The states both providers report, spelled the same way.
  *
  * `GithubIntegrationStatus` and `SlackIntegrationStatus` are separate enums
- * in the schema with identical members, so this is the shape both narrow to
- * rather than a claim that they are the same type.
+ * in the schema, so this is the shape both narrow to rather than a claim that
+ * they are the same type. They are no longer identical: only GitHub has
+ * `PENDING`, because only GitHub's install hands the server an installation
+ * id it cannot verify on the spot. Slack's status never takes that value, and
+ * a narrower union is assignable to this one.
  */
-type IntegrationStatus = 'UNCONFIGURED' | 'DISCONNECTED' | 'CONNECTED'
+type IntegrationStatus =
+  | 'UNCONFIGURED'
+  | 'DISCONNECTED'
+  | 'PENDING'
+  | 'CONNECTED'
 
 interface IntegrationCardProps {
   name: string
@@ -74,6 +81,14 @@ function IntegrationCard({
     badge = <Badge tone="success">Connected</Badge>
     detail =
       connectedTo === null ? 'Already connected.' : `Connected to ${connectedTo}.`
+  } else if (status === 'PENDING') {
+    // A claim the provider has not confirmed. Not connected, and not a
+    // Connect button either: the install has already been run and this step
+    // is skippable, so the honest thing is to say what is happening and let
+    // the person get on with setup. Workspace settings is where it is fixed
+    // if it does not clear.
+    badge = <Badge tone="info">Waiting for {name}</Badge>
+    detail = `${name} has not confirmed this installation yet. Nothing is connected until it does; you can check again in workspace settings.`
   } else if (status === 'DISCONNECTED') {
     badge = <Badge>Not connected</Badge>
     detail = purpose

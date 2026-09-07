@@ -26,6 +26,7 @@ asks the server for the column list and pins it.
 Marked `db`: deselected by default, skipped when Docker is unreachable.
 """
 
+from datetime import timedelta
 from uuid import UUID
 
 import asyncpg
@@ -82,6 +83,13 @@ VALUES ($1, $2, $3)
 INSERT_REPOSITORY_SQL = """
 INSERT INTO github_repositories (workspace_id, repository_id, full_name)
 VALUES ($1, $2, $3)
+"""
+
+# What a signed delivery does, spelled out here so that a test whose subject is
+# one of 013's own constraints can get past 016's. See
+# tests/test_migration_016_db.py for what this column means.
+CONFIRM_INSTALLATION_SQL = """
+UPDATE github_installations SET confirmed_at = now() WHERE workspace_id = $1
 """
 
 # Columns and referenced columns of one foreign key, in key order. The two
@@ -215,8 +223,14 @@ async def test_the_installation_table_holds_no_credential(connection):
         for row in await connection.fetch(COLUMNS_SQL, "github_installations")
     ]
 
+    # `confirmed_at` is 016's, and the fixture applies every migration. It is
+    # in this list rather than only in tests/test_migration_016_db.py because
+    # the point of this assertion is the whole column list: a column added
+    # anywhere is one `SELECT *` from a client, and that is true whichever
+    # migration added it.
     assert columns == [
         "account_login",
+        "confirmed_at",
         "connected_at",
         "connected_by",
         "installation_id",
@@ -338,16 +352,27 @@ async def test_a_non_positive_installation_id_is_refused(connection, installatio
     ["", "-leading-hyphen", "has space", "has/slash", "a" * 40],
 )
 async def test_an_account_login_that_is_not_one_is_refused(connection, login):
+    """The FORMAT check, which needs a confirmed row to be the one that fires.
+
+    016 added `github_installations_unconfirmed_holds_no_account`, and against
+    a fresh claim that constraint refuses every login including a well-formed
+    one -- so without the confirmation below this test would pass while proving
+    nothing about the format rule. The constraint name is asserted for the same
+    reason: two CheckViolationErrors are not the same evidence.
+    """
     await connection.execute(
         INSERT_INSTALLATION_SQL, BOOTSTRAP_WORKSPACE_ID, INSTALLATION_ID, MEMBER_ID
     )
+    await connection.execute(CONFIRM_INSTALLATION_SQL, BOOTSTRAP_WORKSPACE_ID)
 
-    with pytest.raises(asyncpg.CheckViolationError):
+    with pytest.raises(asyncpg.CheckViolationError) as raised:
         await connection.execute(
             "UPDATE github_installations SET account_login = $2 WHERE workspace_id = $1",
             BOOTSTRAP_WORKSPACE_ID,
             login,
         )
+
+    assert raised.value.constraint_name == "github_installations_account_login_format"
 
 
 async def test_an_account_login_may_be_absent(connection):
@@ -411,7 +436,25 @@ async def test_the_repository_round_trips_an_installation(connection):
     assert installation.account_login is None
     assert installation.connected_by == MEMBER_ID
 
-    found = await repository.find_workspace_by_installation_id(
+    # A fresh row is a claim, so it resolves no delivery yet. Confirming it is
+    # what 016 added and tests/test_migration_016_db.py is about; here it is
+    # the step that makes the rest of the round trip reachable at all.
+    assert (
+        await repository.find_confirmed_workspace_by_installation_id(
+            connection, installation_id=INSTALLATION_ID
+        )
+        is None
+    )
+    assert (
+        await repository.confirm_installation(
+            connection,
+            installation_id=INSTALLATION_ID,
+            within=timedelta(minutes=15),
+        )
+        == BOOTSTRAP_WORKSPACE_ID
+    )
+
+    found = await repository.find_confirmed_workspace_by_installation_id(
         connection, installation_id=INSTALLATION_ID
     )
 
