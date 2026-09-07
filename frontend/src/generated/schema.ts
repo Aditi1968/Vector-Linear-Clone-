@@ -244,6 +244,14 @@ export type DuplicateSuggestion = {
   similarity: Scalars['Float']['output'];
 };
 
+export type EmbeddingIndexingState = {
+  __typename?: 'EmbeddingIndexingState';
+  enabled: Scalars['Boolean']['output'];
+  failed: Scalars['Int']['output'];
+  indexed: Scalars['Int']['output'];
+  pending: Scalars['Int']['output'];
+};
+
 export type Environment = {
   __typename?: 'Environment';
   createdAt: Scalars['DateTime']['output'];
@@ -1840,6 +1848,7 @@ export type Query = {
   cycles: Array<Cycle>;
   document?: Maybe<Document>;
   documents: DocumentConnection;
+  embeddingIndexingState: EmbeddingIndexingState;
   environments: Array<Environment>;
   /** This viewer's favorites in this workspace, in their own order. Per-user and per-workspace: the same person in two workspaces has two independent lists. */
   favorites: Array<Favorite>;
@@ -1878,7 +1887,7 @@ export type Query = {
   teams: Array<Team>;
   triageCount: Scalars['Int']['output'];
   triageIssues: TriageIssueConnection;
-  /** Everyone in a workspace, with the role each holds. Members only. */
+  /** Everyone in a workspace, with the role each holds, including people who have left -- see `removedAt`. Members only. */
   workspaceMembers: Array<WorkspaceMember>;
 };
 
@@ -1906,6 +1915,11 @@ export type QueryDocumentsArgs = {
   first?: Scalars['Int']['input'];
   initiativeId?: InputMaybe<Scalars['UUID']['input']>;
   projectId?: InputMaybe<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryEmbeddingIndexingStateArgs = {
   workspaceSlug: Scalars['String']['input'];
 };
 
@@ -2539,6 +2553,8 @@ export type WorkspaceMember = {
   createdAt: Scalars['DateTime']['output'];
   email: Scalars['String']['output'];
   name?: Maybe<Scalars['String']['output']>;
+  /** When this person left the workspace, or null if they are still in it. A member list includes people who have left, so that anything they wrote still renders with their name; anything offering a choice of person -- an assignee picker, a lead -- must exclude the ones this field is set on. */
+  removedAt?: Maybe<Scalars['DateTime']['output']>;
   role: WorkspaceRole;
   userId: Scalars['UUID']['output'];
 };

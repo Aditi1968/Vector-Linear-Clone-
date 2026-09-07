@@ -194,6 +194,13 @@ type DuplicateSuggestion {
   similarity: Float!
 }
 
+type EmbeddingIndexingState {
+  indexed: Int!
+  pending: Int!
+  failed: Int!
+  enabled: Boolean!
+}
+
 type Environment {
   id: UUID!
   name: String!
@@ -1343,7 +1350,9 @@ type Query {
   myWorkspaces: [WorkspaceMembership!]!
   myWorkspace(slug: String!): WorkspaceMembership!
 
-  """Everyone in a workspace, with the role each holds. Members only."""
+  """
+  Everyone in a workspace, with the role each holds, including people who have left -- see `removedAt`. Members only.
+  """
   workspaceMembers(workspaceSlug: String!): [WorkspaceMember!]!
 
   """
@@ -1364,6 +1373,7 @@ type Query {
   documents(workspaceSlug: String!, projectId: UUID, initiativeId: UUID, first: Int! = 50, after: String = null): DocumentConnection!
   search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
   issueDuplicateSuggestions(workspaceSlug: String!, title: String!, description: String = null, excludeIssueId: UUID = null, first: Int! = 5): [DuplicateSuggestion!]!
+  embeddingIndexingState(workspaceSlug: String!): EmbeddingIndexingState!
   githubIntegration(workspaceSlug: String!): GithubIntegration!
   slackIntegration(workspaceSlug: String!): SlackIntegration!
   slackChannels(workspaceSlug: String!): [SlackChannel!]!
@@ -1810,6 +1820,11 @@ type WorkspaceMember {
   name: String
   role: WorkspaceRole!
   createdAt: DateTime!
+
+  """
+  When this person left the workspace, or null if they are still in it. A member list includes people who have left, so that anything they wrote still renders with their name; anything offering a choice of person -- an assignee picker, a lead -- must exclude the ones this field is set on.
+  """
+  removedAt: DateTime
 }
 
 type WorkspaceMemberPayload {
