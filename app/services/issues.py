@@ -349,6 +349,19 @@ class IssueService:
                     )
 
                     if assignee_id is not None:
+                        # Being handed an issue is a statement that its
+                        # future concerns you, so the assignee starts out
+                        # watching it -- and keeps watching after the issue
+                        # is reassigned to somebody else, which is the whole
+                        # difference between a subscription and the
+                        # assignee-derived recipient list migration 012 had.
+                        await activity.auto_subscribe(
+                            connection,
+                            scope=scope,
+                            issue_id=entity.id,
+                            user_id=assignee_id,
+                        )
+
                         # Filing work on somebody else's plate is the first
                         # thing they need to hear about. The statement drops
                         # the row when the assignee IS the creator, so

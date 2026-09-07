@@ -21,6 +21,8 @@ from app.graphql.mutations.projects import ProjectMutation
 from app.graphql.mutations.relations import RelationMutation
 from app.graphql.mutations.saved_views import FavoriteMutation, SavedViewMutation
 from app.graphql.mutations.slack import SlackMutation
+from app.graphql.mutations.subscribers import SubscriberMutation
+from app.graphql.mutations.templates import TemplateMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.cycles import CycleQuery
 from app.graphql.queries.github import GithubQuery
@@ -33,7 +35,9 @@ from app.graphql.queries.projects import ProjectQuery
 from app.graphql.queries.saved_views import SavedViewQuery
 from app.graphql.queries.search import SearchQuery
 from app.graphql.queries.slack import SlackQuery
+from app.graphql.queries.subscribers import SubscriberQuery
 from app.graphql.queries.teams import TeamQuery
+from app.graphql.queries.templates import TemplateQuery
 
 
 # The two root types, assembled from one class per feature, rather than a
@@ -75,6 +79,8 @@ QUERY_TYPES = (
     SlackQuery,
     NotificationQuery,
     SavedViewQuery,
+    SubscriberQuery,
+    TemplateQuery,
 )
 
 Query = merge_types("Query", QUERY_TYPES)
@@ -93,6 +99,8 @@ MUTATION_TYPES = (
     NotificationMutation,
     SavedViewMutation,
     FavoriteMutation,
+    SubscriberMutation,
+    TemplateMutation,
 )
 
 Mutation = merge_types("Mutation", MUTATION_TYPES)

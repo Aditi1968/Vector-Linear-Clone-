@@ -83,6 +83,7 @@ EXPECTED_MIGRATIONS = [
     "017_github_development.sql",
     "018_slack_channels.sql",
     "019_saved_views.sql",
+    "020_subscribers_templates.sql",
     "022_initiatives.sql",
 ]
 
