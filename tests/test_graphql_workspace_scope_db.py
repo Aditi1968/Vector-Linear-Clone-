@@ -533,7 +533,8 @@ async def test_the_team_filter_on_issues_narrows_and_never_widens(world):
 
     document = (
         "query Q($slug: String!, $team: UUID!) "
-        "{ issues(workspaceSlug: $slug, teamId: $team) { nodes { id } } }"
+        "{ issues(workspaceSlug: $slug, filter: {teamId: $team}) "
+        "{ nodes { id } } }"
     )
 
     own = await run(context, document, slug=SLUG_A, team=str(TEAM_A))

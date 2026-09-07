@@ -137,7 +137,16 @@ export function createCache(): InMemoryCache {
     typePolicies: {
       Query: {
         fields: {
-          issues: cursorConnectionPolicy(['workspaceSlug', 'teamId']),
+          /*
+           * `filter` and `orderBy` are key arguments, not merge arguments.
+           * Each names a DIFFERENT list -- "Ana's issues by due date" is not
+           * a page of "everything, newest first" -- so merging their pages
+           * under one key would interleave two orderings into a sequence
+           * neither query asked for, and `fetchMore` would resume one list
+           * with the other's cursor. Apollo serialises the whole object, so
+           * two filters that differ in any field key separately.
+           */
+          issues: cursorConnectionPolicy(['workspaceSlug', 'filter', 'orderBy']),
           labels: cursorConnectionPolicy(['workspaceSlug']),
 
           /*

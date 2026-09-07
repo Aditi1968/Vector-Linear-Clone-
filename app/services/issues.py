@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from datetime import date
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -6,14 +7,24 @@ import asyncpg
 
 from app.domain.activity import ActivityKind, IssueSnapshot
 from app.domain.errors import ValidationError, ValidationIssue
-from app.domain.issues import IssueEntity, IssuePatch, Unset
+from app.domain.issues import (
+    DEFAULT_ORDER,
+    NO_FILTER,
+    UNSET,
+    IssueEntity,
+    IssueFilter,
+    IssueOrder,
+    IssuePatch,
+    Unset,
+    order_key,
+)
 from app.domain.notifications import NotificationKind
 from app.domain.pagination import (
     InvalidCursorError,
-    IssueCursor,
+    IssueListCursor,
     IssuePage,
-    decode_issue_cursor,
-    encode_issue_cursor,
+    decode_issue_list_cursor,
+    encode_issue_list_cursor,
 )
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
@@ -200,6 +211,42 @@ class IssueService:
                 connection,
                 scope=scope,
                 issue_id=issue_id,
+            )
+
+    async def get_many_by_ids(
+        self,
+        *,
+        scope: WorkspaceScope,
+        issue_ids: Sequence[UUID],
+    ) -> list[IssueEntity]:
+        """The live issues in this workspace among these ids, in no set order.
+
+        Declared above `list`, and that is load-bearing rather than tidy:
+        inside this class the annotation `list[IssueEntity]` resolves to
+        `IssueService.list` once that method exists, and the class body stops
+        compiling. Moving this below it is a TypeError at import.
+
+        For batching a field that resolves one issue per row of some other
+        list -- `Notification.issue` today. A single SELECT needs no explicit
+        write transaction, so this acquires a connection without opening one.
+
+        An id that names nothing here is simply absent from the result, and
+        that covers an issue in another workspace, an archived one and an id
+        that exists nowhere. The caller cannot tell them apart, which is the
+        same property `get_by_id` has and is the reason this returns a list
+        rather than raising on a miss.
+        """
+        if not issue_ids:
+            # No statement for an empty batch. A DataLoader will not dispatch
+            # one, but this is a public method and `= ANY('{}')` is a round
+            # trip that can only answer nothing.
+            return []
+
+        async with self._pool.acquire() as connection:
+            return await self._repository.find_many_by_ids(
+                connection,
+                scope=scope,
+                issue_ids=issue_ids,
             )
 
     async def create(
@@ -620,9 +667,10 @@ class IssueService:
         scope: WorkspaceScope,
         first: int,
         after: str | None,
-        team_id: UUID | None = None,
+        issue_filter: IssueFilter = NO_FILTER,
+        order: IssueOrder = DEFAULT_ORDER,
     ) -> IssuePage:
-        """Forward keyset page of one workspace's live issues, newest first.
+        """Forward keyset page of one workspace's live issues, in one order.
 
         A single SELECT needs no explicit write transaction, so this
         acquires a connection without opening one.
@@ -633,24 +681,38 @@ class IssueService:
         one workspace and replayed against another selects nothing rather
         than resuming someone else's page.
 
-        `team_id` narrows within the workspace and is not validated against
-        it here. The repository ANDs it onto the tenant predicate, so a team
-        from another workspace selects nothing -- which is the same empty
-        page an id naming no team gets, and deliberately so: a service that
-        checked the team first and raised would report that another tenant's
-        team is real.
+        The FILTER is deliberately not part of the cursor, though the
+        ordering is. Changing a filter mid-walk is a coherent request -- the
+        client resumes at the same position under a narrower set, and every
+        row it gets is a row it asked for. Changing the ORDERING mid-walk is
+        not: the resume predicate would compare a stored key against a
+        different column, and the page that comes back is made of rows the
+        client has already seen or rows it never will. So the ordering
+        travels in the cursor and a mismatch is refused below.
+
+        Nothing in the filter is validated against the workspace here. The
+        repository ANDs every predicate onto the tenant one, so an id from
+        another workspace selects nothing -- the same empty page an id naming
+        nothing at all gets, and deliberately so: a service that looked the
+        project up first and raised would be reporting that another tenant's
+        project is real.
         """
-        cursor = self._validate_list(first=first, after=after)
+        cursor = self._validate_list(
+            first=first,
+            after=after,
+            issue_filter=issue_filter,
+            order=order,
+        )
 
         async with self._pool.acquire() as connection:
             # One extra row tells us whether a further page exists.
             rows = await self._repository.list(
                 connection,
                 scope=scope,
-                team_id=team_id,
+                issue_filter=issue_filter,
+                order=order,
                 limit=first + 1,
-                after_created_at=cursor.created_at if cursor is not None else None,
-                after_id=cursor.id if cursor is not None else None,
+                after=cursor,
             )
 
         has_next_page = len(rows) > first
@@ -659,9 +721,14 @@ class IssueService:
         end_cursor = None
 
         if nodes:
-            # Built from the last RETURNED node, never from the extra row.
+            # Built from the last RETURNED node, never from the extra row,
+            # and keyed by the ordering that produced it.
             last = nodes[-1]
-            end_cursor = encode_issue_cursor(last.created_at, last.id)
+            end_cursor = encode_issue_list_cursor(
+                order,
+                order_key(last, order.field),
+                last.id,
+            )
 
         return IssuePage(
             nodes=nodes,
@@ -669,15 +736,48 @@ class IssueService:
             end_cursor=end_cursor,
         )
 
+    async def count(
+        self,
+        *,
+        scope: WorkspaceScope,
+        issue_filter: IssueFilter = NO_FILTER,
+    ) -> int:
+        """How many live issues in this workspace match a filter.
+
+        Separate from `list` and not folded into it, because a caller that
+        does not want the number must not pay for the aggregate. See
+        `IssueRepository.count` for when the number is worth its second scan.
+        """
+        self._validate_filter(issue_filter)
+
+        async with self._pool.acquire() as connection:
+            return await self._repository.count(
+                connection,
+                scope=scope,
+                issue_filter=issue_filter,
+            )
+
     @staticmethod
-    def _validate_list(*, first: int, after: str | None) -> IssueCursor | None:
-        """Validate pagination arguments, returning the decoded cursor.
+    def _validate_list(
+        *,
+        first: int,
+        after: str | None,
+        issue_filter: IssueFilter,
+        order: IssueOrder,
+    ) -> IssueListCursor | None:
+        """Validate the list arguments, returning the decoded cursor.
 
         `first` is never silently clamped, and an invalid cursor is an
         expected input error rather than a parser exception.
+
+        A cursor minted under a different ordering gets its own code rather
+        than being folded into INVALID_CURSOR. It is not malformed -- a
+        client that changed the sort while holding a cursor sent exactly what
+        the previous page handed it -- and the fix is different: restart the
+        walk with no `after`, rather than stop sending garbage.
         """
         issues: list[ValidationIssue] = []
-        cursor: IssueCursor | None = None
+        cursor: IssueListCursor | None = None
 
         if first < FIRST_MIN or first > FIRST_MAX:
             issues.append(
@@ -690,7 +790,7 @@ class IssueService:
 
         if after is not None:
             try:
-                cursor = decode_issue_cursor(after)
+                cursor = decode_issue_list_cursor(after)
             except InvalidCursorError:
                 issues.append(
                     ValidationIssue(
@@ -700,10 +800,32 @@ class IssueService:
                     )
                 )
 
+            if cursor is not None and cursor.order != order:
+                cursor = None
+                issues.append(
+                    ValidationIssue(
+                        field="after",
+                        code="ORDER_MISMATCH",
+                        message=(
+                            "Cursor was issued for a different ordering; "
+                            "start the list again without it"
+                        ),
+                    )
+                )
+
+        issues.extend(_filter_issues(issue_filter))
+
         if issues:
             raise ValidationError(issues)
 
         return cursor
+
+    @staticmethod
+    def _validate_filter(issue_filter: IssueFilter) -> None:
+        issues = _filter_issues(issue_filter)
+
+        if issues:
+            raise ValidationError(issues)
 
     @staticmethod
     def _validate_set_project(
@@ -827,6 +949,29 @@ def _validation_error_for(constraint_name: str) -> ValidationError | None:
         if (issue := _EXPECTED_FOREIGN_KEYS.get(constraint_name)) is not None
         else None
     )
+
+
+def _filter_issues(issue_filter: IssueFilter) -> list[ValidationIssue]:
+    """The one thing about a filter the arguments alone decide.
+
+    Module-level rather than a method, and not only by convention with the
+    validators below it: inside `IssueService` the annotation
+    `list[ValidationIssue]` resolves to that class's own `list` method rather
+    than to the builtin, which mypy reports and a reader has to squint at.
+
+    Every other field of a filter is an id or an enum, and an id outside the
+    workspace -- or one naming nothing at all -- is an empty page rather than
+    an error, because answering otherwise would confirm that someone else's
+    project exists. A priority outside 0..4 is different:
+    `issues_priority_range` guarantees no row can hold one, so the request is
+    not a lookup that happens to miss, it is one no state of the database can
+    satisfy. It reuses the codes and messages the create and update paths
+    already publish for that field.
+    """
+    if issue_filter.priority is UNSET:
+        return []
+
+    return _priority_issues(issue_filter.priority)
 
 
 def _title_issues(title: str) -> list[ValidationIssue]:

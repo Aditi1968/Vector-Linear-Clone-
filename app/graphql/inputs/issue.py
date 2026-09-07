@@ -3,7 +3,25 @@ from uuid import UUID
 
 import strawberry
 
-from app.domain.issues import UNSET, IssuePatch, Unset
+from app.domain.issues import (
+    UNSET,
+    IssueFilter,
+    IssueOrder,
+    IssueOrderField,
+    IssuePatch,
+    OrderDirection,
+    Unset,
+)
+from app.domain.teams import WorkflowStateCategory
+
+# Imported for its side effect, not for the name. `types/team.py` is where
+# `strawberry.enum` annotates WorkflowStateCategory with its GraphQL
+# definition, and a field referencing the bare class before that has run
+# makes Strawberry mint a SECOND definition for the same name -- at which
+# point the schema refuses to build. Whether that module happens to be
+# imported first is a question about import order, which is not a thing to
+# leave to luck.
+from app.graphql.types.team import WorkflowStateCategoryType  # noqa: F401
 
 
 @strawberry.input
@@ -130,6 +148,111 @@ def _patched[T](value: T) -> T | Unset:
     are 0, '' and None, each of which is a value a client can legitimately
     send. An `if not value` here would silently drop a priority of 0 and an
     estimate of 0 from every patch that set them.
+    """
+    if value is strawberry.UNSET:
+        return UNSET
+
+    return value
+
+
+@strawberry.input(
+    description=(
+        "What narrows an issue list. Every field is optional and every one "
+        "of them narrows: nothing here can widen a list beyond the "
+        "workspace the request was authorized for, so an id belonging to "
+        "another workspace selects nothing."
+    )
+)
+class IssueFilterInput:
+    """The filter, with omitted and explicitly-null meaning different things.
+
+    Three fields -- `assigneeId`, `projectId`, `cycleId` -- name columns that
+    are genuinely nullable, and for those an explicit `null` is a filter and
+    not the absence of one: `assigneeId: null` is the unassigned issues,
+    `cycleId: null` is the backlog. Omitting the field is what means "I am
+    not filtering on this".
+
+    That distinction has to be spelled somehow, because a nullable argument
+    already spends `null` on "no filter" -- and this is the spelling GraphQL
+    itself offers, the same one `IssueUpdateInput` above uses to tell
+    "clear the assignee" from "leave the assignee alone". The alternative,
+    a second boolean field beside each id, is two fields that can contradict
+    each other.
+
+    The catch is worth naming: a client that passes a nullable variable
+    straight through -- `assigneeId: $maybeViewer` with nothing signed in --
+    asks for the unassigned issues rather than for all of them. Send the
+    field only when filtering.
+
+    The other five name columns that are NOT NULL on every row, so "has
+    none" is not a set to ask for; an explicit null there reads as no filter,
+    exactly as it does everywhere else in this schema.
+    """
+
+    team_id: UUID | None = strawberry.UNSET
+    assignee_id: UUID | None = strawberry.UNSET
+    workflow_state_id: UUID | None = strawberry.UNSET
+    state_category: WorkflowStateCategory | None = strawberry.UNSET
+    label_id: UUID | None = strawberry.UNSET
+    priority: int | None = strawberry.UNSET
+    project_id: UUID | None = strawberry.UNSET
+    cycle_id: UUID | None = strawberry.UNSET
+
+    def to_filter(self) -> IssueFilter:
+        """Translate Strawberry's sentinel onto the domain's own.
+
+        Two sentinels rather than one, for the reason `to_patch` above gives:
+        `strawberry.UNSET` is a transport detail and letting it travel
+        inwards would put a Strawberry import in the domain.
+        """
+        return IssueFilter(
+            team_id=_present(self.team_id),
+            assignee_id=_nullable(self.assignee_id),
+            workflow_state_id=_present(self.workflow_state_id),
+            state_category=_present(self.state_category),
+            label_id=_present(self.label_id),
+            priority=_present(self.priority),
+            project_id=_nullable(self.project_id),
+            cycle_id=_nullable(self.cycle_id),
+        )
+
+
+@strawberry.input(description="How an issue list is sorted.")
+class IssueOrderInput:
+    """A field and a direction, both defaulted to the list's historic order.
+
+    Both are non-null with defaults, so a client may send `{field: PRIORITY}`
+    and get the direction it did not name. Every ordering is completed by the
+    issue's id as a tie-break -- see `IssueOrderField` -- which is what keeps
+    it total, and a total order is what makes the cursor walk neither skip
+    nor repeat rows.
+    """
+
+    field: IssueOrderField = IssueOrderField.CREATED_AT
+    direction: OrderDirection = OrderDirection.DESC
+
+    def to_order(self) -> IssueOrder:
+        return IssueOrder(field=self.field, direction=self.direction)
+
+
+def _present[T](value: T | None) -> T | Unset:
+    """UNSET for both an absent field and an explicit null.
+
+    For the filters whose column is NOT NULL, where "has none" selects
+    nothing any state of the database could produce. A null there is a client
+    saying nothing rather than a client asking for the empty set.
+    """
+    if value is strawberry.UNSET or value is None:
+        return UNSET
+
+    return value
+
+
+def _nullable[T](value: T | None) -> T | None | Unset:
+    """UNSET only for an absent field; an explicit null survives as None.
+
+    For the three filters whose column is nullable, where None is the request
+    for the rows that hold nothing -- unassigned, in no project, in no cycle.
     """
     if value is strawberry.UNSET:
         return UNSET

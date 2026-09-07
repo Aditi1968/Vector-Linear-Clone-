@@ -73,6 +73,8 @@ export type Cycle = {
   name?: Maybe<Scalars['String']['output']>;
   number: Scalars['Int']['output'];
   startsAt: Scalars['DateTime']['output'];
+  /** The team this cycle belongs to. Fixed for the cycle's life -- a cycle cannot be moved between teams -- so a route or a cache may be keyed on it. */
+  teamId: Scalars['UUID']['output'];
   updatedAt: Scalars['DateTime']['output'];
 };
 
@@ -270,6 +272,8 @@ export type IssueConnection = {
   __typename?: 'IssueConnection';
   nodes: Array<Issue>;
   pageInfo: PageInfo;
+  /** How many live issues match, ignoring paging -- the number a column header states, as opposed to how many have been loaded. */
+  totalCount: Scalars['Int']['output'];
 };
 
 export type IssueCreateInput = {
@@ -289,6 +293,18 @@ export type IssueCreatePayload = {
   issue?: Maybe<Issue>;
 };
 
+/** What narrows an issue list. Every field is optional and every one of them narrows: nothing here can widen a list beyond the workspace the request was authorized for, so an id belonging to another workspace selects nothing. */
+export type IssueFilterInput = {
+  assigneeId?: InputMaybe<Scalars['UUID']['input']>;
+  cycleId?: InputMaybe<Scalars['UUID']['input']>;
+  labelId?: InputMaybe<Scalars['UUID']['input']>;
+  priority?: InputMaybe<Scalars['Int']['input']>;
+  projectId?: InputMaybe<Scalars['UUID']['input']>;
+  stateCategory?: InputMaybe<WorkflowStateCategory>;
+  teamId?: InputMaybe<Scalars['UUID']['input']>;
+  workflowStateId?: InputMaybe<Scalars['UUID']['input']>;
+};
+
 export type IssueLabelInput = {
   issueId: Scalars['UUID']['input'];
   labelId: Scalars['UUID']['input'];
@@ -299,6 +315,19 @@ export type IssueLabelPayload = {
   __typename?: 'IssueLabelPayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
+};
+
+/** What an issue list is sorted by. PRIORITY is urgency and not the raw column: 0 means no priority rather than the lowest one, so ascending is Urgent, High, Medium, Low and then the untriaged. DUE_DATE ascending puts the soonest first and the undated last. */
+export type IssueOrderField =
+  | 'CREATED_AT'
+  | 'DUE_DATE'
+  | 'PRIORITY'
+  | 'UPDATED_AT';
+
+/** How an issue list is sorted. */
+export type IssueOrderInput = {
+  direction?: OrderDirection;
+  field?: IssueOrderField;
 };
 
 export type IssueParentPayload = {
@@ -388,6 +417,8 @@ export type IssueSummary = {
   createdAt: Scalars['DateTime']['output'];
   description?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
+  /** The name this issue is known by outside the product -- ENG-42. Costs nothing to select: it is the team's key and the issue's number, both already on the row. */
+  identifier: Scalars['String']['output'];
   priority: Scalars['Int']['output'];
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
@@ -755,6 +786,8 @@ export type Notification = {
   actorId?: Maybe<Scalars['UUID']['output']>;
   createdAt: Scalars['DateTime']['output'];
   id: Scalars['UUID']['output'];
+  /** The issue this is about, or null where it is no longer visible -- an archived issue, most often. Cheap to select: one query per page of notifications rather than one per row. */
+  issue?: Maybe<IssueSummary>;
   issueId: Scalars['UUID']['output'];
   kind: NotificationKind;
   readAt?: Maybe<Scalars['DateTime']['output']>;
@@ -791,6 +824,11 @@ export type NotificationMarkReadPayload = {
   errors: Array<ValidationErrorType>;
   notification?: Maybe<Notification>;
 };
+
+/** Which end of an ordering a list starts from. */
+export type OrderDirection =
+  | 'ASC'
+  | 'DESC';
 
 export type PageInfo = {
   __typename?: 'PageInfo';
@@ -967,8 +1005,9 @@ export type QueryIssueArgs = {
 
 export type QueryIssuesArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
+  filter?: InputMaybe<IssueFilterInput>;
   first?: Scalars['Int']['input'];
-  teamId?: InputMaybe<Scalars['UUID']['input']>;
+  orderBy?: InputMaybe<IssueOrderInput>;
   workspaceSlug: Scalars['String']['input'];
 };
 

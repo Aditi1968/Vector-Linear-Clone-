@@ -68,7 +68,7 @@ class NotificationMutation:
             )
 
         return NotificationMarkReadPayload(
-            notification=NotificationType.from_entity(entity),
+            notification=NotificationType.from_entity(entity, scope),
             errors=[],
         )
 

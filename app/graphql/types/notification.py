@@ -5,10 +5,13 @@ from datetime import datetime
 from uuid import UUID
 
 import strawberry
+from strawberry.types import Info
 
 from app.domain.notifications import NotificationEntity, NotificationPage
+from app.domain.tenancy import WorkspaceScope
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.pagination import PageInfo
+from app.graphql.types.relations import IssueSummaryType
 
 
 # Page size for `notifications` when a document does not say.
@@ -55,9 +58,55 @@ class NotificationType:
     read_at: datetime | None
     created_at: datetime
 
+    # Carried, not exposed. The scope the root field AUTHORIZED, handed down
+    # so `issue` below reads in the workspace this notification was read from
+    # -- never from the row, and never from anything ambient on the context.
+    scope: strawberry.Private[WorkspaceScope]
+
+    @strawberry.field(
+        description=(
+            "The issue this is about, or null where it is no longer visible "
+            "-- an archived issue, most often. Cheap to select: one query per "
+            "page of notifications rather than one per row."
+        )
+    )
+    async def issue(self, info: Info) -> IssueSummaryType | None:
+        """What the notification is about, named rather than described.
+
+        `issueId` alone lets an inbox row LINK to an issue without being able
+        to say which one, so the screen ends up describing the event instead
+        of the work. This is the summary type `Issue.parent` and
+        `Issue.children` already return, for the reason that type exists: it
+        has no edges, so nothing reachable from an inbox leads back to an
+        issue and out again into another page of rows.
+
+        Batched through the request's loader, so a page of twenty-five
+        notifications costs one statement rather than twenty-five.
+
+        Null covers an archived issue and -- unreachably through the schema,
+        since `notifications_issue_fk` is composite over the workspace -- an
+        issue this scope cannot see. The second is a floor rather than an
+        expected answer: if a row ever did disagree with its tenant, this
+        resolves to null instead of handing back an issue from outside the
+        workspace that asked.
+        """
+        entity = await info.context.issue_summaries.load(
+            (self.scope.workspace_id, self.issue_id)
+        )
+
+        if entity is None:
+            return None
+
+        return IssueSummaryType.from_entity(entity)
+
     @classmethod
-    def from_entity(cls, entity: NotificationEntity) -> "NotificationType":
+    def from_entity(
+        cls,
+        entity: NotificationEntity,
+        scope: WorkspaceScope,
+    ) -> "NotificationType":
         return cls(
+            scope=scope,
             id=entity.id,
             actor_id=entity.actor_id,
             issue_id=entity.issue_id,
@@ -73,9 +122,15 @@ class NotificationConnection:
     page_info: PageInfo
 
     @classmethod
-    def from_domain(cls, page: NotificationPage) -> "NotificationConnection":
+    def from_domain(
+        cls,
+        page: NotificationPage,
+        scope: WorkspaceScope,
+    ) -> "NotificationConnection":
         return cls(
-            nodes=[NotificationType.from_entity(entity) for entity in page.nodes],
+            nodes=[
+                NotificationType.from_entity(entity, scope) for entity in page.nodes
+            ],
             page_info=PageInfo(
                 has_next_page=page.has_next_page,
                 end_cursor=page.end_cursor,

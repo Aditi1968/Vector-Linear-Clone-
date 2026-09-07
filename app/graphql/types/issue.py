@@ -7,7 +7,13 @@ from graphql import GraphQLError
 from strawberry.types import Info
 
 from app.domain.errors import ValidationError
-from app.domain.issues import IssueEntity
+from app.domain.issues import (
+    NO_FILTER,
+    IssueEntity,
+    IssueFilter,
+    IssueOrderField,
+    OrderDirection,
+)
 from app.domain.pagination import IssuePage
 from app.domain.tenancy import WorkspaceScope
 from app.graphql.errors import bad_user_input
@@ -37,6 +43,30 @@ if TYPE_CHECKING:
     # IssueSetCyclePayload returns one -- so importing CycleType here at
     # runtime would close the loop and neither module would import at all.
     from app.graphql.types.cycle import CycleType
+
+
+# The domain enums, published rather than restated -- the same move
+# `app/graphql/types/team.py` makes for WorkflowStateCategory, and for the
+# same reason: two enums of strings that must agree drift in a way that
+# type-checks. `strawberry.enum` annotates the class it is given and returns
+# it, so the dependency still points one way and `app/domain/issues.py`
+# imports nothing from strawberry.
+IssueOrderFieldType = strawberry.enum(
+    IssueOrderField,
+    name="IssueOrderField",
+    description=(
+        "What an issue list is sorted by. PRIORITY is urgency and not the "
+        "raw column: 0 means no priority rather than the lowest one, so "
+        "ascending is Urgent, High, Medium, Low and then the untriaged. "
+        "DUE_DATE ascending puts the soonest first and the undated last."
+    ),
+)
+
+OrderDirectionType = strawberry.enum(
+    OrderDirection,
+    name="OrderDirection",
+    description="Which end of an ordering a list starts from.",
+)
 
 
 @strawberry.type(name="Issue")
@@ -469,12 +499,54 @@ class IssueConnection:
     nodes: list[IssueType]
     page_info: PageInfo
 
+    # Carried, not exposed: what `totalCount` has to count, and the workspace
+    # it counts inside. Both come from the resolver that authorized the
+    # request, never from the document, so the aggregate cannot be steered
+    # somewhere the page itself was not read from.
+    scope: strawberry.Private[WorkspaceScope]
+    issue_filter: strawberry.Private[IssueFilter]
+
+    @strawberry.field(
+        description=(
+            "How many live issues match, ignoring paging -- the number a "
+            "column header states, as opposed to how many have been loaded."
+        )
+    )
+    async def total_count(self, info: Info) -> int:
+        """A second aggregate over the same predicate as the page.
+
+        A resolver and not a field on the page, which is the whole cost
+        story: the count is one more query per issue list, so a document that
+        does not select it does not run it. Worth paying when the number is
+        the answer -- a board column that must say how much work is in a
+        state, a filter chip reporting what it would select -- and not worth
+        paying for an infinite scroll, where `pageInfo.hasNextPage` already
+        says whether to fetch again and costs nothing extra.
+
+        Not memoised against the page either. Two selections of `totalCount`
+        in one document are two selections of a field with no arguments, and
+        the operation limits already price and cap that.
+        """
+        total: int = await info.context.issue_service.count(
+            scope=self.scope,
+            issue_filter=self.issue_filter,
+        )
+
+        return total
+
     @classmethod
-    def from_domain(cls, page: IssuePage, scope: WorkspaceScope) -> "IssueConnection":
+    def from_domain(
+        cls,
+        page: IssuePage,
+        scope: WorkspaceScope,
+        issue_filter: IssueFilter = NO_FILTER,
+    ) -> "IssueConnection":
         return cls(
             nodes=[IssueType.from_entity(entity, scope) for entity in page.nodes],
             page_info=PageInfo(
                 has_next_page=page.has_next_page,
                 end_cursor=page.end_cursor,
             ),
+            scope=scope,
+            issue_filter=issue_filter,
         )

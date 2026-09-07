@@ -35,7 +35,12 @@
 #
 # Cost: 25 x (20 per node + 2 on pageInfo) = 550 of 1000.
 query BoardIssues($workspaceSlug: String!, $teamId: UUID!, $after: String) {
-  issues(workspaceSlug: $workspaceSlug, teamId: $teamId, first: 25, after: $after) {
+  issues(
+    workspaceSlug: $workspaceSlug
+    filter: { teamId: $teamId }
+    first: 25
+    after: $after
+  ) {
     nodes {
       ...IssueRowFields
     }

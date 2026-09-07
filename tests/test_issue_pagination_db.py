@@ -36,7 +36,12 @@ from uuid import UUID
 import asyncpg
 import pytest
 
-from app.domain.pagination import IssuePage, decode_issue_cursor, encode_issue_cursor
+from app.domain.issues import IssueOrder
+from app.domain.pagination import (
+    IssuePage,
+    decode_issue_list_cursor,
+    encode_issue_list_cursor,
+)
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
 from app.repositories.teams import TeamRepository
@@ -635,7 +640,9 @@ async def test_a_cursor_inside_a_timestamp_tie_resumes_at_the_next_tied_row(serv
     page = await service.list(
         scope=SCOPE,
         first=PAGE_SIZE,
-        after=encode_issue_cursor(resume_from.created_at, resume_from.id),
+        after=encode_issue_list_cursor(
+            IssueOrder(), resume_from.created_at, resume_from.id
+        ),
     )
 
     assert _ids(page) == [row.id for row in expected]
@@ -692,16 +699,16 @@ async def test_the_last_page_is_partial_reports_no_next_page_and_still_has_a_cur
     assert final.has_next_page is False
 
     assert final.end_cursor is not None
-    assert final.end_cursor == encode_issue_cursor(
-        EXPECTED[-1].created_at, EXPECTED[-1].id
+    assert final.end_cursor == encode_issue_list_cursor(
+        IssueOrder(), EXPECTED[-1].created_at, EXPECTED[-1].id
     )
 
     # The cursor is built from the row PostgreSQL returned, so decoding it
     # also shows the microseconds survived the storage and the isoformat
     # round trip intact.
-    decoded = decode_issue_cursor(final.end_cursor)
+    decoded = decode_issue_list_cursor(final.end_cursor)
 
-    assert decoded.created_at == EXPECTED[-1].created_at
+    assert decoded.key == EXPECTED[-1].created_at
     assert decoded.id == EXPECTED[-1].id
 
 

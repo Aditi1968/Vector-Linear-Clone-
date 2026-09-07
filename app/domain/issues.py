@@ -1,8 +1,10 @@
 from dataclasses import dataclass
 from datetime import date, datetime
-from enum import Enum
+from enum import Enum, StrEnum
 from typing import Final
 from uuid import UUID
+
+from app.domain.teams import WorkflowStateCategory
 
 
 class Unset(Enum):
@@ -162,3 +164,125 @@ class IssuePatch:
                 self.due_date,
             )
         )
+
+
+@dataclass(frozen=True, slots=True)
+class IssueFilter:
+    """What narrows a list of issues, with everything unnamed left wide.
+
+    UNSET rather than None on every field, and for the same reason
+    `IssuePatch` needs the sentinel: three states, not two. "Assigned to
+    Ana", "assigned to nobody", and "I am not filtering on assignee" are
+    three different questions, and a plain `UUID | None` can only ask two of
+    them. `assignee_id=None` here means `assignee_id IS NULL` -- the
+    unassigned issues -- and UNSET means the filter is absent.
+
+    Only the three columns that are genuinely nullable admit None. A team, a
+    workflow state and a priority are NOT NULL on every row, so "has none"
+    is not a set anyone can ask for, and the types say so.
+
+    Nothing here is a tenant. Every predicate this becomes is ANDed onto the
+    workspace the caller was authorized for, so a `project_id` from another
+    workspace narrows to nothing rather than widening to that workspace --
+    see IssueRepository.
+
+    Pure application code -- no Strawberry, FastAPI, asyncpg or PostgreSQL.
+    """
+
+    team_id: UUID | Unset = UNSET
+    assignee_id: UUID | None | Unset = UNSET
+    workflow_state_id: UUID | Unset = UNSET
+    state_category: WorkflowStateCategory | Unset = UNSET
+    label_id: UUID | Unset = UNSET
+    priority: int | Unset = UNSET
+    project_id: UUID | None | Unset = UNSET
+    cycle_id: UUID | None | Unset = UNSET
+
+
+class IssueOrderField(StrEnum):
+    """What an issue list is sorted by.
+
+    The values are the sort KEY each field names, not necessarily a column:
+    `PRIORITY` orders by urgency, and urgency is not what the `priority`
+    column sorts as. 0 there means "no priority" rather than "the lowest
+    one" -- 1 is Urgent and 4 is Low -- so a plain column sort puts the
+    issues nobody has triaged either at the top or below Low, and neither is
+    an order a person asked for. The key is `NULLIF(priority, 0)`, which
+    sorts 1..4 ascending and leaves the untriaged at the end. See
+    `app/repositories/issues.py` for the expression itself and
+    `order_key` below for the value a cursor carries.
+
+    Every ordering here is completed by `id` as a tie-break, which is what
+    keeps it total: `created_at` ties constantly under a bulk import,
+    `priority` has five distinct values across the whole table, and a
+    keyset walk over a non-total order silently skips and repeats rows.
+    """
+
+    PRIORITY = "priority"
+    CREATED_AT = "created_at"
+    UPDATED_AT = "updated_at"
+    DUE_DATE = "due_date"
+
+
+class OrderDirection(StrEnum):
+    ASC = "asc"
+    DESC = "desc"
+
+
+@dataclass(frozen=True, slots=True)
+class IssueOrder:
+    """One total ordering of an issue list.
+
+    The default is the ordering this product has always listed issues in,
+    so a caller that names no order gets the page it used to get.
+    """
+
+    field: IssueOrderField = IssueOrderField.CREATED_AT
+    direction: OrderDirection = OrderDirection.DESC
+
+    @property
+    def token(self) -> str:
+        """This ordering as one opaque string, for a cursor to carry.
+
+        A cursor is only meaningful against the ordering that minted it, so
+        the ordering travels inside it and the service refuses a cursor
+        replayed under a different one.
+        """
+        return f"{self.field.value}:{self.direction.value}"
+
+
+# The value an issue sorts at, for each ordering.
+#
+# This has to agree with the SQL expression `app/repositories/issues.py`
+# orders by, because one mints the cursor and the other resumes from it: a
+# disagreement is not an error anywhere, it is a page walk that quietly skips
+# rows. `tests/test_issue_ordering.py` walks every field to hold the two
+# together.
+type OrderKey = int | datetime | date | None
+
+
+def order_key(issue: IssueEntity, field: IssueOrderField) -> OrderKey:
+    if field is IssueOrderField.PRIORITY:
+        # NULLIF(priority, 0): untriaged issues have no urgency, not the
+        # lowest one. None here is the same "no key" a missing due date is,
+        # and the keyset handles both the same way.
+        return issue.priority or None
+
+    if field is IssueOrderField.CREATED_AT:
+        return issue.created_at
+
+    if field is IssueOrderField.UPDATED_AT:
+        return issue.updated_at
+
+    return issue.due_date
+
+
+# The wide filter and the default ordering, as shared instances.
+#
+# Both types are frozen, so one instance per default is safe -- and a default
+# argument has to be a singleton anyway: `def list(..., issue_filter =
+# IssueFilter())` builds a new one at import time and hands the SAME object to
+# every caller regardless, which is the bug ruff's B008 is about. Naming them
+# also gives the "no filter" case something to be called at a call site.
+NO_FILTER: Final = IssueFilter()
+DEFAULT_ORDER: Final = IssueOrder()

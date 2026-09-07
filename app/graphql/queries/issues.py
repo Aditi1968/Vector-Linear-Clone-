@@ -1,10 +1,12 @@
 from uuid import UUID
 
 import strawberry
-from graphql import GraphQLError
 from strawberry.types import Info
 
 from app.domain.errors import ValidationError
+from app.domain.issues import DEFAULT_ORDER, NO_FILTER
+from app.graphql.errors import bad_user_input
+from app.graphql.inputs.issue import IssueFilterInput, IssueOrderInput
 from app.graphql.scope import authorized_scope
 from app.graphql.types.issue import IssueConnection, IssueType
 
@@ -44,44 +46,48 @@ class Query:
         self,
         info: Info,
         workspace_slug: str,
-        team_id: UUID | None = None,
+        filter: IssueFilterInput | None = None,
+        order_by: IssueOrderInput | None = None,
         first: int = DEFAULT_FIRST,
         after: str | None = None,
     ) -> IssueConnection:
-        """A keyset page of one workspace's live issues, newest first.
+        """A keyset page of one workspace's live issues.
 
-        `teamId` is optional and filters within the workspace rather than
-        widening it: the tenant predicate leads the statement either way, so a
-        team id from another workspace matches no rows instead of selecting
-        that workspace's. Omitting it is the whole workspace, which is what an
-        "all issues" screen asks for.
+        One `filter` object rather than eight loose arguments, which is not
+        only tidiness: a filter has to travel to `totalCount` and into the
+        cursor validation as one thing, and eight parameters threaded through
+        three layers is eight chances to drop one on the way.
+
+        Every field of that filter NARROWS. The workspace is resolved from
+        the slug through the membership check and leads the statement either
+        way, so a `projectId` or `cycleId` from another workspace matches no
+        rows instead of selecting that workspace's -- the same empty page an
+        id naming nothing at all gets. Omitting the filter entirely is the
+        whole workspace, which is what an "all issues" screen asks for.
+
+        `orderBy` defaults to newest first, the order this field has always
+        returned, so an existing document keeps its existing pages. A cursor
+        carries the ordering it was minted under and this refuses one minted
+        under a different one, because resuming a keyset walk in a different
+        sort does not fail -- it silently returns the wrong rows.
         """
         scope = await authorized_scope(info, workspace_slug)
+
+        issue_filter = NO_FILTER if filter is None else filter.to_filter()
+        order = DEFAULT_ORDER if order_by is None else order_by.to_order()
 
         try:
             page = await info.context.issue_service.list(
                 scope=scope,
-                team_id=team_id,
+                issue_filter=issue_filter,
+                order=order,
                 first=first,
                 after=after,
             )
         except ValidationError as exc:
-            # Only expected pagination input errors are translated. Anything
-            # else (asyncpg failures, bugs) propagates as a real execution
-            # error. `from None` keeps parser detail out of the response.
-            raise GraphQLError(
-                "Invalid pagination arguments",
-                extensions={
-                    "code": "BAD_USER_INPUT",
-                    "issues": [
-                        {
-                            "field": issue.field,
-                            "code": issue.code,
-                            "message": issue.message,
-                        }
-                        for issue in exc.issues
-                    ],
-                },
-            ) from None
+            # Only expected input errors are translated. Anything else
+            # (asyncpg failures, bugs) propagates as a real execution error.
+            # `from None` keeps parser detail out of the response.
+            raise bad_user_input("Invalid issue list arguments", exc) from None
 
-        return IssueConnection.from_domain(page, scope)
+        return IssueConnection.from_domain(page, scope, issue_filter)

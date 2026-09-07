@@ -24,14 +24,25 @@ import strawberry
 
 from app.domain.activity import ActivityKind, IssueSnapshot, changes
 from app.domain.errors import WorkspaceAccessDeniedError
-from app.domain.notifications import NotificationKind
+from app.domain.notifications import (
+    NotificationEntity,
+    NotificationKind,
+    NotificationPage,
+)
 from app.graphql.schema import build_schema
 from app.graphql.scope import WORKSPACE_NOT_FOUND_MESSAGE
 from app.graphql.types.activity import ActivityKindEnum
 from app.graphql.types.notification import NotificationKindEnum
 from app.graphql.viewer import UNAUTHENTICATED_MESSAGE
 
-from tests.conftest import graphql_context
+from tests.conftest import (
+    BASE_TIME,
+    TEST_USER_ID,
+    TEST_WORKSPACE_ID,
+    TEST_WORKSPACE_SLUG,
+    graphql_context,
+    make_entity,
+)
 
 
 schema = build_schema("test")
@@ -303,3 +314,166 @@ def test_no_inbox_field_accepts_a_user_id():
     ]
 
     assert inbox == []
+
+
+# --- naming the issue an inbox row is about ---------------------------
+
+
+INBOX_WITH_ISSUES = """
+query Inbox($slug: String!) {
+  notifications(workspaceSlug: $slug) {
+    nodes {
+      id
+      issue {
+        id
+        identifier
+        title
+      }
+    }
+  }
+}
+"""
+
+INBOX_ISSUE_IDS = [
+    UUID("00000000-0000-7000-8000-000000000101"),
+    UUID("00000000-0000-7000-8000-000000000102"),
+]
+
+
+class FakeInboxService:
+    """One page of notifications over a fixed set of issues."""
+
+    def __init__(self, issue_ids):
+        self._issue_ids = list(issue_ids)
+
+    async def list_notifications(self, *, scope, unread_only, first, after):
+        return NotificationPage(
+            nodes=[
+                NotificationEntity(
+                    id=UUID(int=index + 1),
+                    user_id=VIEWER_ID,
+                    actor_id=None,
+                    issue_id=issue_id,
+                    kind=NotificationKind.ASSIGNED,
+                    read_at=None,
+                    created_at=BASE_TIME,
+                )
+                for index, issue_id in enumerate(self._issue_ids)
+            ],
+            has_next_page=False,
+            end_cursor=None,
+        )
+
+
+class RecordingIssueService:
+    """Answers `get_many_by_ids` and records every batch it was asked for."""
+
+    def __init__(self, known):
+        self._known = {entity.id: entity for entity in known}
+        self.calls: list[dict] = []
+
+    async def get_many_by_ids(self, *, scope, issue_ids):
+        self.calls.append({"scope": scope, "issue_ids": list(issue_ids)})
+
+        return [self._known[i] for i in issue_ids if i in self._known]
+
+
+def _inbox_entity(issue_id: UUID, index: int):
+    return make_entity(index, id=issue_id)
+
+
+async def test_an_inbox_page_costs_one_issue_query_and_not_one_per_row():
+    """The whole reason this field is a loader rather than a lookup.
+
+    Twenty-five rows in an inbox naming twenty-five issues is twenty-five
+    round trips without batching, and the complexity rule cannot catch it:
+    `issue` declares no page size, so it is charged as a single selection
+    whatever it costs to resolve.
+    """
+    issues = RecordingIssueService(
+        [_inbox_entity(issue_id, i + 1) for i, issue_id in enumerate(INBOX_ISSUE_IDS)]
+    )
+
+    result = await schema.execute(
+        INBOX_WITH_ISSUES,
+        variable_values={"slug": TEST_WORKSPACE_SLUG},
+        context_value=viewer_context(
+            TEST_USER_ID,
+            activity_service=FakeInboxService(INBOX_ISSUE_IDS),
+            issue_service=issues,
+        ),
+    )
+
+    assert result.errors is None
+    assert len(issues.calls) == 1
+    assert sorted(issues.calls[0]["issue_ids"]) == sorted(INBOX_ISSUE_IDS)
+
+    nodes = result.data["notifications"]["nodes"]
+
+    assert [node["issue"]["id"] for node in nodes] == [
+        str(issue_id) for issue_id in INBOX_ISSUE_IDS
+    ]
+    assert all(node["issue"]["identifier"].startswith("ENG-") for node in nodes)
+
+
+async def test_two_rows_about_the_same_issue_are_one_key():
+    """The loader's cache is the reason a busy issue does not cost more."""
+    issue_id = INBOX_ISSUE_IDS[0]
+    issues = RecordingIssueService([_inbox_entity(issue_id, 1)])
+
+    result = await schema.execute(
+        INBOX_WITH_ISSUES,
+        variable_values={"slug": TEST_WORKSPACE_SLUG},
+        context_value=viewer_context(
+            TEST_USER_ID,
+            activity_service=FakeInboxService([issue_id, issue_id, issue_id]),
+            issue_service=issues,
+        ),
+    )
+
+    assert result.errors is None
+    assert issues.calls[0]["issue_ids"] == [issue_id]
+
+
+async def test_the_batch_is_scoped_to_the_workspace_the_field_authorized():
+    """The tenant comes from the authorized scope, never from the row.
+
+    A notification carries an `issue_id` and nothing else; if the batch were
+    keyed on that alone, a mismatched row -- or a loader shared past the
+    request -- could answer with an issue from another workspace. The
+    workspace in the key is the one `authorized_scope` returned.
+    """
+    issues = RecordingIssueService([])
+
+    await schema.execute(
+        INBOX_WITH_ISSUES,
+        variable_values={"slug": TEST_WORKSPACE_SLUG},
+        context_value=viewer_context(
+            TEST_USER_ID,
+            activity_service=FakeInboxService(INBOX_ISSUE_IDS),
+            issue_service=issues,
+        ),
+    )
+
+    assert issues.calls[0]["scope"].workspace_id == TEST_WORKSPACE_ID
+
+
+async def test_an_issue_the_batch_cannot_see_resolves_to_null():
+    """Archived, absent and another tenant's are one answer, not three."""
+    issues = RecordingIssueService([])
+
+    result = await schema.execute(
+        INBOX_WITH_ISSUES,
+        variable_values={"slug": TEST_WORKSPACE_SLUG},
+        context_value=viewer_context(
+            TEST_USER_ID,
+            activity_service=FakeInboxService(INBOX_ISSUE_IDS),
+            issue_service=issues,
+        ),
+    )
+
+    assert result.errors is None
+    assert [node["issue"] for node in result.data["notifications"]["nodes"]] == [
+        None,
+        None,
+    ]

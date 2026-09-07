@@ -103,7 +103,7 @@ def Context(issue_service):
 class ExplodingIssueService:
     """Fails the way a driver or a bug does: an exception nobody expected."""
 
-    async def list(self, *, scope, team_id, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None, **kwargs):
         raise RuntimeError(INTERNAL_MARKER)
 
     async def create(self, *, scope, team_id, **fields):
@@ -118,7 +118,7 @@ class LeakyIssueService:
     decision to publish, so this must be masked exactly like a RuntimeError.
     """
 
-    async def list(self, *, scope, team_id, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None, **kwargs):
         raise GraphQLError(
             INTERNAL_MARKER,
             extensions={"code": "DB_CONNECTION_FAILED", "statement": INTERNAL_MARKER},
@@ -131,7 +131,7 @@ class RejectingIssueService:
     def __init__(self, issues: list[ValidationIssue]):
         self._issues = issues
 
-    async def list(self, *, scope, team_id, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None, **kwargs):
         raise ValidationError(self._issues)
 
     async def create(self, *, scope, team_id, **fields):
@@ -142,7 +142,7 @@ class FakeIssueService:
     def __init__(self, page: IssuePage):
         self._page = page
 
-    async def list(self, *, scope, team_id, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None, **kwargs):
         return self._page
 
 
@@ -224,7 +224,7 @@ async def test_public_input_errors_keep_their_code_and_payload(
 
     error = result.errors[0]
 
-    assert error.message == "Invalid pagination arguments"
+    assert error.message == "Invalid issue list arguments"
     assert error.extensions == {
         "code": "BAD_USER_INPUT",
         "issues": [

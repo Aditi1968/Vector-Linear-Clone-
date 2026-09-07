@@ -96,6 +96,13 @@ class IssueSummaryType:
     """
 
     id: UUID
+    identifier: str = strawberry.field(
+        description=(
+            "The name this issue is known by outside the product -- ENG-42. "
+            "Costs nothing to select: it is the team's key and the issue's "
+            "number, both already on the row."
+        )
+    )
     title: str
     description: str | None
     priority: int
@@ -107,6 +114,7 @@ class IssueSummaryType:
     def from_entity(cls, entity: IssueEntity) -> "IssueSummaryType":
         return cls(
             id=entity.id,
+            identifier=entity.identifier,
             title=entity.title,
             description=entity.description,
             priority=entity.priority,
