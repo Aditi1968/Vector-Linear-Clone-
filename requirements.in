@@ -39,3 +39,27 @@ structlog
 # implementation cannot make them expensive for an attacker without making
 # them ruinous for the server.
 argon2-cffi
+
+# RSA signing for the GitHub App's authentication JWT.
+#
+# A GitHub App proves who it is by presenting a JWT it signed with its
+# private key, exchanges that for a short-lived installation token, and
+# uses the token to read the installation's repositories. The signature
+# is RS256, which no part of the standard library can produce -- hashlib
+# and hmac cover symmetric algorithms only, and the webhook's HMAC-SHA256
+# is why nothing here needed a crypto library until now.
+#
+# The alternative was to abandon installation tokens and use the
+# user-to-server token from the OAuth code instead. That is a worse
+# design, not a cheaper one: it ties what Vector can see to one person's
+# account, breaks when they leave, and means storing a user's bearer
+# credential -- which app/rest/github.py deliberately refuses to do.
+cryptography
+
+# The HTTP client for those GitHub API calls.
+#
+# Already the dev lock's test client (starlette's TestClient is built on
+# it), so this promotes a dependency the project has rather than adding a
+# new one. Async, because every call sits on the request path of an
+# already-async application.
+httpx
