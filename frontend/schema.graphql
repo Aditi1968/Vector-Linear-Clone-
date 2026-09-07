@@ -83,6 +83,31 @@ scalar Date
 """Date with time (isoformat)"""
 scalar DateTime
 
+type Environment {
+  id: UUID!
+  name: String!
+  kind: EnvironmentKind!
+  createdAt: DateTime!
+}
+
+input EnvironmentCreateInput {
+  workspaceSlug: String!
+  name: String!
+  kind: EnvironmentKind!
+}
+
+enum EnvironmentKind {
+  DEVELOPMENT
+  STAGING
+  PRODUCTION
+  CUSTOM
+}
+
+type EnvironmentPayload {
+  environment: Environment
+  errors: [ValidationErrorType!]!
+}
+
 """
 One shortcut in one person's sidebar. Exactly one of `teamId`, `projectId` and `savedViewId` is set.
 """
@@ -884,6 +909,10 @@ type Mutation {
   issueTemplateUpdate(input: IssueTemplateUpdateInput!): IssueTemplateSavePayload!
   issueTemplateDelete(input: IssueTemplateDeleteInput!): IssueTemplateDeletePayload!
   issueCreateFromTemplate(input: IssueCreateFromTemplateInput!): IssueCreateFromTemplatePayload!
+  environmentCreate(input: EnvironmentCreateInput!): EnvironmentPayload!
+  releaseCreate(input: ReleaseCreateInput!): ReleasePayload!
+  releaseStatusSet(input: ReleaseStatusSetInput!): ReleasePayload!
+  releaseDelete(input: ReleaseDeleteInput!): ReleaseDeletePayload!
 }
 
 type Notification {
@@ -1133,6 +1162,9 @@ type Query {
   issueViewerIsSubscribed(workspaceSlug: String!, issueId: UUID!): Boolean!
   issueTemplates(workspaceSlug: String!, teamId: UUID = null): [IssueTemplate!]!
   issueTemplate(workspaceSlug: String!, id: UUID!): IssueTemplate
+  environments(workspaceSlug: String!): [Environment!]!
+  release(workspaceSlug: String!, id: UUID!): Release
+  releases(workspaceSlug: String!, first: Int! = 50, after: String = null): ReleaseConnection!
 }
 
 input RegisterInput {
@@ -1144,6 +1176,64 @@ input RegisterInput {
 type RegisterPayload {
   user: User
   errors: [ValidationErrorType!]!
+}
+
+type Release {
+  id: UUID!
+  name: String!
+  environmentId: UUID!
+  repositoryId: ID!
+  commitSha: String!
+  previousCommitSha: String
+  status: ReleaseStatus!
+  notes: String!
+  deployedAt: DateTime
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  issueIds: [UUID!]!
+  pullRequestNumbers: [Int!]!
+}
+
+type ReleaseConnection {
+  nodes: [Release!]!
+  pageInfo: PageInfo!
+}
+
+input ReleaseCreateInput {
+  workspaceSlug: String!
+  name: String!
+  environmentId: UUID!
+  repositoryId: ID!
+  commitSha: String!
+  previousCommitSha: String
+}
+
+input ReleaseDeleteInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type ReleaseDeletePayload {
+  deletedReleaseId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type ReleasePayload {
+  release: Release
+  errors: [ValidationErrorType!]!
+}
+
+enum ReleaseStatus {
+  PENDING
+  DEPLOYED
+  FAILED
+  ROLLED_BACK
+}
+
+input ReleaseStatusSetInput {
+  workspaceSlug: String!
+  id: UUID!
+  status: ReleaseStatus!
 }
 
 type SavedView {

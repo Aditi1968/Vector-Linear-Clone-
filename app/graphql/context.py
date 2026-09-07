@@ -33,6 +33,7 @@ from app.repositories.memberships import MembershipRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.relations import RelationRepository
+from app.repositories.releases import ReleaseRepository
 from app.repositories.saved_views import FavoriteRepository, SavedViewRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.slack import SlackRepository
@@ -53,6 +54,7 @@ from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
 from app.services.projects import ProjectService
 from app.services.relations import RelationService
+from app.services.releases import ReleaseService
 from app.services.saved_views import FavoriteService, SavedViewService
 from app.services.search import SearchService
 from app.services.slack import DatabaseTokenStore, SlackService, SlackWebClient
@@ -75,6 +77,7 @@ class VectorContext(BaseContext):
         project_service: ProjectService,
         initiative_service: InitiativeService,
         relation_service: RelationService,
+        release_service: ReleaseService,
         saved_view_service: SavedViewService,
         favorite_service: FavoriteService,
         search_service: SearchService,
@@ -95,6 +98,14 @@ class VectorContext(BaseContext):
         self.project_service = project_service
         self.initiative_service = initiative_service
         self.search_service = search_service
+
+        # What shipped, where, and the notes that say so. Holds the whole
+        # feature rather than sharing GithubService's: a release READS
+        # migration 017's tables and never writes them, so the two services
+        # have no state to keep in step -- and putting release creation behind
+        # the object that also applies webhooks would give a webhook path a
+        # method that cuts releases.
+        self.release_service = release_service
 
         # Saved views and favorites. Two services over two tables rather
         # than one over both: a favourite points at a team, a project or a
@@ -373,6 +384,16 @@ async def get_context() -> VectorContext:
         relation_service=RelationService(
             pool=pool,
             repository=RelationRepository(),
+        ),
+        release_service=ReleaseService(
+            pool=pool,
+            # One repository, even though the range it resolves reads
+            # `github_commits` and `github_pull_requests`. Those two statements
+            # are SELECTs in service of the releases feature and belong with
+            # the rest of its SQL; reaching into GithubRepository for them
+            # would mean that class growing methods about release windows,
+            # which is not what it owns.
+            repository=ReleaseRepository(),
         ),
         saved_view_service=SavedViewService(
             pool=pool,
