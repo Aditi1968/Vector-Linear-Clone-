@@ -131,6 +131,69 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* The keyboard reference                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * `tabIndex={-1}` in the markup and therefore focusable by script.
+ *
+ * No `outline: none` to hide the ring that would draw: `:focus-visible` in
+ * base.css only paints for keyboard-initiated focus, and this focus is moved
+ * programmatically, so nothing appears without the ring being suppressed.
+ */
+.shortcuts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-height: min(28rem, 55vh);
+  overflow-y: auto;
+}
+
+.shortcutsHeading {
+  margin-block-end: var(--space-3);
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.shortcutList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/**
+ * Keys first, description second.
+ *
+ * A fixed key column and a flexible description, so the keycaps line up down
+ * the page: the column is what the eye scans when looking for a key it half
+ * remembers.
+ */
+.shortcutRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+  min-height: var(--row-height);
+  padding-inline: var(--space-3);
+}
+
+.shortcutKeys {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  width: 6rem;
+}
+
+.shortcutDescription {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* ------------------------------------------------------------------ */
 /* Footer hints                                                        */
 /* ------------------------------------------------------------------ */
 

@@ -472,3 +472,133 @@ describe('the create-issue action', () => {
     expect(screen.getByRole('option', { name: 'Settings' })).toBeInTheDocument()
   })
 })
+
+describe('the product-wide single-key shortcuts', () => {
+  /**
+   * The half of a single-key shortcut that is worth testing.
+   *
+   * `/` opening a palette is easy and nearly worthless to assert on its own.
+   * What is silent when it breaks is everything the key must *not* do: fire
+   * while somebody is typing a path into a description, or steal Ctrl+/ from
+   * the platform.
+   */
+  it.each(['input', 'textarea'] as const)(
+    'does not fire inside <%s>',
+    async (tagName) => {
+      await renderShell()
+
+      const field = focusOutsideTheApp(document.createElement(tagName))
+
+      fireEvent.keyDown(field, { key: '/' })
+      fireEvent.keyDown(field, { key: '?', shiftKey: true })
+
+      expect(palette()).toBeNull()
+    },
+  )
+
+  it('does not fire inside a contenteditable element', async () => {
+    await renderShell()
+
+    const editor = document.createElement('div')
+
+    // jsdom leaves `isContentEditable` undefined however the attribute is
+    // set, so the property stands in for the browser behaviour. The code
+    // under test runs unmodified.
+    Object.defineProperty(editor, 'isContentEditable', { value: true })
+    focusOutsideTheApp(editor)
+
+    fireEvent.keyDown(editor, { key: '/' })
+
+    expect(palette()).toBeNull()
+  })
+
+  it('leaves the modified forms to the platform', async () => {
+    await renderShell()
+
+    fireEvent.keyDown(window, { key: '/', ctrlKey: true })
+    fireEvent.keyDown(window, { key: '/', metaKey: true })
+
+    expect(palette()).toBeNull()
+  })
+
+  it('opens the palette on / with the query field focused', async () => {
+    await renderShell()
+
+    fireEvent.keyDown(window, { key: '/' })
+
+    expect(palette()).toBeInTheDocument()
+    expect(paletteInput()).toHaveFocus()
+  })
+
+  it('opens the composer on C, through the shell slot', async () => {
+    const { link } = await renderShell()
+
+    await link.resolve('IssueList', { data: issueListData([issueRow(1)]) })
+
+    fireEvent.keyDown(window, { key: 'c' })
+
+    expect(screen.getByRole('heading', { name: 'New issue' })).toBeInTheDocument()
+  })
+
+  it('does nothing on C where no screen offers a composer', async () => {
+    const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/settings` })
+
+    await view.link.idle()
+
+    fireEvent.keyDown(window, { key: 'c' })
+
+    expect(screen.queryByRole('heading', { name: 'New issue' })).toBeNull()
+  })
+})
+
+describe('the keyboard reference', () => {
+  it('opens on ? and lists only shortcuts that work', async () => {
+    const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/settings` })
+
+    await view.link.idle()
+
+    fireEvent.keyDown(window, { key: '?', shiftKey: true })
+
+    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' })
+
+    expect(within(dialog).getByText('Open the command palette')).toBeInTheDocument()
+    expect(within(dialog).getByText('Search this workspace')).toBeInTheDocument()
+
+    // No screen here offers a composer, so `C` is not advertised. A reference
+    // that documents a key nobody bound is worse than no reference.
+    expect(within(dialog).queryByText('New issue')).toBeNull()
+  })
+
+  it('is reachable from the palette itself, and does not close it', async () => {
+    const { user, link } = await renderShell()
+
+    await link.resolve('IssueList', { data: issueListData([issueRow(1)]) })
+
+    pressChord()
+    await user.click(screen.getByRole('option', { name: 'Keyboard shortcuts' }))
+
+    // The dialog's accessible name follows the view, so a screen reader is
+    // told where the user now is.
+    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' })
+
+    // This screen does register a composer, so `C` is advertised here.
+    // Scoped, because the rail's own button carries the same words.
+    expect(within(dialog).getByText('New issue')).toBeInTheDocument()
+
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('goes back to the command view the next time it opens', async () => {
+    const { user } = await renderShell()
+
+    pressChord()
+    await user.click(screen.getByRole('option', { name: 'Keyboard shortcuts' }))
+    await user.keyboard('{Escape}')
+
+    pressChord()
+
+    expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeInTheDocument()
+  })
+})
