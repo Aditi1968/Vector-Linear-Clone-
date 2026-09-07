@@ -1,0 +1,168 @@
+# Every GraphQL document the saved-views feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it.
+#
+# `first` is a literal in both list queries below. See
+# `src/features/issues/api/operations.graphql` for why: a variable page size
+# is charged at `ASSUMED_PAGE_SIZE = 100` during validation by
+# `app/graphql/limits.py`, whatever value is actually sent.
+
+# One saved view, as the list and the editor both receive it.
+#
+# The whole stored row bar its timestamps and `createdBy`, because the editor
+# has to round-trip every field it does not show: `SavedViewUpdateInput`
+# takes each field as nullable-and-optional, so a field omitted from an
+# update is left alone -- but a field the form renders as blank because it
+# was never loaded would be sent as a deliberate clearing.
+#
+# ## `filter` reads back in a different vocabulary than it is written in
+#
+# `SavedView.filter` is a `SavedViewFilter`, whose `assignee`, `project` and
+# `cycle` are `SavedViewIdFilter` wrappers -- the wrapper's presence is the
+# filter and its `id` is what to match, so `{id: null}` means "unassigned"
+# while a null wrapper means "does not filter on assignee at all".
+#
+# `SavedViewCreateInput.filter` and `SavedViewUpdateInput.filter` are
+# `IssueFilterInput`, whose `assigneeId`, `projectId` and `cycleId` are flat
+# nullable UUIDs with no wrapper. A flat null is indistinguishable from an
+# absent key, so the input type cannot express "unassigned" at all.
+#
+# The two are therefore NOT round-trippable: a view stored with
+# `assignee: {id: null}` cannot be re-sent through an update without losing
+# that meaning. ../api/types.ts documents what this feature does about it,
+# which is to refuse to rewrite a filter it cannot faithfully represent.
+fragment SavedViewFields on SavedView {
+  id
+  name
+  teamId
+  filter {
+    teamId
+    workflowStateId
+    stateCategory
+    labelId
+    priority
+    assignee {
+      id
+    }
+    project {
+      id
+    }
+    cycle {
+      id
+    }
+  }
+  orderField
+  orderDirection
+  layout
+  grouping
+  subgrouping
+  visibility
+}
+
+# Every saved view the viewer can see, personal and shared alike.
+#
+# `teamId` is deliberately not sent: it is an optional narrowing, and the
+# screen is the workspace's whole list of views. A view with no team is a
+# workspace-wide view rather than a malformed one, so filtering by team here
+# would hide exactly the views that apply everywhere.
+#
+# Cost: 25 x (nodes 17 + pageInfo 2) = 475 of 1000. Written as `first: 25`
+# rather than left to the schema's declared default of 50, which would be
+# charged 50 x 19 = 950 -- inside the budget, but with no room for a field
+# added to the fragment later.
+query SavedViewList($workspaceSlug: String!, $after: String) {
+  savedViews(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+    nodes {
+      ...SavedViewFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# What one saved view actually selects.
+#
+# `SavedView.issues` is the whole point of the type: the filter and the
+# ordering come from the stored row rather than from this document, so the
+# page that comes back is the one that was saved. There is no way to ask for
+# "the issues matching this filter" other than through the view that holds
+# it, and no way to preview an unsaved filter at all.
+#
+# Unlike `TriageIssue.issue`, these nodes are full `Issue` objects, so a row
+# here CAN show a status glyph and an assignee -- both are resolved through
+# `useWorkspaceContext()`'s lookups, which is one query for the screen rather
+# than one per row.
+#
+# Cost: `savedView` is not a list, so it is charged once: 2 + 25 x (7 + 2 + 1)
+# = 252 of 1000.
+query SavedViewResults($workspaceSlug: String!, $id: UUID!, $after: String) {
+  savedView(workspaceSlug: $workspaceSlug, id: $id) {
+    id
+    name
+    issues(first: 25, after: $after) {
+      nodes {
+        id
+        identifier
+        title
+        priority
+        workflowStateId
+        assigneeId
+        dueDate
+      }
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      totalCount
+    }
+  }
+}
+
+# Create a view. Returns the whole row, so the list corrects itself by
+# normalisation for every field except its own membership -- which is why
+# ../api/mutations.ts refetches `SavedViewList` here and on delete.
+mutation SavedViewCreate($input: SavedViewCreateInput!) {
+  savedViewCreate(input: $input) {
+    savedView {
+      ...SavedViewFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Update a view. A patch and not a whole-row replace: every field of
+# `SavedViewUpdateInput` past `workspaceSlug` and `id` is optional, so only
+# what changed is sent.
+#
+# No refetch. The payload returns the same fragment the list selects, over
+# the same `SavedView:<id>` entity, so Apollo's normalisation corrects the
+# row and the open results panel together.
+mutation SavedViewUpdate($input: SavedViewUpdateInput!) {
+  savedViewUpdate(input: $input) {
+    savedView {
+      ...SavedViewFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation SavedViewDelete($input: SavedViewDeleteInput!) {
+  savedViewDelete(input: $input) {
+    deletedSavedViewId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

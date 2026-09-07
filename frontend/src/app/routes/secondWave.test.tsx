@@ -6,7 +6,8 @@ import { renderApp } from '../../test/render'
 import { paths } from './paths'
 
 /**
- * Every second-wave route, and the heading its placeholder shows.
+ * Every second-wave route that is still a placeholder, and the heading it
+ * shows.
  *
  * Written as builder-plus-title rather than as a list of URL strings, which
  * is the whole point of the test: a segment spelled one way in `paths` and
@@ -14,15 +15,18 @@ import { paths } from './paths'
  * nothing, and lands on the shell's not-found page. Nothing else catches
  * that -- `paths.test.ts` proves the two *forms* of a builder agree with each
  * other, not that the router has heard of either.
+ *
+ * Four of the original twelve are gone from this list because their screens
+ * are built: `triage`, `savedViews`, `favorites` and `templates` now render
+ * real pages, and each is covered by its own feature test. A row removed here
+ * has to be a row that graduated -- deleting one whose screen does not exist
+ * would leave a rail link pointing at the not-found page with nothing
+ * watching.
  */
 const SECOND_WAVE = [
-  [paths.triage, 'Triage'],
-  [paths.savedViews, 'Saved views'],
-  [paths.favorites, 'Favorites'],
   [paths.initiatives, 'Initiatives'],
   [paths.roadmap, 'Roadmap'],
   [paths.documents, 'Documents'],
-  [paths.templates, 'Templates'],
   [paths.releases, 'Releases'],
   [paths.environments, 'Environments'],
   [paths.labelGroups, 'Label groups'],

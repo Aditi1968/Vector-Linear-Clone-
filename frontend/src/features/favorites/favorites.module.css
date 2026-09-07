@@ -1,0 +1,78 @@
+/*
+ * Styles for the favorites feature.
+ *
+ * Every value comes from `src/styles/tokens.css`; there is no literal hex or
+ * pixel measurement below. Resets, list semantics and the focus ring belong
+ * to `src/styles/base.css` and are not restated.
+ */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: space-between;
+  margin-block-end: var(--space-7);
+}
+
+/* ----------------------------------------------------------------- rows */
+
+.rowLink {
+  color: inherit;
+  overflow: hidden;
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * A favorite whose target could not be resolved.
+ *
+ * Muted and italic rather than hidden: the shortcut is really there, and a
+ * row that silently vanished would leave someone hunting for a favorite they
+ * remember adding.
+ */
+.missingName {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.rowActions {
+  position: relative;
+  z-index: var(--z-raised);
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+/* --------------------------------------------------------------- states */
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.actionError {
+  margin-block-end: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/*
+ * The note under the list explaining an unresolvable row.
+ *
+ * Not a nicety: a favorite can outlive what it points at, and a reader who
+ * does not know that will read "Not available" as a bug in the screen.
+ */
+.footnote {
+  margin-block-start: var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}

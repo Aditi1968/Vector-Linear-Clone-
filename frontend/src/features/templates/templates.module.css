@@ -1,0 +1,171 @@
+/*
+ * Styles for the templates feature.
+ *
+ * Every value comes from `src/styles/tokens.css`; there is no literal hex or
+ * pixel measurement below. Resets, list semantics and the focus ring belong
+ * to `src/styles/base.css` and are not restated.
+ */
+
+/* ------------------------------------------------------------- sections */
+
+/*
+ * One team's templates, plus the workspace-wide group.
+ *
+ * Headed by a real `<h2>` and named by it through `aria-labelledby`, so the
+ * groups are landmarks a screen-reader user can jump between rather than one
+ * undifferentiated stack of names.
+ */
+.group + .group {
+  margin-block-start: var(--space-8);
+}
+
+.groupHead {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  margin-block-end: var(--space-4);
+}
+
+/* A heading level, not a size: `base.css` decouples the two. */
+.groupTitle {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.groupCount {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ----------------------------------------------------------------- rows */
+
+.templateName {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The line under a template's name: the issue title it produces. */
+.templateTitle {
+  display: block;
+  overflow: hidden;
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* --------------------------------------------------------------- states */
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.actionError {
+  margin-block-end: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* What just happened, when an issue was filed from a template. */
+.actionSuccess {
+  margin-block-end: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-success-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-success-subtle);
+  color: var(--color-text-success);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.successLink {
+  color: inherit;
+  font-weight: var(--weight-medium);
+}
+
+/* --------------------------------------------------------------- forms */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-5);
+}
+
+@media (max-width: 34rem) {
+  .fieldRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+/* The message an `aria-describedby` points at. Never the only signal -- the
+ * control also carries `aria-invalid`. */
+.fieldError {
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+}
+
+.formError {
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.formActions {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: flex-end;
+}
+
+.hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
