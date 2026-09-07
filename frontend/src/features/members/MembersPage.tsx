@@ -126,7 +126,14 @@ export function MembersPage() {
   const emailErrors = formErrors.filter((entry) => entry.field === 'email')
   const otherErrors = formErrors.filter((entry) => entry.field !== 'email')
 
-  /** Report one outcome the same way wherever it came from. */
+  /**
+   * Report one outcome the same way wherever it came from.
+   *
+   * `toForm` is what keeps a rejected role change out of the invite form's
+   * `email` field. Only the invite has fields for a rejection to name; every
+   * other write on this screen owns no control, so its refusal belongs at the
+   * top of the page and nowhere else.
+   */
   const report = useCallback(
     (
       outcome:
@@ -134,10 +141,12 @@ export function MembersPage() {
         | { status: 'rejected'; errors: readonly MemberValidationError[] }
         | { status: 'failed'; message: string },
       success: string,
+      toForm = false,
     ): boolean => {
+      setFormErrors(NO_ERRORS)
+
       if (outcome.status === 'ok') {
         setActionError(null)
-        setFormErrors(NO_ERRORS)
         setStatus(success)
         return true
       }
@@ -145,12 +154,16 @@ export function MembersPage() {
       setStatus(null)
 
       if (outcome.status === 'rejected') {
-        setFormErrors(outcome.errors)
-        setActionError(outcome.errors.map((entry) => entry.message).join(' '))
+        if (toForm) {
+          setFormErrors(outcome.errors)
+          setActionError(null)
+        } else {
+          setActionError(outcome.errors.map((entry) => entry.message).join(' '))
+        }
+
         return false
       }
 
-      setFormErrors(NO_ERRORS)
       setActionError(outcome.message)
       return false
     },
@@ -159,7 +172,7 @@ export function MembersPage() {
 
   const handleInvite = useCallback(() => {
     void invite(email, inviteRole).then((outcome) => {
-      if (!report(outcome, `Invitation created for ${email}.`)) {
+      if (!report(outcome, `Invitation created for ${email}.`, true)) {
         return
       }
 
@@ -293,8 +306,13 @@ export function MembersPage() {
                         <ListRowMain>
                           <Avatar name={memberName(member)} size="sm" decorative />{' '}
                           {memberName(member)}
-                          {isSelf && <VisuallyHidden> (you)</VisuallyHidden>}
-                          <span className={styles.rowSub}>{member.email}</span>
+                          {isSelf && <VisuallyHidden>, you</VisuallyHidden>}
+                          {/* Only when it adds something. `memberName` falls
+                              back to the email for an account that never set
+                              a name, and printing it twice reads as a bug. */}
+                          {member.name !== null && (
+                            <span className={styles.rowSub}>{member.email}</span>
+                          )}
                         </ListRowMain>
 
                         <ListRowMeta>
@@ -435,14 +453,21 @@ export function MembersPage() {
                               a button, because the clipboard can be refused
                               and this string cannot be fetched again. */}
                           <p className={styles.secret}>{invitation.link}</p>
+                          {/*
+                            `aria-label` rather than appended hidden text.
+                            An accessible name concatenates each node's
+                            *trimmed* text, so " for ada@..." would join as
+                            "Copy linkfor ada@...". Stating the whole name is
+                            simpler than smuggling a separator into it.
+                          */}
                           <Button
                             size="sm"
+                            aria-label={`Copy invite link for ${invitation.invitation.email}`}
                             onClick={() => {
                               copy(invitation)
                             }}
                           >
                             Copy link
-                            <VisuallyHidden> for {invitation.invitation.email}</VisuallyHidden>
                           </Button>
                         </li>
                       ))}
@@ -490,6 +515,7 @@ export function MembersPage() {
                             size="sm"
                             variant="danger"
                             disabled={isSubmitting}
+                            aria-label={`Revoke the invitation for ${invitation.email}`}
                             onClick={() => {
                               void revokeInvitation(invitation.id).then((outcome) => {
                                 report(
@@ -500,7 +526,6 @@ export function MembersPage() {
                             }}
                           >
                             Revoke
-                            <VisuallyHidden> the invitation for {invitation.email}</VisuallyHidden>
                           </Button>
                         </ListRowMeta>
                       </ListRow>

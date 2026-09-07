@@ -225,10 +225,20 @@ export function InboxPage() {
                           to={paths.issue(notification.issueId)}
                         >
                           {sentence}
-                          {/* The link's name has to say where it goes. The
-                              issue's own identifier is not available here --
-                              see the note on this component. */}
-                          <VisuallyHidden> -- open the issue</VisuallyHidden>
+                          {/*
+                            The link's name has to say where it goes; the
+                            issue's own identifier is not available (see the
+                            note on this component).
+
+                            The comma is inside the hidden node and not a
+                            space between the two. Accessible names are
+                            computed by concatenating each node's *trimmed*
+                            text, so a leading space here would be thrown
+                            away and the name would read "...to youopen the
+                            issue". Punctuation is the only separator that
+                            survives.
+                          */}
+                          <VisuallyHidden>, open the issue</VisuallyHidden>
                         </Link>
                       </ListRowMain>
 
