@@ -32,6 +32,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from starlette.responses import PlainTextResponse, RedirectResponse
 
@@ -64,6 +65,8 @@ from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
 from app.services.tokens import hash_session_token
 
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/github", tags=["github"])
 
@@ -543,9 +546,25 @@ async def _complete_install(
     if not config.configured:
         raise _not_found()
 
-    stored = _decode_state(request.cookies.get(STATE_COOKIE_NAME))
+    raw_cookie = request.cookies.get(STATE_COOKIE_NAME)
+    stored = _decode_state(raw_cookie)
 
     if stored is None or not _state_matches(stored, state, request):
+        # One structured line, and only booleans. The two ways this refusal
+        # happens need completely different fixes and the response cannot say
+        # which without becoming an oracle: a MISSING cookie means the browser
+        # arrived on an origin the cookie was not set for -- almost always a
+        # registered callback URL pointing somewhere other than where the user
+        # actually browses -- while a PRESENT cookie that does not match means
+        # a stale, replayed or forged state. Diagnosing the first from the
+        # second cost hours; neither the state nor the cookie is logged.
+        logger.warning(
+            "github.callback.state_rejected",
+            state_cookie_present=raw_cookie is not None,
+            state_cookie_decoded=stored is not None,
+            state_parameter_present=state is not None,
+        )
+
         # 400 rather than 404: the request is malformed rather than aimed at
         # something hidden, and a browser that lost its cookie needs to be
         # told to start the flow again rather than that GitHub does not exist.
