@@ -354,3 +354,17 @@ def decode_label_cursor(cursor: str) -> LabelCursor:
 KeysetCursor = IssueCursor
 encode_keyset_cursor = encode_issue_cursor
 decode_keyset_cursor = decode_issue_cursor
+
+# The same three names again, for the alphabetical keyset rather than the
+# chronological one.
+#
+# Nothing in the label codec is label-specific: the payload is a position over
+# `(name, id)`, which is how any list of named things is read. `saved_views` is
+# the second such list, and importing `encode_label_cursor` to page saved views
+# would read as a mistake at every call site -- while a second, identical
+# implementation would be two encodings that have to stay byte-compatible by
+# attention alone. Aliases, for the same reason and with the same caveat as the
+# three above.
+NameCursor = LabelCursor
+encode_name_cursor = encode_label_cursor
+decode_name_cursor = decode_label_cursor

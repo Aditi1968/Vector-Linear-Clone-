@@ -29,6 +29,7 @@ from app.repositories.memberships import MembershipRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.relations import RelationRepository
+from app.repositories.saved_views import FavoriteRepository, SavedViewRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.slack import SlackRepository
 from app.repositories.teams import TeamRepository
@@ -45,6 +46,7 @@ from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
 from app.services.projects import ProjectService
 from app.services.relations import RelationService
+from app.services.saved_views import FavoriteService, SavedViewService
 from app.services.search import SearchService
 from app.services.slack import DatabaseTokenStore, SlackService
 from app.services.teams import TeamService
@@ -64,6 +66,8 @@ class VectorContext(BaseContext):
         cycle_service: CycleService,
         project_service: ProjectService,
         relation_service: RelationService,
+        saved_view_service: SavedViewService,
+        favorite_service: FavoriteService,
         search_service: SearchService,
         github_service: GithubService,
         slack_service: SlackService,
@@ -80,6 +84,15 @@ class VectorContext(BaseContext):
         self.cycle_service = cycle_service
         self.project_service = project_service
         self.search_service = search_service
+
+        # Saved views and favorites. Two services over two tables rather
+        # than one over both: a favourite points at a team, a project or a
+        # saved view, and only the third has anything to do with saved
+        # views. What couples them is one statement -- deleting a view
+        # clears the favourites pointing at it -- which is a service
+        # reaching across to a second repository inside one transaction.
+        self.saved_view_service = saved_view_service
+        self.favorite_service = favorite_service
 
         # Holds the deployment's GitHub App credentials, and is the reason
         # nothing else in this context does. The service answers `configured`
@@ -312,6 +325,23 @@ async def get_context() -> VectorContext:
         relation_service=RelationService(
             pool=pool,
             repository=RelationRepository(),
+        ),
+        saved_view_service=SavedViewService(
+            pool=pool,
+            repository=SavedViewRepository(),
+            # Deleting a view drops the favourites pointing at it, in the
+            # same transaction. SQL against `favorites` belongs to the
+            # repository that owns that table, so the service reaches across
+            # to it rather than the saved-view repository growing statements
+            # about favourites.
+            favorites=FavoriteRepository(),
+        ),
+        favorite_service=FavoriteService(
+            pool=pool,
+            # A fresh instance rather than the one above. A repository here
+            # holds no state and no connection -- it is a namespace for
+            # statements -- so there is nothing for one request to get two of.
+            repository=FavoriteRepository(),
         ),
         search_service=SearchService(
             pool=pool,
