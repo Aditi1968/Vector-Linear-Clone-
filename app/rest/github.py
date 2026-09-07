@@ -43,6 +43,7 @@ from app.domain.errors import (
     GithubNotConfiguredError,
     WorkspaceAccessDeniedError,
 )
+from app.domain.github import NO_GRANT
 from app.domain.tenancy import AuthorizedWorkspaceScope
 from app.http_cookies import is_secure_environment, read_session_token
 from app.repositories.github import GithubRepository
@@ -603,9 +604,18 @@ async def _complete_install(
     # Asked at most once. The OAuth code is single-use, and this answers both
     # questions the callback has: which installation this authorisation is
     # about, and whether an id the redirect named is genuinely the caller's.
-    grant_installations = (
-        await services.github.installations_for_grant(code=code) if code else []
+    grant = (
+        await services.github.installations_for_grant(
+            code=code,
+            # The id the redirect named, so the grant knows whose repositories
+            # to read while the single-use token is still live. It decides
+            # nothing about which installation is claimed; that stays below.
+            preferred=installation_id,
+        )
+        if code
+        else NO_GRANT
     )
+    grant_installations = grant.installation_ids
 
     if installation_id is None or installation_id <= 0:
         # No `installation_id` does NOT mean nothing happened. GitHub sends
@@ -651,7 +661,20 @@ async def _complete_install(
         # what a second workspace collides with, so recording it first keeps
         # the refusal for a contested id identical either way.
         if installation_id in grant_installations:
-            await services.github.confirm_claim(installation_id=installation_id)
+            # The repositories ride along with the confirmation, because both
+            # rest on the same evidence and because this is the only moment
+            # they can be learned. An app already installed emits no
+            # `installation` delivery, so a reconnect that confirmed here and
+            # seeded nothing produced a CONNECTED integration covering no
+            # repositories, with no later event to fill it in.
+            #
+            # Empty when the grant could not be read, which is the behaviour
+            # that shipped before: still connected, repositories arriving with
+            # the next delivery that changes them.
+            await services.github.confirm_claim(
+                installation_id=installation_id,
+                repositories=grant.repositories,
+            )
     except GithubNotConfiguredError:
         raise _not_found() from None
     except GithubInstallationClaimedError:

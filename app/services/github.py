@@ -36,10 +36,12 @@ from app.domain.github import (
     LINK_SOURCE_BODY,
     LINK_SOURCE_BRANCH,
     LINK_SOURCE_TITLE,
+    NO_GRANT,
     PENDING,
     PULL_REQUEST_STATES,
     UNCONFIGURED,
     GithubDevelopmentEntity,
+    GithubGrant,
     GithubInstallationEntity,
     GithubIntegrationEntity,
     GithubRepositoryEntity,
@@ -658,16 +660,61 @@ def _pushed_commits(payload: Mapping[str, Any]) -> tuple[_PushedCommit, ...]:
 GITHUB_TOKEN_URL: Final = "https://github.com/login/oauth/access_token"
 GITHUB_USER_INSTALLATIONS_URL: Final = "https://api.github.com/user/installations"
 
+# The repositories one installation covers, as the INSTALLER sees them.
+#
+# The user-to-server route rather than the app-to-server one
+# (`/installation/repositories` signed with the app's private key), because
+# this flow already holds a user token and holds no key: minting an
+# installation token needs RS256 JWT signing, which this application
+# deliberately does not carry -- see the note in migrations/013.
+GITHUB_INSTALLATION_REPOSITORIES_URL: Final = (
+    "https://api.github.com/user/installations/{installation_id}/repositories"
+)
+
+# One page. An installation covering more than this is a case this flow does
+# not have, and the webhook path fills in anything a first page missed.
+REPOSITORY_PAGE_SIZE: Final = 100
+
 # How long the two calls below may take. Short, because they sit inside an
 # OAuth callback the user is watching, and a provider that has stopped
 # answering must not hold the request open.
 VERIFY_TIMEOUT_SECONDS: Final = 10.0
 
 
+def _resolve_installation(
+    installation_ids: tuple[int, ...], preferred: int | None
+) -> int | None:
+    """Which installation's repositories are worth one request, if any.
+
+    The id the redirect named, when the grant actually lists it -- an id it
+    does not list is a guess, and enumerating a guess would ask GitHub about
+    somebody else's installation. Failing that, the sole installation, because
+    with exactly one there is nothing to choose between.
+
+    None for the ambiguous case: several installations and no id naming one.
+    The callback refuses that too, so there is nothing to fetch repositories
+    for and picking one would attach a repository set nobody asked for.
+
+    Deliberately mirrors, rather than shares, the callback's own rule about
+    which id to CLAIM. The two answer different questions -- what to ask
+    GitHub, and what to write down -- and the cost of them disagreeing is a
+    wasted request and an empty set, never a wrong row.
+    """
+    if preferred is not None and preferred in installation_ids:
+        return preferred
+
+    if len(installation_ids) == 1:
+        return installation_ids[0]
+
+    return None
+
+
 class InstallationOwnershipCheck(Protocol):
     """Which installations the person finishing this flow can administer."""
 
-    async def installations_for_user(self, *, code: str) -> list[int]: ...
+    async def installations_for_user(
+        self, *, code: str, preferred: int | None = None
+    ) -> GithubGrant: ...
 
 
 class GithubUserInstallations:
@@ -700,8 +747,10 @@ class GithubUserInstallations:
         self._client_secret = client_secret
         self._redirect_uri = redirect_uri
 
-    async def installations_for_user(self, *, code: str) -> list[int]:
-        """Every installation of this App the consenting account administers.
+    async def installations_for_user(
+        self, *, code: str, preferred: int | None = None
+    ) -> GithubGrant:
+        """Every installation the consenting account administers, and its repos.
 
         Returns ids rather than answering a yes/no about one, because the
         redirect does not always name an installation. GitHub sends
@@ -711,8 +760,21 @@ class GithubUserInstallations:
         installation the person just authorised against.
 
         The code is single-use, so this must be called at most once per
-        callback and its result reused for both questions the caller has:
-        which installation, and whether a named one is really theirs.
+        callback and its result reused for every question the caller has:
+        which installation, whether a named one is really theirs, and -- since
+        the same exchange is the only chance to ask -- what that installation
+        covers.
+
+        `preferred` is the id the redirect named, or None. It decides which
+        installation's repositories are worth a request, and nothing else: the
+        caller still settles which id to CLAIM from `installation_ids`, on its
+        own rules. Resolving to a different one than the caller does costs a
+        wasted request and an empty repository set, never a wrong write.
+
+        Repositories are fetched at most once. An account with several
+        installations and no `installation_id` in the redirect is ambiguous,
+        the caller refuses it anyway, and guessing one to enumerate would be
+        asking GitHub about an installation nobody chose.
         """
         fields = {
             "client_id": self._client_id,
@@ -732,34 +794,65 @@ class GithubUserInstallations:
             )
 
             if granted.status_code != 200:
-                return []
+                return NO_GRANT
 
             token = granted.json().get("access_token")
 
             if not isinstance(token, str) or not token:
-                return []
+                return NO_GRANT
+
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
 
             # One page is enough for the question being asked; an account with
             # more than a hundred installations is not a case this flow has,
             # and asking for more would turn a verification into a crawl.
             listed = await client.get(
                 GITHUB_USER_INSTALLATIONS_URL,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Accept": "application/vnd.github+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
-                params={"per_page": 100},
+                headers=headers,
+                params={"per_page": REPOSITORY_PAGE_SIZE},
             )
 
-        if listed.status_code != 200:
-            return []
+            if listed.status_code != 200:
+                return NO_GRANT
 
-        return [
-            entry["id"]
-            for entry in (listed.json().get("installations") or [])
-            if isinstance(entry.get("id"), int)
-        ]
+            installation_ids = tuple(
+                entry["id"]
+                for entry in (listed.json().get("installations") or [])
+                if isinstance(entry.get("id"), int)
+            )
+
+            resolved = _resolve_installation(installation_ids, preferred)
+
+            if resolved is None:
+                return GithubGrant(installation_ids=installation_ids, repositories=())
+
+            covered = await client.get(
+                GITHUB_INSTALLATION_REPOSITORIES_URL.format(installation_id=resolved),
+                headers=headers,
+                params={"per_page": REPOSITORY_PAGE_SIZE},
+            )
+
+        if covered.status_code != 200:
+            # The installation is still real and the claim still confirmable;
+            # only the repository list is missing. Returning the ids without
+            # them degrades to exactly the behaviour that shipped before this
+            # call existed -- an integration whose repositories arrive with the
+            # next delivery -- rather than failing a connect that is otherwise
+            # complete.
+            return GithubGrant(installation_ids=installation_ids, repositories=())
+
+        # `_repositories` is the webhook path's parser, reused rather than
+        # copied: this endpoint answers `{"repositories": [...]}` with entries
+        # of the same shape, and a second parser would be a second place for
+        # "skip the malformed, collapse duplicate ids" to drift.
+        return GithubGrant(
+            installation_ids=installation_ids,
+            repositories=_repositories(covered.json().get("repositories")) or (),
+        )
 
 
 class GithubService:
@@ -836,30 +929,40 @@ class GithubService:
 
         return self._view(installation, repositories)
 
-    async def installations_for_grant(self, *, code: str) -> list[int]:
-        """Which installations the consenting account administers, or none.
+    async def installations_for_grant(
+        self, *, code: str, preferred: int | None = None
+    ) -> GithubGrant:
+        """What the consenting account administers, and what it covers.
 
         Exposed on the service so the callback asks GitHub exactly once: the
-        OAuth code is single-use, and the callback has two questions for it --
-        which installation this authorisation is about, and whether an id the
-        redirect named is genuinely the caller's.
+        OAuth code is single-use, and the callback has three questions for it
+        -- which installation this authorisation is about, whether an id the
+        redirect named is genuinely the caller's, and which repositories that
+        installation covers.
 
-        Fails closed to an empty list, so every caller treats a provider that
+        Fails closed to an empty grant, so every caller treats a provider that
         is down, slow, or answering nonsense the same way it treats an account
         with nothing installed.
         """
         if self._ownership is None:
-            return []
+            return NO_GRANT
 
         try:
-            return await self._ownership.installations_for_user(code=code)
+            return await self._ownership.installations_for_user(
+                code=code, preferred=preferred
+            )
         except Exception:
             # A provider failure must not become a 500 in the middle of an
             # OAuth callback. PENDING is an honest state; the webhook path and
             # the claim TTL both still apply.
-            return []
+            return NO_GRANT
 
-    async def confirm_claim(self, *, installation_id: int) -> bool:
+    async def confirm_claim(
+        self,
+        *,
+        installation_id: int,
+        repositories: Sequence[GithubRepositoryEntity] = (),
+    ) -> bool:
         """Promote a claim GitHub has confirmed belongs to the installer.
 
         The second route to `confirmed_at`, and the one that makes connecting
@@ -886,6 +989,32 @@ class GithubService:
                     installation_id=installation_id,
                     within=CLAIM_TTL,
                 )
+
+                # Seeded in the SAME transaction as the promotion, and only
+                # when there was one. `confirm_installation` answers the
+                # workspace whose claim it just promoted, so the repositories
+                # land on exactly that tenant without this method taking a
+                # scope it could be handed the wrong one of.
+                #
+                # This is what makes connecting to an already-installed app
+                # produce a usable integration. GitHub emits `installation`
+                # once, at first install, so a reconnect -- disconnect inside
+                # Vector, press Connect again, with the app still on the
+                # account -- has no delivery to wait for and used to arrive
+                # CONNECTED covering nothing, permanently. The grant is the
+                # same evidence that promotes the claim, so a repository set
+                # read from it is trusted exactly as far.
+                #
+                # `connect` has already deleted this workspace's repositories
+                # inside its own transaction, so there is nothing here for
+                # `add_repositories` to collide with -- which matters, because
+                # it has no ON CONFLICT.
+                if workspace_id is not None and repositories:
+                    await self._repository.add_repositories(
+                        connection,
+                        scope=WorkspaceScope(workspace_id=workspace_id),
+                        repositories=repositories,
+                    )
 
         return workspace_id is not None
 

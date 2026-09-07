@@ -30,7 +30,7 @@ from app.domain.errors import (
     GithubInstallationClaimedError,
     WorkspaceAccessDeniedError,
 )
-from app.domain.github import GithubRepositoryEntity
+from app.domain.github import GithubGrant, GithubRepositoryEntity
 from app.domain.tenancy import AuthorizedWorkspaceScope
 from app.http_cookies import SESSION_COOKIE_NAME
 from app.main import create_app
@@ -41,7 +41,7 @@ from app.rest.github import (
     build_services,
     router,
 )
-from app.services.github import GithubService
+from app.services.github import GithubService, _resolve_installation
 
 from tests.conftest import FakePool
 from tests.test_github import (
@@ -125,14 +125,27 @@ class FakeOwnership:
     would notice.
     """
 
-    def __init__(self, installations=()):
+    def __init__(self, installations=(), repositories=()):
         self.installations = list(installations)
+        self.repositories = tuple(repositories)
         self.calls = 0
+        self.preferred = []
 
-    async def installations_for_user(self, *, code):
+    async def installations_for_user(self, *, code, preferred=None):
         self.calls += 1
+        self.preferred.append(preferred)
 
-        return list(self.installations)
+        # Resolves through the real helper rather than a second copy of the
+        # rule. The repositories only come back when an installation could be
+        # settled on, which is what the live client does -- a fake that always
+        # returned them would let a test pass against a callback that seeded
+        # from an ambiguous grant.
+        resolved = _resolve_installation(tuple(self.installations), preferred)
+
+        return GithubGrant(
+            installation_ids=tuple(self.installations),
+            repositories=self.repositories if resolved is not None else (),
+        )
 
 
 def build_services_for(
@@ -1040,6 +1053,92 @@ async def test_an_authorisation_with_no_installation_id_uses_the_only_grant():
 
     assert [c[1] for c in confirmed] == [4242], "and it should be confirmed"
     assert ownership.calls == 1, "the single-use code must be spent exactly once"
+
+
+async def test_reconnecting_to_an_installed_app_seeds_its_repositories():
+    """Regression: disconnect, press Connect, get a connection covering nothing.
+
+    Disconnecting inside Vector deletes this workspace's rows. It does not
+    uninstall anything on GitHub, so the app is still on the account -- and
+    GitHub emits `installation` exactly once, when an app is first installed.
+    Pressing Connect again therefore produces an authorisation carrying only
+    `code`, no `installation_id`, and no delivery follows it because from
+    GitHub's side nothing changed.
+
+    Everything downstream then worked and the result was still useless: the
+    claim was confirmed from the grant, the browser was sent back to the
+    workspace, and `github_repositories` stayed empty for good. The settings
+    page said Connected and listed nothing, with no event that would ever fill
+    it in short of uninstalling the app and installing it again.
+
+    The grant is the fix because it is the only thing in this flow that knows.
+    It is also the same evidence that promotes the claim, so a repository set
+    read from it is trusted exactly as far as the confirmation beside it.
+    """
+    repository = FakeGithubRepository()
+    covered = (
+        GithubRepositoryEntity(repository_id=1, full_name="acme/vector"),
+        GithubRepositoryEntity(repository_id=2, full_name="acme/docs"),
+    )
+    ownership = FakeOwnership([4242], repositories=covered)
+
+    async with build_client(
+        build_services_for(repository=repository, ownership=ownership)
+    ) as client:
+        state = state_from(await start_install(client, return_to=ALLOWED_RETURN))
+        await client.get(
+            "/github/callback",
+            params={"state": state, "code": "the-code"},
+            follow_redirects=False,
+        )
+
+    added = [call for call in repository.calls if call[0] == "add_repositories"]
+
+    assert added, "a reconnect must seed the repositories the grant reported"
+    assert added[0][2] == ((1, "acme/vector"), (2, "acme/docs")), (
+        "ids as well as names: the id is what survives a rename, and seeding "
+        "names alone would leave nothing for a later delivery to match on"
+    )
+    assert ownership.calls == 1, "the single-use code must still be spent once"
+
+
+async def test_an_installation_the_grant_does_not_list_seeds_nothing():
+    """A guessed id stays PENDING, and collects no repository names with it.
+
+    The whole point of the claim design: GitHub numbers installations with a
+    small ascending counter, so `?installation_id=N` for somebody else's N
+    costs an attacker a guess. Seeding is bound to the confirmation for that
+    reason -- an id the grant does not list is confirmed by nothing, so it must
+    also be covered by nothing. Were repositories written before that check, a
+    guess would harvest another organisation's private repository names into a
+    workspace the attacker controls, which is the exact disclosure
+    migrations/016 was written to close.
+    """
+    repository = FakeGithubRepository()
+    ownership = FakeOwnership(
+        [9999],
+        repositories=(
+            GithubRepositoryEntity(repository_id=7, full_name="victim/private"),
+        ),
+    )
+
+    async with build_client(
+        build_services_for(repository=repository, ownership=ownership)
+    ) as client:
+        state = state_from(await start_install(client, return_to=ALLOWED_RETURN))
+        await client.get(
+            "/github/callback",
+            # 4242 is what this workspace claims; the grant lists only 9999.
+            params={"state": state, "code": "the-code", "installation_id": 4242},
+            follow_redirects=False,
+        )
+
+    assert not [call for call in repository.calls if call[0] == "add_repositories"], (
+        "an unconfirmed claim must collect no repository names"
+    )
+    assert not [
+        call for call in repository.calls if call[0] == "confirm_installation"
+    ], "and must not be confirmed either"
 
 
 async def test_no_installation_and_no_grant_says_nothing_was_installed():

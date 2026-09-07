@@ -93,6 +93,39 @@ class GithubRepositoryEntity:
 
 
 @dataclass(frozen=True, slots=True)
+class GithubGrant:
+    """What one OAuth code turned out to be worth.
+
+    Two answers from a single exchange, because the code buys exactly one.
+    `installation_ids` is every installation the consenting account
+    administers -- the evidence that promotes a claim. `repositories` is the
+    set covered by the ONE installation that grant resolves to, or empty when
+    it resolves to none.
+
+    The pairing exists because of a gap the webhook path cannot close.
+    Repositories are otherwise written only by an `installation` or
+    `installation_repositories` delivery, and GitHub emits `installation`
+    exactly once -- when the app is first installed. A workspace connecting to
+    an app that is ALREADY installed therefore gets a confirmed integration
+    covering nothing, and no later event ever fills it in, because from
+    GitHub's side nothing changed. Disconnecting inside Vector and pressing
+    Connect again is precisely that case: Vector's rows go, the installation
+    on GitHub stays, and the reconnect has no delivery to wait for.
+    """
+
+    installation_ids: tuple[int, ...]
+    repositories: tuple[GithubRepositoryEntity, ...]
+
+
+# What every unusable grant is. Named once rather than spelled at each of the
+# half-dozen `return`s that mean it: a deployment with no ownership check, a
+# provider that is down, an exchange GitHub refused, a token that came back
+# malformed, and a callback with no `code` at all are the same answer to
+# everyone downstream, and a caller must not be able to tell them apart.
+NO_GRANT: Final = GithubGrant(installation_ids=(), repositories=())
+
+
+@dataclass(frozen=True, slots=True)
 class GithubIntegrationEntity:
     """What one workspace's integration looks like right now.
 
