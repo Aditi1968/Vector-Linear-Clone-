@@ -105,12 +105,21 @@ class MembershipQuery:
         return WorkspaceMembershipType.from_entity(membership)
 
     @strawberry.field(
-        description=("Everyone in a workspace, with the role each holds. Members only.")
+        description=(
+            "Everyone in a workspace, with the role each holds, including "
+            "people who have left -- see `removedAt`. Members only."
+        )
     )
     async def workspace_members(
         self, info: Info, workspace_slug: str
     ) -> list[WorkspaceMemberType]:
         """The workspace's people, for an assignee picker or a settings page.
+
+        Past and present both, distinguished by `removedAt` rather than by
+        membership of the list. A caller offering a choice of person filters on
+        that field; a caller naming the author of something does not. See
+        `MembershipRepository.list_members` for why one list serving both beats
+        two lists that have to be merged.
 
         Errors rather than answering an empty list for a workspace the viewer
         cannot see, which is the opposite of what `teams` does today and is

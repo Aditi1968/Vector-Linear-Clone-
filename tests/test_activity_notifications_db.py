@@ -615,6 +615,38 @@ async def test_a_notification_cannot_be_filed_for_a_non_member(wired):
     assert raised.value.constraint_name == "notifications_user_fk"
 
 
+async def test_a_member_who_has_left_stops_receiving_notifications(wired):
+    """The same guarantee as above, for the case the constraint stopped making.
+
+    Since 026 a removed member keeps their `workspace_members` row -- that is
+    what lets a comment they wrote two years ago still resolve to a name -- so
+    `notifications_user_fk` is satisfied by somebody who has left and the test
+    above would no longer catch them. The `removed_at IS NULL` on the join in
+    `notify_about_issue` is the only thing left, and the failure it prevents is
+    silent: a former colleague kept on the assignee arm of the fan-out would go
+    on being told the titles of new work, by email, indefinitely.
+
+    Alice is the assignee of ISSUE_A and Bob filed it, so Bob is the control.
+    An assertion that Alice's inbox is empty would pass against a fan-out that
+    had simply stopped working.
+    """
+    await wired.connection.execute(
+        "UPDATE workspace_members SET removed_at = now() "
+        "WHERE workspace_id = $1 AND user_id = $2",
+        WORKSPACE_A,
+        ALICE,
+    )
+
+    await wired.comments.create(
+        scope=SCOPE_A, issue_id=ISSUE_A, author_id=DAVE, body="still going"
+    )
+
+    assert await _inbox(wired.connection, ALICE) == []
+    assert await _inbox(wired.connection, BOB) == [
+        (NotificationKind.COMMENTED, ISSUE_A, DAVE, False)
+    ]
+
+
 # --------------------------------------------------------------------------
 # The inbox: reading it, and clearing it
 # --------------------------------------------------------------------------

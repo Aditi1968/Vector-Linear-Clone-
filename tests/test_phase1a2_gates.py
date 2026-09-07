@@ -89,6 +89,7 @@ EXPECTED_MIGRATIONS = [
     "023_documents.sql",
     "024_releases.sql",
     "025_semantic_search.sql",
+    "026_member_departure.sql",
     "027_domain_events.sql",
     "028_embedding_jobs.sql",
 ]

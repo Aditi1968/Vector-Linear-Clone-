@@ -124,6 +124,17 @@ class NotificationRepository:
         anyway, so nothing here depends on that constraint holding to be
         correct.
 
+        `member.removed_at IS NULL` is the half of that join the constraint no
+        longer backs. Since 026 a departed member keeps their row, so
+        `notifications_user_fk` is satisfied by somebody who left and this
+        predicate is the only thing standing between them and an inbox they
+        cannot open -- a former colleague reading the titles of new issues by
+        email is exactly the leak the join was written to prevent, and it would
+        arrive silently. `MembershipService.remove_member` deletes their
+        subscriptions and their existing notifications on the way out; this is
+        what stops new ones being written afterwards, for the assignee and
+        creator arms that no deletion can reach.
+
         DISTINCT because the assignee, the creator and a subscriber are
         frequently the same person, and one event is one item in one inbox.
 
@@ -168,6 +179,7 @@ class NotificationRepository:
             JOIN workspace_members AS member
                 ON member.workspace_id = $1
                 AND member.user_id = candidate.recipient
+                AND member.removed_at IS NULL
             WHERE candidate.recipient IS DISTINCT FROM $2
             """,
             scope.workspace_id,

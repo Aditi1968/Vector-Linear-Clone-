@@ -5,6 +5,29 @@ import asyncpg
 from app.domain.memberships import WorkspaceMemberEntity, WorkspaceMembershipEntity
 
 
+# The shared holdings `shared_holdings` probes for, in the order it reports
+# them, named after the foreign key that used to refuse a removal over each.
+#
+# Here rather than inline so that the order is a stated decision and not
+# whatever a dict literal happened to iterate as: this is the sequence an admin
+# reads "what do I have to reassign" in, and a list that reshuffles between two
+# attempts at the same removal reads as a different answer.
+#
+# Every name is also a column in the statement's select list. The statement is
+# a complete literal and is NOT built from this tuple -- see the class docstring
+# on why no SQL here is assembled from Python -- so the two are kept in step by
+# `test_members_invites_db.py`, which fails on a name this tuple has and the
+# statement does not.
+SHARED_HOLDINGS = (
+    "projects_lead_fk",
+    "initiatives_owner_fk",
+    "saved_views_creator_fk",
+    "issue_templates_assignee_fk",
+    "github_installations_connected_by_fk",
+    "slack_installations_connected_by_fk",
+)
+
+
 class MembershipRepository:
     """SQL access for `workspace_members`.
 
@@ -58,6 +81,15 @@ class MembershipRepository:
         Keyword-only, because these two parameters are the whole authorization
         question and transposing them at a call site is the one mistake here
         that would still typecheck at every layer above.
+
+        `removed_at IS NULL` is the third equality and the one carrying the
+        most weight. Since 026 a membership that has ended is a row that is
+        still there, so without this predicate a removed member would keep
+        every permission they had -- and `AuthorizedWorkspaceScope`, whose
+        whole claim is "this came out of `workspace_members`", would still be
+        telling the truth while meaning nothing. It sits inside the same
+        statement as the other two so that a former member and a stranger
+        produce the same absent row, and this frame never holds the difference.
         """
         row = await connection.fetchrow(
             """
@@ -73,6 +105,7 @@ class MembershipRepository:
                 ON workspaces.id = workspace_members.workspace_id
             WHERE workspaces.slug = $1
                 AND workspace_members.user_id = $2
+                AND workspace_members.removed_at IS NULL
             """,
             slug,
             user_id,
@@ -102,10 +135,15 @@ class MembershipRepository:
         the service states out loud; see MEMBERSHIP_LIST_LIMIT for what it is
         and why it exists at all.
 
-        The user id is the only filter. There is deliberately no workspace
-        argument: this answers "which workspaces are mine", and a caller after
-        one named workspace asks `find_membership`, which is the lookup that
-        cannot distinguish absent from unauthorized.
+        The user id is the only filter that a caller supplies. There is
+        deliberately no workspace argument: this answers "which workspaces are
+        mine", and a caller after one named workspace asks `find_membership`,
+        which is the lookup that cannot distinguish absent from unauthorized.
+
+        `removed_at IS NULL` is not optional here either. This is the workspace
+        switcher, so a former member who kept it would see a tenant they can no
+        longer open -- every entry in the list is a place they would be refused
+        on arrival.
         """
         rows = await connection.fetch(
             """
@@ -120,6 +158,7 @@ class MembershipRepository:
             JOIN workspaces
                 ON workspaces.id = workspace_members.workspace_id
             WHERE workspace_members.user_id = $1
+                AND workspace_members.removed_at IS NULL
             ORDER BY workspaces.slug
             LIMIT $2
             """,
@@ -136,8 +175,8 @@ class MembershipRepository:
         workspace_id: UUID,
         user_id: UUID,
         role: str,
-    ) -> WorkspaceMembershipEntity:
-        """Grant a membership, and read back the workspace it grants.
+    ) -> WorkspaceMembershipEntity | None:
+        """Grant a membership, or nothing if this account already holds one.
 
         One statement, so the grant and the description of it come from the
         same snapshot. The alternative -- INSERT, then SELECT the workspace --
@@ -151,15 +190,45 @@ class MembershipRepository:
         visible to this statement, which is what lets workspace creation and
         the owner's grant be one transaction.
 
-        No ON CONFLICT. A second grant for the same pair breaks
-        `workspace_members_pkey`, and that refusal is the answer -- whether it
-        means "already a member" is a question for the service.
+        The ON CONFLICT clause exists entirely because of 026. A removed member
+        keeps their row, so the primary key stays occupied after they leave,
+        and a plain INSERT would make re-inviting somebody who once left
+        impossible -- the grant would collide, the service would report
+        "already a member" of a workspace they cannot open, and the invitation
+        would roll back so the same token could be presented forever with the
+        same answer. Rejoining is an ordinary thing to do, so the conflict
+        revives the row instead.
+
+        The `WHERE` on the conflict action is load-bearing. Without it, a
+        second grant to a CURRENT member would quietly rewrite their role --
+        which is a privilege change performed by whoever holds any invitation
+        to a workspace the account is already in. With it, that conflict
+        updates no row, and this method returns None.
+
+        None therefore means exactly "already an active member", and it is the
+        only thing it can mean: the INSERT and the revival both return a row,
+        and every other failure still raises. Distinguishing that from a
+        successful grant is the service's job, as it was when the same case
+        arrived as a UniqueViolationError.
+
+        `created_at` is reset on a revival, deliberately. It is the date the
+        product shows as "joined", and carrying the original one forward would
+        have it span a stretch during which this person was not in the
+        workspace at all -- a membership that reads as continuous when it was
+        not. What is being revived is the row, not the history of the row.
+        `ON CONFLICT DO UPDATE` touches only the columns named, so this has to
+        be said rather than assumed.
         """
         row = await connection.fetchrow(
             """
             WITH granted AS (
                 INSERT INTO workspace_members (workspace_id, user_id, role)
                 VALUES ($1, $2, $3)
+                ON CONFLICT ON CONSTRAINT workspace_members_pkey DO UPDATE
+                    SET role = EXCLUDED.role,
+                        removed_at = NULL,
+                        created_at = now()
+                    WHERE workspace_members.removed_at IS NOT NULL
                 RETURNING workspace_id, user_id, role, created_at
             )
             SELECT
@@ -177,6 +246,9 @@ class MembershipRepository:
             user_id,
             role,
         )
+
+        if row is None:
+            return None
 
         return self._to_entity(row)
 
@@ -202,6 +274,22 @@ class MembershipRepository:
 
         `limit` is required rather than defaulted, so the bound is a decision
         the service states out loud; see MEMBERSHIP_LIST_LIMIT.
+
+        Former members are INCLUDED, and `removed_at` is projected so a caller
+        can tell them apart. That is the one read of this table that does not
+        filter on `removed_at IS NULL`, and it is deliberate: this list has two
+        readers who need opposite halves of it. An assignee picker needs the
+        people who are here, and a comment thread needs a name for whoever
+        wrote each entry -- including the ones who left, which is the whole
+        reason 026 keeps their row. Returning only the active ones would make
+        every screen showing both fetch a second list and merge it, and the
+        merge is where a missing author starts rendering as nothing at all.
+
+        Filtering is therefore the caller's, on a field the row carries rather
+        than on an absence it has to interpret. Nothing about permission is
+        being delegated here: `list_members` is reached only through an
+        AuthorizedWorkspaceScope, and a former member's own access is refused
+        by `find_membership`, which never returns their row to begin with.
         """
         rows = await connection.fetch(
             """
@@ -210,7 +298,8 @@ class MembershipRepository:
                 users.email AS email,
                 users.name AS name,
                 workspace_members.role AS role,
-                workspace_members.created_at AS created_at
+                workspace_members.created_at AS created_at,
+                workspace_members.removed_at AS removed_at
             FROM workspace_members
             JOIN users
                 ON users.id = workspace_members.user_id
@@ -244,12 +333,22 @@ class MembershipRepository:
         The caller MUST already be inside the transaction that performs the
         write. A lock taken in a transaction of its own is released before the
         write it was meant to protect.
+
+        `removed_at IS NULL` is in the predicate rather than applied to the
+        result, and it matters for the same reason `role = $2` is: a former
+        owner counted here is an owner who cannot administer anything, so a
+        workspace whose only remaining owner had left would look safe to demote
+        the last real one. PostgreSQL re-evaluates the whole predicate after
+        the row lock under READ COMMITTED, so a concurrent removal is seen by
+        this statement exactly as a concurrent demotion is.
         """
         rows = await connection.fetch(
             """
             SELECT user_id
             FROM workspace_members
-            WHERE workspace_id = $1 AND role = $2
+            WHERE workspace_id = $1
+                AND role = $2
+                AND removed_at IS NULL
             FOR UPDATE
             """,
             workspace_id,
@@ -273,24 +372,30 @@ class MembershipRepository:
         cross-tenant write performed by a lookup that never looked anything up.
 
         Returns None rather than raising when nothing matched. Whether that
-        means "no such account" or "not a member here" is a question for the
-        service, and the repository does not answer questions about what an
-        absence means.
+        means "no such account", "not a member here" or "a member who has
+        since left" is a question for the service, and the repository does not
+        answer questions about what an absence means -- which is also why
+        `removed_at IS NULL` belongs in this predicate and not in a check
+        beforehand. A former member has no role to change; granting them one
+        would produce a row that is authorized by nothing and looks promoted.
         """
         row = await connection.fetchrow(
             """
             WITH updated AS (
                 UPDATE workspace_members
                 SET role = $3
-                WHERE workspace_id = $1 AND user_id = $2
-                RETURNING user_id, role, created_at
+                WHERE workspace_id = $1
+                    AND user_id = $2
+                    AND removed_at IS NULL
+                RETURNING user_id, role, created_at, removed_at
             )
             SELECT
                 updated.user_id AS user_id,
                 users.email AS email,
                 users.name AS name,
                 updated.role AS role,
-                updated.created_at AS created_at
+                updated.created_at AS created_at,
+                updated.removed_at AS removed_at
             FROM updated
             JOIN users
                 ON users.id = updated.user_id
@@ -305,24 +410,44 @@ class MembershipRepository:
 
         return self._to_member_entity(row)
 
-    async def delete(
+    async def mark_removed(
         self,
         connection: asyncpg.Connection,
         *,
         workspace_id: UUID,
         user_id: UUID,
     ) -> UUID | None:
-        """Revoke a membership, returning the user id it named, or nothing.
+        """End a membership, returning the user id it named, or nothing.
 
-        Scoped by workspace for the reason `update_role` gives. The row is
-        deleted rather than flagged: `workspace_members` records who belongs,
-        and a membership that is over is a row that is gone -- 004 gives it no
-        column that could say otherwise.
+        Scoped by workspace for the reason `update_role` gives.
+
+        The row is stamped rather than deleted, and 026 argues that at length.
+        The short version: seventeen foreign keys reference this table and
+        seven of them are authorship -- a comment, a document, a project update
+        -- which cannot be deleted, cannot be reassigned to anybody, and sit in
+        migrations that are applied and therefore immutable. Deleting the row
+        is the one operation all seventeen refuse, so the membership ends by
+        ceasing to be current instead of by ceasing to exist. This method's
+        earlier name, `delete`, is gone along with the statement, because a
+        method still called that would be describing what it no longer does.
+
+        `removed_at IS NULL` in the predicate makes this idempotent in the only
+        sense that matters: removing an already-removed member matches nothing
+        and answers None, exactly as an id naming nobody does, rather than
+        moving the timestamp forward and reporting a second departure.
+
+        `now()` and not a value from the caller. The stamp is the moment the
+        server committed the removal, which is a fact the database is holding
+        the clock for; a timestamp passed in would be whenever the process that
+        built it thought it was.
         """
         removed = await connection.fetchval(
             """
-            DELETE FROM workspace_members
-            WHERE workspace_id = $1 AND user_id = $2
+            UPDATE workspace_members
+            SET removed_at = now()
+            WHERE workspace_id = $1
+                AND user_id = $2
+                AND removed_at IS NULL
             RETURNING user_id
             """,
             workspace_id,
@@ -347,23 +472,26 @@ class MembershipRepository:
     ) -> None:
         """Clear what a departing member owns alone, before the membership goes.
 
-        Thirteen foreign keys across nine migrations reference
-        `workspace_members`, every one of them RESTRICT. That is deliberate --
-        009 says so directly, that removing someone who still leads a project is
-        "refused rather than silently vacating the projects they lead". But the
-        rule was written for the things a workspace shares, and it was never
-        narrowed, so it also caught the things only the departing person could
-        ever see. One unread notification made a member unremovable, and
-        `remove_member` did not catch the RestrictViolationError, so an admin
-        clicking Remove got a masked "Internal server error" naming nothing.
-
         The four statements below are the rows that answer to exactly one
         person: their notification feed, the issues they watch, their sidebar
         shortcuts, and the saved views only they can open. None of them is a
         record of anything the workspace did; deleting them destroys no history
-        and changes nothing another member can observe. Everything else is left
-        to its RESTRICT, and `MembershipService.remove_member` turns that
-        refusal into a field error naming what still has to be reassigned.
+        and changes nothing another member can observe.
+
+        Since 026 the membership row itself survives a removal, so none of this
+        is still required to satisfy a RESTRICT -- these deletions would all
+        succeed if they never ran. They run because leaving a workspace should
+        stop it filling an inbox: a former member who kept their subscriptions
+        would go on being notified about issues they can no longer open. What
+        changed is only the reason; the four statements are the same four.
+
+        Shared rows are deliberately NOT touched here. A view the whole
+        workspace uses is not personal property, and dropping it because its
+        author left would take a working list away from everyone. It is
+        `shared_holdings` below that finds those, and
+        `MembershipService.remove_member` refuses the removal by name until
+        somebody reassigns them -- which is the answer 009 gives for a project
+        lead.
 
         Why this lives on the membership repository rather than on four others:
         each statement is keyed on `(workspace_id, user_id)` and none of them is
@@ -378,12 +506,6 @@ class MembershipRepository:
         visible only to its creator, so their own favourites are the only ones
         that can reference it -- which is what makes deleting favourites first
         sufficient rather than merely likely.
-
-        Shared saved views are deliberately NOT deleted. A view the whole
-        workspace uses is not personal property, and dropping it because its
-        author left would take a working list away from everyone. It keeps its
-        RESTRICT and becomes something the caller must reassign, which is the
-        same answer 009 gives for a project lead.
 
         No return value. Every statement is idempotent and a member with none of
         these rows is the ordinary case, so "how many were deleted" is not a
@@ -415,6 +537,133 @@ class MembershipRepository:
             user_id,
         )
 
+    async def shared_holdings(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        workspace_id: UUID,
+        user_id: UUID,
+    ) -> list[str]:
+        """Which shared things still name this member, by constraint name.
+
+        Before 026 this question was PostgreSQL's. Removal was a DELETE, every
+        foreign key onto `workspace_members` was ON DELETE RESTRICT, and a
+        member who still led a project had the deletion refused by
+        `projects_lead_fk` -- for free, with no application code involved.
+        Since the row now survives, no RESTRICT fires on departure and that
+        refusal has to be asked for. This statement is the asking.
+
+        The names it returns are the constraints that WOULD have refused. That
+        is not nostalgia: the constraint is where the policy is written down --
+        009 for a project lead, 013 and 014 for the two integrations -- so the
+        name is what a reader follows to the argument, and it is already what
+        `MembershipService._REMOVAL_BLOCKED` is keyed on. The mapping there did
+        not have to change when the mechanism underneath it did.
+
+        Six probes, one statement, one round trip, and all six are evaluated
+        rather than short-circuited. An admin about to remove somebody wants
+        the whole list of what to reassign, not the first item and then another
+        attempt; each EXISTS stops at its own first row, so the cost of asking
+        for all of them is six index probes against tables whose migrations
+        already index this exact column -- see the closing note in 026.
+
+        `saved_views` is the one probe with a third predicate. A personal view
+        answers to its creator alone and `delete_personal_rows` above takes it
+        with the membership; only a shared one is a list other people open, and
+        only that one is worth refusing a removal over.
+
+        `issues` is deliberately absent. `issues.assignee_id` is nullable, so
+        an assignment is vacated rather than defended -- see `unassign_issues`.
+        So are the seven authorship keys, which is the entire point of 026: a
+        comment somebody wrote is not a holding they can hand over.
+
+        Returns a plain list of names. `asyncpg.Record` does not escape: the
+        row is read here against a module-level tuple that fixes the order, so
+        the same set of blockers always reaches a client in the same sequence.
+        """
+        row = await connection.fetchrow(
+            """
+            SELECT
+                EXISTS (
+                    SELECT 1 FROM projects
+                    WHERE workspace_id = $1 AND lead_id = $2
+                ) AS projects_lead_fk,
+                EXISTS (
+                    SELECT 1 FROM initiatives
+                    WHERE workspace_id = $1 AND owner_id = $2
+                ) AS initiatives_owner_fk,
+                EXISTS (
+                    SELECT 1 FROM saved_views
+                    WHERE workspace_id = $1
+                      AND created_by = $2
+                      AND visibility = 'shared'
+                ) AS saved_views_creator_fk,
+                EXISTS (
+                    SELECT 1 FROM issue_templates
+                    WHERE workspace_id = $1 AND assignee_id = $2
+                ) AS issue_templates_assignee_fk,
+                EXISTS (
+                    SELECT 1 FROM github_installations
+                    WHERE workspace_id = $1 AND connected_by = $2
+                ) AS github_installations_connected_by_fk,
+                EXISTS (
+                    SELECT 1 FROM slack_installations
+                    WHERE workspace_id = $1 AND connected_by_user_id = $2
+                ) AS slack_installations_connected_by_fk
+            """,
+            workspace_id,
+            user_id,
+        )
+
+        return [name for name in SHARED_HOLDINGS if row[name]]
+
+    async def unassign_issues(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        workspace_id: UUID,
+        user_id: UUID,
+    ) -> None:
+        """Hand back every issue assigned to a departing member.
+
+        This statement is what `issues_assignee_fk` used to do. 006 declared it
+        `ON DELETE SET NULL (assignee_id)` -- alone among the seventeen keys
+        onto this table, and for the reason 006 gives: an assignment is a
+        statement about who is doing the work now, so when the person leaves it
+        is vacated rather than defended. Since 026 stopped deleting the row
+        that clause never fires, and the behaviour it encoded moved here.
+
+        Not into `delete_personal_rows`: an assignment is not personal
+        property. It is work the workspace still wants doing, and what happens
+        to it is that it goes back on the pile for somebody to pick up --
+        which is a different verb and worth a different method.
+
+        No return value, for the same reason that one has none. Reassigning
+        nothing is the ordinary case.
+
+        ponytail: this vacates existing assignments and does not stop new ones.
+        While removal was a DELETE, `issues_assignee_fk` also guaranteed that
+        an assignee was a CURRENT member; now that the row survives, the
+        constraint is satisfied by somebody who left, so a client that sends a
+        former member's id gets the assignment. That is a stale picker rather
+        than a breach -- the id still has to belong to this workspace, the
+        composite key sees to that, and the person it names cannot open the
+        issue either way. Left as a ceiling because closing it properly means a
+        check in each of the three services that write an assignee
+        (`issues`, `bulk`, `templates`), and the honest single place for it is
+        a trigger on `issues` that nobody wants on that write path. Add the
+        three checks if assignment-to-a-leaver is ever observed in practice.
+        """
+        await connection.execute(
+            """
+            UPDATE issues
+            SET assignee_id = NULL
+            WHERE workspace_id = $1 AND assignee_id = $2
+            """,
+            workspace_id,
+            user_id,
+        )
+
     @staticmethod
     def _to_entity(row: asyncpg.Record) -> WorkspaceMembershipEntity:
         return WorkspaceMembershipEntity(
@@ -434,4 +683,5 @@ class MembershipRepository:
             name=row["name"],
             role=row["role"],
             created_at=row["created_at"],
+            removed_at=row["removed_at"],
         )

@@ -1,0 +1,192 @@
+-- Member departure: ending a membership without erasing what the person did.
+--
+-- Apply this ONLY through `python -m scripts.apply_migration
+-- migrations/026_member_departure.sql`. A hand-run -- pasted into a console,
+-- piped through some other client -- gets no ledger row, no advisory lock and
+-- no recorded checksum, and it executes one statement at a time in autocommit.
+-- Here that would mean a column that exists without the CHECK that bounds it,
+-- with nothing recording that the file only half-ran.
+--
+-- DEPENDS ON 004, which creates `workspace_members`. Applying this file before
+-- it fails on the ALTER, and -- inside the single transaction the runner wraps
+-- the file in -- leaves nothing behind. That failure IS the dependency check:
+-- the ledger records what has been applied and not what depends on what, so
+-- the schema itself is what has to refuse an out-of-order apply.
+--
+--
+-- WHY THIS FILE EXISTS
+--
+-- Seventeen foreign keys across ten migrations reference
+-- `workspace_members (workspace_id, user_id)`, and sixteen of them are ON
+-- DELETE RESTRICT -- every one but `issues_assignee_fk`. Removing a member is a
+-- DELETE against that table, so each of those sixteen is a veto over it, and
+-- the result is that today a member who has ever left a comment cannot be
+-- removed from a workspace at all: the removal is refused by
+-- `comments_author_fk` and there is no correction an admin can make, because
+-- the comment is not a mistake.
+--
+-- Those seventeen do not all mean the same thing, and the fix is to stop
+-- treating them as if they did. Sorted by what a removal ought to do:
+--
+--   * SHARED OWNERSHIP -- projects_lead_fk (009), initiatives_owner_fk (022),
+--     github_installations_connected_by_fk (013),
+--     slack_installations_connected_by_fk (014), saved_views_creator_fk over a
+--     shared view (019), issue_templates_assignee_fk (020). Something the rest
+--     of the workspace depends on still names this person. 009 states the
+--     policy: the removal is "refused rather than silently vacating", and
+--     somebody reassigns it first. That is right and this file does not change
+--     it.
+--
+--   * PERSONAL ROWS -- notifications_user_fk (012), issue_subscribers_user_fk
+--     (020), favorites_member_fk (019), saved_views_creator_fk over a personal
+--     view. These answer to exactly one person, so they leave with the
+--     membership. `MembershipRepository.delete_personal_rows` already deletes
+--     them, in the same transaction, before the removal.
+--
+--   * AUTHORSHIP -- comments_author_fk (007), project_updates_author_fk and
+--     initiative_updates_author_fk (022), documents_creator_fk,
+--     documents_last_editor_fk, document_revisions_author_fk and
+--     document_comments_author_fk (023). This is the group nothing can do
+--     anything about, and the reason for the column below. A comment IS the
+--     record that this person said this thing on this day. It cannot be
+--     deleted, because deleting it destroys a discussion other people are in;
+--     it cannot be reassigned, because there is nobody to reassign authorship
+--     to; and it cannot be orphaned, because the constraints are RESTRICT and
+--     the migrations that declared them are applied and immutable. 023 says
+--     as much in the file itself: CASCADE here "would destroy a workspace's
+--     written record as a side effect of an administrative removal".
+--
+--   * ASSIGNMENT -- issues_assignee_fk (006), which is already
+--     `ON DELETE SET NULL (assignee_id)` and never refused anything. It is
+--     listed because the column below stops that clause from firing, and the
+--     unassignment it used to perform has to move into the service. See
+--     `MembershipService.remove_member`.
+--
+-- The referencing side of the authorship group cannot be changed. 006 through
+-- 023 are applied; an applied migration is immutable here, and re-pointing
+-- those columns at `users` in a NEW migration would be rewriting seven tables'
+-- tenancy guarantees to work around a lifecycle problem in an eighth. So the
+-- only move left is on the referenced side: stop deleting the row.
+--
+--
+-- WHAT A TOMBSTONE IS AND IS NOT
+--
+-- `removed_at` is when the membership ended, and NULL means it has not. A row
+-- with it set is a former member: still the referent of every authorship
+-- foreign key, so a two-year-old comment still resolves to a name and a
+-- workspace's history stays readable -- and no longer a member, so it grants
+-- nothing.
+--
+-- A timestamp and not an `is_active BOOLEAN`, for the reason 004 gives about
+-- `workspace_invitations.accepted_at`: the timestamp is what "removed" means,
+-- so there is no second column that can come to disagree with it. It also
+-- answers "when", which a boolean cannot and which is the first question asked
+-- of any row in this state.
+--
+-- Nullable with no default, so every existing row is active and no backfill
+-- statement is needed. A DEFAULT here would be the opposite of 004's argument
+-- about `role`: a default is what an INSERT that forgot the column silently
+-- receives, and a default of `now()` would make every new membership arrive
+-- already ended.
+--
+-- Rejoining clears it rather than writing a second row, which the primary key
+-- would not allow in any case: `workspace_members_pkey` is (workspace_id,
+-- user_id) and 004 argues that the pair IS the membership. So an invitation
+-- accepted by somebody who once left revives the row -- see
+-- `MembershipRepository.create`, which needed an ON CONFLICT clause it did not
+-- have before this migration, because without one a tombstone made rejoining
+-- impossible and reported it as "you are already a member".
+--
+-- That revival resets `created_at`, deliberately. It is the date the product
+-- shows as "joined", and carrying the original one forward would have it span
+-- a stretch during which this person was not in the workspace -- a membership
+-- that reads as continuous when it was not. The consequence is that this
+-- schema keeps one membership per pair and not a history of them: a workspace
+-- that later needs "they were here twice" needs a `workspace_membership_spans`
+-- table, and this column is not a substitute for one.
+--
+-- No `removed_by`. Who performed a removal is an audit question, and this
+-- schema has no audit log for administrative actions to be the first entry in
+-- -- `issue_activity` is about issues. One column answering half an audit
+-- question is worse than none, because it looks like the answer.
+--
+-- What this does NOT do is weaken authorization, and that is the part worth
+-- being explicit about. `AuthorizedWorkspaceScope` can still be produced only
+-- from a row in this table -- that is the type-level evidence 002 and
+-- app/domain/tenancy.py are built on, and it is unchanged. What changes is the
+-- predicate that finds the row: `MembershipRepository.find_membership` now
+-- reads `removed_at IS NULL`, so a former member's slug resolves to nothing
+-- and they receive the same refusal a stranger does. The same predicate is
+-- added to every other read of this table that means "who is here now": the
+-- workspace switcher, the owner lock that keeps a workspace administrable, the
+-- role update, and the notification fan-out in
+-- `NotificationRepository.notify_about_issue` -- which is the one outside this
+-- table's own repository, and the one whose absence would be silent rather
+-- than visible.
+--
+-- `MembershipRepository.list_members` is the single deliberate exception, and
+-- it is not an authorization read. It answers "who has been in this workspace"
+-- for two screens at once: an assignee picker, which must exclude anyone who
+-- has left, and a comment thread, which must still name them. It therefore
+-- returns both and projects `removed_at` so the caller can tell which is
+-- which. Filtering it server-side would make an author who left
+-- indistinguishable from a lookup that found nothing, and the two would render
+-- the same -- one of them a bug nobody would see.
+--
+--
+-- WHAT THIS MOVES OUT OF THE DATABASE
+--
+-- Stated plainly, because it is a real loss and the next person to add a
+-- column referencing this table needs to know about it.
+--
+-- While removal was a DELETE, the SHARED OWNERSHIP group above was enforced by
+-- PostgreSQL: a new table referencing `workspace_members` with ON DELETE
+-- RESTRICT got a veto over member removal for free, whether or not anybody
+-- remembered to wire one up. With the row surviving, no RESTRICT can fire on
+-- departure, and that veto becomes a check the application makes --
+-- `MembershipRepository.shared_holdings`, one statement of EXISTS probes, one
+-- per constraint, mapped by constraint name to the field error an admin acts
+-- on. A table added later gets no refusal until its probe is added there.
+--
+-- The probes are keyed on constraint names rather than table names on purpose,
+-- even though no constraint raises them any more. The name is what a reader
+-- follows to the migration that wrote the policy down, and it keeps
+-- `_REMOVAL_BLOCKED` in app/services/memberships.py -- which those names
+-- already keyed -- meaning exactly what it meant before.
+
+
+ALTER TABLE workspace_members
+    ADD COLUMN removed_at TIMESTAMPTZ;
+
+
+-- A membership cannot have ended before it began. The same shape as
+-- `workspace_invitations_expiry_after_creation` in 004 and for the same
+-- reason: it is not a plausible row that happens to be unusual, it is a row
+-- whose two timestamps contradict each other, and the write that produced it
+-- had a bug. `>=` rather than `>`, because a membership granted and revoked
+-- inside one transaction shares `now()` between both columns.
+ALTER TABLE workspace_members
+    ADD CONSTRAINT workspace_members_removed_after_created
+        CHECK (removed_at IS NULL OR removed_at >= created_at);
+
+
+-- No index, and that is a decision rather than an omission.
+--
+-- Every read that gained `removed_at IS NULL` reaches its rows by a key that
+-- already exists and then filters a handful of them in the heap:
+-- `workspace_members_pkey` for the authorization lookup and the role update,
+-- `workspace_members_user_idx` (004) for the workspace switcher, and the
+-- primary key's leading column for the owner lock. A workspace holds people,
+-- not rows -- the largest plausible member list is smaller than one index page
+-- -- so a partial index on the active ones would add a write to every
+-- membership change and save no scan that is being performed.
+--
+-- The EXISTS probes in `shared_holdings` are served by indexes their own
+-- migrations already created for the referencing side of these foreign keys:
+-- projects_workspace_lead_idx (009), initiatives_workspace_owner_idx (022),
+-- issue_templates_workspace_assignee_idx (020),
+-- saved_views_workspace_creator_idx (019) and
+-- github_installations_connected_by_idx (013). `slack_installations` has no
+-- such index and needs none: 014 makes one Slack workspace connect to at most
+-- one Vector workspace, so the probe reads a table with roughly one row per
+-- tenant.

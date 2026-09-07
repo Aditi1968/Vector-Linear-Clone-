@@ -34,10 +34,10 @@ import pytest
 
 from app.domain.errors import ValidationError, WorkspaceAccessDeniedError
 from app.repositories.invitations import InvitationRepository
-from app.repositories.memberships import MembershipRepository
+from app.repositories.memberships import SHARED_HOLDINGS, MembershipRepository
 from app.repositories.teams import TeamRepository
 from app.repositories.workspaces import WorkspaceRepository
-from app.services.memberships import MembershipService
+from app.services.memberships import _REMOVAL_BLOCKED, MembershipService
 from app.services.teams import TeamService
 
 from tests.conftest import apply_all_migrations, reset_schema
@@ -603,17 +603,22 @@ async def test_a_member_holding_only_personal_rows_can_be_removed(
 ):
     """Regression: one unread notification made a member unremovable.
 
-    Thirteen foreign keys reference `workspace_members` and every one is
-    RESTRICT. That is right for the things a workspace shares -- 009 says a
-    project lead must be reassigned rather than silently vacated -- but it was
-    never narrowed, so it also caught rows only the departing person could ever
-    see. `remove_member` did not catch the RestrictViolationError either, so an
-    admin clicking Remove got a masked "Internal server error" naming nothing,
-    for a member whose entire footprint was a notification nobody had read.
+    Seventeen foreign keys reference `workspace_members` and every one but the
+    assignee is RESTRICT. That is right for the things a workspace shares --
+    009 says a project lead must be reassigned rather than silently vacated --
+    but it was never narrowed, so it also caught rows only the departing person
+    could ever see, for a member whose entire footprint was a notification
+    nobody had read.
 
     All four personal kinds are seeded at once, deliberately. Each is deleted by
     its own statement, so a fixture holding one of them would pass while the
-    other three still blocked the removal.
+    other three survived it.
+
+    Since 026 the four deletions are no longer what makes the removal possible
+    -- the membership row is stamped rather than deleted, so no RESTRICT is in
+    the way of anything. They still have to happen, and the assertion is
+    unchanged, because a former member whose subscriptions survived would go on
+    being notified about issues they can no longer open.
     """
     await acme(memberships)
     await join_as(memberships, user_id=COLLEAGUE_ID, role="member")
@@ -668,7 +673,6 @@ async def test_a_member_holding_only_personal_rows_can_be_removed(
 
     async with pool.acquire() as connection:
         for table, column in (
-            ("workspace_members", "user_id"),
             ("notifications", "user_id"),
             ("issue_subscribers", "user_id"),
             ("favorites", "user_id"),
@@ -681,6 +685,17 @@ async def test_a_member_holding_only_personal_rows_can_be_removed(
                 )
                 == 0
             ), f"{table} still holds a row for the removed member"
+
+        # The membership itself is the one row that stays, stamped. Asserted
+        # here rather than in a test of its own because this is the file's
+        # first removal and the shape would otherwise be stated nowhere.
+        assert (
+            await connection.fetchval(
+                "SELECT removed_at FROM workspace_members WHERE user_id = $1",
+                COLLEAGUE_ID,
+            )
+            is not None
+        )
 
 
 async def test_a_member_who_leads_a_project_is_refused_by_name(
@@ -718,8 +733,384 @@ async def test_a_member_who_leads_a_project_is_refused_by_name(
 
     assert (
         await pool.fetchval(
-            "SELECT count(*) FROM workspace_members WHERE user_id = $1",
+            "SELECT count(*) FROM workspace_members WHERE user_id = $1 "
+            "AND removed_at IS NULL",
             COLLEAGUE_ID,
         )
         == 1
     )
+
+
+# ------------------------------------------------------------ member departure
+
+
+async def seed_comment(pool, workspace_id: UUID, issue_id: UUID, author: UUID) -> UUID:
+    """One comment by `author`, written straight into the table.
+
+    Not through CommentService, unlike `join_as` above, and the difference is
+    deliberate: this file is about what happens to the row afterwards, so the
+    path that wrote it is not the subject and a service dependency here would
+    be one more thing that can fail for reasons this test is not about.
+    """
+    async with pool.acquire() as connection:
+        comment_id = await connection.fetchval(
+            """
+            INSERT INTO comments (workspace_id, issue_id, author_id, body)
+            VALUES ($1, $2, $3, 'It is the cache, it is always the cache')
+            RETURNING id
+            """,
+            workspace_id,
+            issue_id,
+            author,
+        )
+
+    return comment_id
+
+
+async def test_a_member_who_commented_can_be_removed_and_keeps_the_comment(
+    memberships, teams, pool
+):
+    """The bug 026 exists to fix, and the property it must not trade away.
+
+    `comments_author_fk` is ON DELETE RESTRICT, so before 026 a member who had
+    ever said anything could not be removed at all -- and unlike a project
+    lead, there was no correction an admin could make, because a comment is not
+    a mistake and cannot be handed to somebody else. Removal now stamps the
+    membership instead of deleting it, so both halves hold at once: the person
+    is gone, and the thing they wrote still says who wrote it.
+
+    The join in the assertion is the part that matters. Checking that the
+    comment row survived would prove much less -- what a reader needs is for
+    `author_id` to still resolve to a membership, because that is what a
+    comment thread renders a name from.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="member")
+
+    workspace_id, issue_id = await seed_issue(pool, teams, memberships)
+    comment_id = await seed_comment(pool, workspace_id, issue_id, COLLEAGUE_ID)
+
+    removed = await memberships.remove_member(
+        scope=await owner_scope(memberships),
+        user_id=COLLEAGUE_ID,
+    )
+
+    assert removed == COLLEAGUE_ID
+
+    attribution = await pool.fetchrow(
+        """
+        SELECT comments.body, comments.author_id, member.removed_at
+        FROM comments
+        JOIN workspace_members AS member
+            ON member.workspace_id = comments.workspace_id
+            AND member.user_id = comments.author_id
+        WHERE comments.id = $1
+        """,
+        comment_id,
+    )
+
+    assert attribution is not None, "the comment no longer resolves to an author"
+    assert attribution["author_id"] == COLLEAGUE_ID
+    assert attribution["removed_at"] is not None
+
+
+async def test_a_removed_member_cannot_authorize(memberships, teams, pool):
+    """The half of the tombstone that would be a disaster to get wrong.
+
+    Keeping the row is what makes authorship resolve, and it is also what would
+    make a removed member keep every permission they had, since
+    `AuthorizedWorkspaceScope` is built from exactly this table. The predicate
+    in `find_membership` is the only thing standing between those two, so it is
+    asserted through the service rather than by reading the SQL.
+
+    Both refusals are checked, and the second is not a duplicate of the first:
+    `membership_for_slug` answers "may I be here", and the workspace switcher
+    answers "where may I be". A former member who kept the switcher entry would
+    see a tenant that refuses them on arrival.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="member")
+
+    # Real footprint before leaving, so the removal being tested is the one the
+    # product performs rather than the trivial case of a member holding nothing.
+    workspace_id, issue_id = await seed_issue(pool, teams, memberships)
+    await seed_comment(pool, workspace_id, issue_id, COLLEAGUE_ID)
+
+    assert await memberships.list_for_user(user_id=COLLEAGUE_ID) != []
+
+    await memberships.remove_member(
+        scope=await owner_scope(memberships),
+        user_id=COLLEAGUE_ID,
+    )
+
+    with pytest.raises(WorkspaceAccessDeniedError):
+        await memberships.authorized_scope_for_slug(slug="acme", user_id=COLLEAGUE_ID)
+
+    assert await memberships.list_for_user(user_id=COLLEAGUE_ID) == []
+
+
+async def test_a_removed_member_is_listed_as_former_rather_than_dropped(
+    memberships, teams, pool
+):
+    """Absent from a picker, present in history, out of one query.
+
+    `list_members` is read by two screens wanting opposite halves of it, so it
+    returns both and marks the difference: an assignee picker filters on
+    `removed_at`, and a comment thread looks the author up and finds them. The
+    alternative -- filtering removed members out server-side -- would make
+    every author who has left indistinguishable from a lookup that failed, and
+    the two would render identically.
+
+    The role is asserted too. A former member keeps the one they held, because
+    that is what a history screen shows; it grants nothing, which is what the
+    test above is about.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="admin")
+
+    workspace_id, issue_id = await seed_issue(pool, teams, memberships)
+    await seed_comment(pool, workspace_id, issue_id, COLLEAGUE_ID)
+
+    await memberships.remove_member(
+        scope=await owner_scope(memberships),
+        user_id=COLLEAGUE_ID,
+    )
+
+    members = await memberships.list_members(scope=await owner_scope(memberships))
+    by_id = {member.user_id: member for member in members}
+
+    assert set(by_id) == {FOUNDER_ID, COLLEAGUE_ID}
+
+    assert by_id[FOUNDER_ID].removed_at is None
+    assert by_id[COLLEAGUE_ID].removed_at is not None
+    assert by_id[COLLEAGUE_ID].role == "admin"
+
+    assert [member.user_id for member in members if member.removed_at is None] == [
+        FOUNDER_ID
+    ], "the picker's half of this list still offers someone who left"
+
+
+async def test_an_assigned_issue_is_unassigned_rather_than_blocking(
+    memberships, teams, pool
+):
+    """What `issues_assignee_fk` used to do, now that it cannot.
+
+    006 made that key `ON DELETE SET NULL (assignee_id)` alone among the
+    seventeen: an assignment says who is doing the work now, so when the person
+    leaves it is vacated rather than defended. Stamping the row fires no
+    ON DELETE clause, so the behaviour moved into `unassign_issues` -- and if
+    it ever stops running, the symptom is not an error but work sitting
+    assigned to somebody who is not there, which nobody would be paged about.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="member")
+
+    workspace_id, issue_id = await seed_issue(pool, teams, memberships)
+
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "UPDATE issues SET assignee_id = $1 WHERE id = $2",
+            COLLEAGUE_ID,
+            issue_id,
+        )
+
+    removed = await memberships.remove_member(
+        scope=await owner_scope(memberships),
+        user_id=COLLEAGUE_ID,
+    )
+
+    assert removed == COLLEAGUE_ID
+
+    assert (
+        await pool.fetchval("SELECT assignee_id FROM issues WHERE id = $1", issue_id)
+        is None
+    )
+
+
+async def test_a_shared_view_refuses_the_removal_and_a_personal_one_does_not(
+    memberships, teams, pool
+):
+    """`saved_views_creator_fk` is the probe with a branch, so it gets a test.
+
+    Both rows are the same table, the same column and the same person; only
+    `visibility` differs, and it decides everything. A personal view is deleted
+    with the membership because nobody else could ever open it. A shared one is
+    a list the workspace uses, so the removal is refused until somebody takes
+    it over -- 009's answer for a project lead, applied to the thing 019 built.
+
+    Asserting the refusal first and the removal second is what makes this one
+    test rather than two: the shared view is the only difference between the
+    two calls, so the second passing is what proves the first refusal was about
+    that row and not about the personal one sitting beside it.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="member")
+
+    scope = await owner_scope(memberships)
+
+    async with pool.acquire() as connection:
+        for visibility in ("personal", "shared"):
+            await connection.execute(
+                """
+                INSERT INTO saved_views (
+                    workspace_id, name, filter, order_field, order_direction,
+                    layout, visibility, created_by
+                )
+                VALUES ($1, $2, '{}'::jsonb, 'created_at', 'desc',
+                        'list', $3, $4)
+                """,
+                scope.workspace_id,
+                f"{visibility} view",
+                visibility,
+                COLLEAGUE_ID,
+            )
+
+    with pytest.raises(ValidationError) as raised:
+        await memberships.remove_member(scope=scope, user_id=COLLEAGUE_ID)
+
+    assert [(issue.field, issue.code) for issue in raised.value.issues] == [
+        ("userId", "OWNS_SHARED_VIEW")
+    ]
+
+    # Nothing was written by the refused attempt -- not even the personal view,
+    # which the old removal path deleted before discovering the RESTRICT and
+    # relied on a rollback to put back.
+    assert (
+        await pool.fetchval(
+            "SELECT count(*) FROM saved_views WHERE created_by = $1", COLLEAGUE_ID
+        )
+        == 2
+    )
+
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "DELETE FROM saved_views WHERE created_by = $1 AND visibility = 'shared'",
+            COLLEAGUE_ID,
+        )
+
+    assert (
+        await memberships.remove_member(scope=scope, user_id=COLLEAGUE_ID)
+        == COLLEAGUE_ID
+    )
+
+
+async def test_every_shared_holding_has_a_field_error_and_a_column(
+    memberships, teams, pool
+):
+    """The two lists that have to agree, pinned instead of trusted.
+
+    `shared_holdings` reads its row against `SHARED_HOLDINGS`, and
+    `remove_member` looks every name it returns up in `_REMOVAL_BLOCKED` with a
+    bare subscript. A name in the tuple and not the mapping is a KeyError on a
+    real removal; a name in the mapping and not the tuple is a refusal that can
+    never fire. Neither is visible by reading either file.
+
+    Calling the repository is the other half. The statement is a complete SQL
+    literal and is deliberately NOT built from the tuple -- no SQL in this
+    codebase is assembled from Python -- so a name the tuple has and the select
+    list does not would raise here and nowhere else.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="member")
+
+    assert set(SHARED_HOLDINGS) == set(_REMOVAL_BLOCKED)
+
+    scope = await owner_scope(memberships)
+
+    async with pool.acquire() as connection:
+        assert (
+            await MembershipRepository().shared_holdings(
+                connection,
+                workspace_id=scope.workspace_id,
+                user_id=COLLEAGUE_ID,
+            )
+            == []
+        )
+
+
+async def test_a_removed_member_can_be_invited_back(memberships, teams, pool):
+    """A tombstone occupies the primary key, so rejoining has to revive it.
+
+    Without the ON CONFLICT in `create`, the second grant collides with the
+    stamped row, the service reports "you are already a member" of a workspace
+    the person cannot open, and the rollback puts the invitation back -- so the
+    same token can be presented forever and always says the same thing. There
+    is no way out of that state through the API at all.
+
+    `created_at` moving is asserted because `ON CONFLICT DO UPDATE` touches
+    only the columns it names: left alone, the date the product shows as
+    "joined" would be the original one and would span the stretch when this
+    person was not in the workspace.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="member")
+
+    workspace_id, issue_id = await seed_issue(pool, teams, memberships)
+    await seed_comment(pool, workspace_id, issue_id, COLLEAGUE_ID)
+
+    first_joined = await pool.fetchval(
+        "SELECT created_at FROM workspace_members WHERE user_id = $1", COLLEAGUE_ID
+    )
+
+    await memberships.remove_member(
+        scope=await owner_scope(memberships),
+        user_id=COLLEAGUE_ID,
+    )
+
+    rejoined = await join_as(memberships, user_id=COLLEAGUE_ID, role="admin")
+
+    assert rejoined.workspace_slug == "acme"
+    assert rejoined.role == "admin"
+    assert rejoined.created_at > first_joined
+
+    # They can authorize again, and the invitation granted the role it named
+    # rather than the one they used to hold.
+    scope = await memberships.authorized_scope_for_slug(
+        slug="acme", user_id=COLLEAGUE_ID
+    )
+
+    assert scope.role == "admin"
+
+    assert (
+        await pool.fetchval(
+            "SELECT removed_at FROM workspace_members WHERE user_id = $1",
+            COLLEAGUE_ID,
+        )
+        is None
+    )
+
+
+async def test_a_second_grant_to_a_current_member_still_refuses(memberships):
+    """The `WHERE` on the conflict action, which is the dangerous half.
+
+    `ON CONFLICT DO UPDATE` without it would rewrite a current member's role
+    from whatever the invitation happened to say -- a privilege change
+    available to anybody holding any invitation to a workspace the account is
+    already in, including one they were sent themselves at a lower role. The
+    predicate confines the revival to rows that were actually removed, and this
+    is the case that proves it: an active member's role is untouched and the
+    acceptance is refused.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="admin")
+
+    scope = await owner_scope(memberships)
+
+    _, token = await memberships.create_invitation(
+        scope=scope,
+        email="colleague@example.test",
+        role="member",
+    )
+
+    with pytest.raises(ValidationError) as raised:
+        await memberships.accept_invitation(token=token, user_id=COLLEAGUE_ID)
+
+    assert [(issue.field, issue.code) for issue in raised.value.issues] == [
+        ("token", "ALREADY_MEMBER")
+    ]
+
+    unchanged = await memberships.authorized_scope_for_slug(
+        slug="acme", user_id=COLLEAGUE_ID
+    )
+
+    assert unchanged.role == "admin"
