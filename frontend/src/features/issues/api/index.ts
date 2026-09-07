@@ -12,7 +12,7 @@
  */
 
 export { useIssueList } from './useIssueList'
-export type { UseIssueListResult } from './useIssueList'
+export type { UseIssueListOptions, UseIssueListResult } from './useIssueList'
 
 export { useIssueDetail } from './useIssueDetail'
 export type { UseIssueDetailResult } from './useIssueDetail'
@@ -58,9 +58,11 @@ export type {
   IssueDetailFields,
   IssueDetailVariables,
   IssueDraft,
+  IssueFilterInput,
   IssueLabel,
   IssueListData,
   IssueListVariables,
+  IssueOrderInput,
   IssuePageInfo,
   IssuePatch,
   IssueProject,

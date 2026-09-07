@@ -3,9 +3,9 @@
  *
  * The boundary the rest of the feature is written against. Screens and panels
  * import hooks and types from here; they never import `gql`, a document, an
- * Apollo hook, or an Apollo error type. When the backend grows an
- * `issues(projectId:)` filter -- the one thing this feature most wants -- the
- * change lands in this directory and stops here.
+ * Apollo hook, or an Apollo error type. `issues(filter: { projectId })` is
+ * where a project's issues come from, and the two queries built on it --
+ * the panel's list and the "add an issue" menu's -- begin and end here.
  *
  * The documents are exported too, and only from this module rather than from
  * the feature root, because mocking a GraphQL response requires the exact
@@ -19,6 +19,7 @@ export {
   useProjectList,
   useProjectMembers,
   useProjectTeams,
+  useUnfiledIssues,
 } from './queries'
 export type {
   UseProjectDetailResult,
@@ -53,6 +54,7 @@ export {
   ProjectTeamAddDocument,
   ProjectTeamRemoveDocument,
   ProjectTeamsDocument,
+  ProjectUnfiledIssuesDocument,
   ProjectUpdateDocument,
 } from './documents'
 
@@ -70,6 +72,7 @@ export type {
   ProjectState,
   ProjectTeam,
   ProjectTeamsData,
+  ProjectUnfiledIssue,
   ProjectUpdateInput,
   ProjectValidationError,
 } from './types'

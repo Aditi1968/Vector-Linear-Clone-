@@ -9,6 +9,7 @@ import {
   ProjectListDocument,
   ProjectMembersDocument,
   ProjectTeamsDocument,
+  ProjectUnfiledIssuesDocument,
 } from './documents'
 import { describeError } from './errors'
 import type {
@@ -17,6 +18,7 @@ import type {
   ProjectMember,
   ProjectRowFields,
   ProjectTeam,
+  ProjectUnfiledIssue,
 } from './types'
 
 /**
@@ -35,6 +37,7 @@ const NO_PROJECTS: readonly ProjectRowFields[] = []
 const NO_TEAMS: readonly ProjectTeam[] = []
 const NO_MEMBERS: readonly ProjectMember[] = []
 const NO_ISSUES: readonly ProjectIssue[] = []
+const NO_UNFILED_ISSUES: readonly ProjectUnfiledIssue[] = []
 
 export interface UseProjectListResult {
   projects: readonly ProjectRowFields[]
@@ -234,10 +237,10 @@ export function useProjectMembers(): UseProjectMembersResult {
 }
 
 export interface UseProjectIssuesResult {
-  /** Every workspace issue loaded so far. Filtering by project is the caller's job. */
+  /** The issues in this project, as far as they have been paged in. */
   issues: readonly ProjectIssue[]
-  /** How many issues have been loaded, of any project or none. */
-  loadedCount: number
+  /** How many are in the project altogether, paging ignored. */
+  totalCount: number
   hasNextPage: boolean
   isLoading: boolean
   isLoadingMore: boolean
@@ -246,31 +249,30 @@ export interface UseProjectIssuesResult {
 }
 
 /**
- * A page of the workspace's issues, for a project screen to filter.
+ * The issues in one project.
  *
- * ## Why this is not `project.issues`
+ * `filter: { projectId }`, so membership is decided by the server and this
+ * hook returns the project's issues rather than the workspace's for a screen
+ * to sift. `teamId` is still not sent, deliberately: a project spans teams
+ * (`Project.teamIds` is a list), so scoping to one would hide the issues of
+ * every other team working on it.
  *
- * Because there is no such field, and no `issues(projectId:)` argument
- * either. The schema offers `issues(workspaceSlug:, teamId:)` and nothing
- * narrower, so "the issues in this project" is a question the API cannot be
- * asked -- it can only be answered by fetching issues and matching
- * `projectId` here.
+ * What has not changed is that the answer is paginated, so `issues` is the
+ * project's issues *so far* and `totalCount` is how many there are. The
+ * screen states the difference while it exists.
  *
- * `teamId` is not sent, deliberately: a project spans teams
- * (`Project.teamIds` is a list), so scoping to one team would hide the
- * issues of every other team working on the project.
- *
- * The honest consequence, which the screen states rather than hides: what is
- * shown is the project's issues *among those loaded*, and loading more means
- * loading more of the workspace. A project whose issues are all older than
- * the first page appears empty until the pages reach them. That is a missing
- * backend filter, not a UI that can be tuned around it.
+ * The id comes from the route rather than from the loaded project, so this
+ * asks in the same round trip as `useProjectDetail` rather than waiting for
+ * it; an id that cannot be a UUID is not sent at all, for the reason
+ * `UUID_PATTERN` is declared above.
  */
-export function useProjectIssues(): UseProjectIssuesResult {
+export function useProjectIssues(projectId: string | undefined): UseProjectIssuesResult {
   const workspaceSlug = useWorkspaceSlug()
+  const isRequestable = projectId !== undefined && UUID_PATTERN.test(projectId)
 
   const { data, error, networkStatus, fetchMore } = useQuery(ProjectIssuesDocument, {
-    variables: { workspaceSlug, after: null },
+    variables: { workspaceSlug, projectId: projectId ?? '', after: null },
+    skip: !isRequestable,
     notifyOnNetworkStatusChange: true,
   })
 
@@ -289,15 +291,33 @@ export function useProjectIssues(): UseProjectIssuesResult {
     void fetchMore({ variables: { after: endCursor } }).catch(() => undefined)
   }, [endCursor, fetchMore, hasNextPage, isLoadingMore])
 
-  const issues = connection?.nodes ?? NO_ISSUES
-
   return {
-    issues,
-    loadedCount: issues.length,
+    issues: connection?.nodes ?? NO_ISSUES,
+    totalCount: connection?.totalCount ?? 0,
     hasNextPage,
     isLoading: networkStatus === NetworkStatus.loading,
     isLoadingMore,
     errorMessage: error === undefined ? null : describeError(error),
     loadMore,
   }
+}
+
+/**
+ * The issues no project has claimed, for the "add an issue" menu.
+ *
+ * A second query rather than a slice of the panel's own list, because the two
+ * ask opposite questions: the panel wants this project's issues and the menu
+ * wants the ones in no project at all. Server-side filtering makes them
+ * genuinely different requests, and the menu's is the better list for it --
+ * it is candidates from the whole workspace rather than whichever unfiled
+ * issues happened to share a page with this project's.
+ */
+export function useUnfiledIssues(): readonly ProjectUnfiledIssue[] {
+  const workspaceSlug = useWorkspaceSlug()
+
+  const { data } = useQuery(ProjectUnfiledIssuesDocument, {
+    variables: { workspaceSlug },
+  })
+
+  return data?.issues.nodes ?? NO_UNFILED_ISSUES
 }

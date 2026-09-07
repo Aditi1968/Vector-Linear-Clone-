@@ -12,14 +12,20 @@ import {
   TeamIcon,
   VisuallyHidden,
 } from '../../../components'
-import { useWorkspaceContext } from '../../issues/api'
+import { useTeamCycles, useWorkspaceContext } from '../../issues/api'
 import type { IssueRowFields } from '../../issues/api'
-import { useBoardIssues, useMoveIssue } from '../api'
+import { useBoardIssues, useBoardLabels, useMoveIssue } from '../api'
 import styles from '../board.module.css'
 import { BoardColumn } from '../components/BoardColumn'
 import { BoardControls } from '../components/BoardControls'
 import { buildColumns, filterOptions } from '../lib/arrange'
-import { applyBoardView, parseBoardView } from '../lib/viewState'
+import {
+  applyBoardView,
+  hasActiveFilter,
+  parseBoardView,
+  toIssueFilter,
+  toIssueOrder,
+} from '../lib/viewState'
 import type { BoardView } from '../lib/viewState'
 
 /** No workflow states, as a stable identity so the memos below do not churn. */
@@ -56,21 +62,30 @@ function localToday(): string {
  * button undoes a filter, and "the urgent unassigned work on ENG" is
  * something you can paste into a message.
  *
- * ## What the server does not do, said out loud
+ * ## What the server does, and the one thing it still cannot
  *
- * `issues(workspaceSlug:, teamId:, first:, after:)` is the entire contract --
- * no status, assignee, label, priority, project or cycle argument, no sort,
- * no grouping. Every control on this screen therefore operates on the pages
- * already loaded, every count is a count of loaded cards, and a column can be
- * empty because the matching issues have not been paged in yet. The screen
- * says so in a sentence above the columns rather than letting the controls
- * imply a filtered query the API cannot answer.
+ * Every filter control is a key of `IssueFilterInput` and the sort control is
+ * `IssueOrderInput`, so the cards that arrive are the matching ones, in
+ * order, and `totalCount` is how many match. Grouping stays in the browser
+ * because there is no grouping argument -- and that is right: a grouped board
+ * needs all the matching issues anyway.
+ *
+ * What server-side filtering does NOT do is make the answer complete. It is
+ * still one keyset-paginated page of the matching issues, so while there is
+ * another page the screen says how many of the total are on it. Once there is
+ * not, it says nothing.
  */
 export function BoardScreen() {
   const [searchParams, setSearchParams] = useSearchParams()
   const view = useMemo(() => parseBoardView(searchParams), [searchParams])
 
-  const { teams, memberById, isLoading: isLoadingContext } = useWorkspaceContext()
+  const {
+    teams,
+    members,
+    projects,
+    memberById,
+    isLoading: isLoadingContext,
+  } = useWorkspaceContext()
 
   /**
    * The team whose board this is.
@@ -88,8 +103,23 @@ export function BoardScreen() {
   const isUnknownTeam = view.team !== null && team === undefined
   const states = team?.workflowStates ?? NO_STATES
 
+  /**
+   * The view, as the two arguments the server takes.
+   *
+   * Memoised on the view and the team because these are query variables: a
+   * fresh object every render is a fresh set of variables every render, which
+   * Apollo would read as a different question.
+   */
+  const teamId = team?.id
+  const filter = useMemo(
+    () => (teamId === undefined ? undefined : toIssueFilter(view, teamId)),
+    [teamId, view],
+  )
+  const orderBy = useMemo(() => toIssueOrder(view), [view])
+
   const {
     issues,
+    totalCount,
     hasNextPage,
     isLoadingFirstPage,
     isLoadingMore,
@@ -97,7 +127,7 @@ export function BoardScreen() {
     loadMoreErrorMessage,
     loadMore,
     retry,
-  } = useBoardIssues(team?.id)
+  } = useBoardIssues(filter, orderBy)
 
   const { moveIssue } = useMoveIssue()
 
@@ -114,9 +144,14 @@ export function BoardScreen() {
     [issues, memberById, states, view],
   )
 
+  // The team's cycles and the workspace's labels, for two of the pickers. The
+  // other two read lists the workspace context already holds.
+  const cycles = useTeamCycles(teamId)
+  const labels = useBoardLabels()
+
   const options = useMemo(
-    () => filterOptions(issues, memberById),
-    [issues, memberById],
+    () => filterOptions({ members, projects, labels, cycles }),
+    [cycles, labels, members, projects],
   )
 
   /**
@@ -207,6 +242,7 @@ export function BoardScreen() {
 
   const today = localToday()
   const loadedCount = issues.length
+  const isFiltered = hasActiveFilter(view)
   const isEmptyBoard =
     !isLoadingFirstPage && errorMessage === null && loadedCount === 0
 
@@ -256,23 +292,28 @@ export function BoardScreen() {
 
         {team !== undefined && (
           <>
-            <p className={styles.scopeNote}>
-              Filters, sorting and grouping apply to the {loadedCount}{' '}
-              {loadedCount === 1 ? 'issue' : 'issues'} loaded so far. The server
-              offers no filter for them, so a column can also be empty because
-              its issues are on a page that has not been loaded.
-              {hasNextPage && !isLoadingMore && (
-                <Button className={styles.loadMore} onClick={loadMore} size="sm">
-                  Load more
-                </Button>
-              )}
-              {isLoadingMore && (
-                <span className={styles.loadingMore} role="status">
-                  <Spinner />
-                  Loading more issues...
-                </span>
-              )}
-            </p>
+            {/* Only while the board is partial. Filtering and sorting happen
+              * on the server now, so with every matching issue loaded there
+              * is nothing here that the columns do not already say. A live
+              * region, because the numbers change as pages arrive. */}
+            {(hasNextPage || isLoadingMore) && (
+              <p className={styles.scopeNote} role="status">
+                Showing {loadedCount} of {totalCount}{' '}
+                {totalCount === 1 ? 'issue' : 'issues'}, so a column may hold
+                fewer than it will.
+                {hasNextPage && !isLoadingMore && (
+                  <Button className={styles.loadMore} onClick={loadMore} size="sm">
+                    Load more
+                  </Button>
+                )}
+                {isLoadingMore && (
+                  <span className={styles.loadingMore}>
+                    <Spinner />
+                    Loading more issues...
+                  </span>
+                )}
+              </p>
+            )}
 
             {loadMoreErrorMessage !== null && (
               <p className={styles.inlineError} role="alert">
@@ -323,11 +364,19 @@ export function BoardScreen() {
               />
             )}
 
+            {/* An empty board is now two different situations, and the server
+              * filter is what separates them: nothing matches the filters, or
+              * nothing has been filed at all. Saying the second when the first
+              * is true would send someone looking for a bug. */}
             {isEmptyBoard && (
               <EmptyState
-                description="Nothing has been filed against this team yet."
+                description={
+                  isFiltered
+                    ? 'No issue on this board matches the filters above.'
+                    : 'Nothing has been filed against this team yet.'
+                }
                 icon={<IssuesIcon />}
-                title={`No issues for ${team.key}`}
+                title={isFiltered ? 'No matching issues' : `No issues for ${team.key}`}
               />
             )}
 
@@ -337,6 +386,7 @@ export function BoardScreen() {
                   <BoardColumn
                     column={column}
                     draggingId={draggingId}
+                    isPartial={hasNextPage}
                     key={column.id}
                     memberById={memberById}
                     moveTargets={moveTargets}

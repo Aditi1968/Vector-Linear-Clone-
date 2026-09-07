@@ -9,7 +9,13 @@
  * its own query.
  */
 
-export { useCycleDetail, useCycleIssues, useCycleList, useCycleTeams } from './queries'
+export {
+  useCycleDetail,
+  useCycleIssues,
+  useCycleList,
+  useCycleTeams,
+  useCycleUnscheduledIssues,
+} from './queries'
 export type {
   UseCycleDetailResult,
   UseCycleIssuesResult,
@@ -29,6 +35,7 @@ export {
   CycleIssuesDocument,
   CycleListDocument,
   CycleTeamsDocument,
+  CycleUnscheduledIssuesDocument,
   CycleUpdateDocument,
   IssueSetCycleDocument,
 } from './documents'
@@ -39,6 +46,7 @@ export type {
   CycleFields,
   CycleIssue,
   CycleTeam,
+  CycleUnscheduledIssue,
   CycleUpdateFields,
   CycleUpdateInput,
   CycleValidationError,

@@ -146,22 +146,6 @@ export function closedCount(issues: readonly ProjectIssue[]): number {
   return issues.filter((issue) => issue.completedAt !== null).length
 }
 
-/**
- * The issues that belong to a project, out of those loaded.
- *
- * The client-side half of a filter the API does not offer: there is no
- * `project.issues` field and no `issues(projectId:)` argument, so this is
- * where "in this project" is decided. Order is preserved -- the server's
- * `created_at DESC` -- rather than re-sorted, so the panel agrees with the
- * issue list about what "newest" means.
- */
-export function issuesInProject(
-  issues: readonly ProjectIssue[],
-  projectId: string,
-): ProjectIssue[] {
-  return issues.filter((issue) => issue.projectId === projectId)
-}
-
 /** The issues in one milestone, out of a project's issues. */
 export function issuesInMilestone(
   issues: readonly ProjectIssue[],

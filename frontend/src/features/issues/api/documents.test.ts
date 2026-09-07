@@ -199,16 +199,17 @@ describe('IssueList document', () => {
     )
   })
 
-  it('declares the workspace and the cursor, and no page size', () => {
+  it('declares the workspace, the filter and the cursor, and no page size', () => {
     const variables = (operation.variableDefinitions ?? []).map(
       (definition) => definition.variable.name.value,
     )
 
     // `$workspaceSlug` because the URL decides it and only a variable can
-    // carry that. No `$first`, because a variable page size is charged at
+    // carry that; `$filter` because My Issues narrows the same list to one
+    // assignee. No `$first`, because a variable page size is charged at
     // ASSUMED_PAGE_SIZE = 100 during validation -- see ./operations.graphql.
     // And nothing that could be an offset.
-    expect(variables).toEqual(['workspaceSlug', 'after'])
+    expect(variables).toEqual(['workspaceSlug', 'filter', 'after'])
   })
 
   it('passes the cursor through the `after` argument', () => {
@@ -224,7 +225,12 @@ describe('IssueList document', () => {
     const argumentNames = (issues.arguments ?? []).map(
       (argument) => argument.name.value,
     )
-    expect(argumentNames.toSorted()).toEqual(['after', 'first', 'workspaceSlug'])
+    expect(argumentNames.toSorted()).toEqual([
+      'after',
+      'filter',
+      'first',
+      'workspaceSlug',
+    ])
   })
 
   it('stays inside the backend complexity budget', () => {
@@ -244,7 +250,7 @@ describe('IssueList document', () => {
     const complexity = complexityOf(operation.selectionSet, fragments)
 
     expect(complexity).toBeLessThanOrEqual(1000)
-    expect(complexity).toBe(550)
+    expect(complexity).toBe(575)
   })
 
   it('selects the fields a dense row shows, and no body', () => {

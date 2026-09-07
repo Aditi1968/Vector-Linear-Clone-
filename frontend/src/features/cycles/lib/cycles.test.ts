@@ -29,6 +29,7 @@ function cycle(overrides: Partial<CycleFields> = {}): CycleFields {
   return {
     __typename: 'Cycle',
     id: '00000000-0000-4000-8000-000000000001',
+    teamId: '00000000-0000-4000-8000-0000000000c1',
     number: 12,
     name: null,
     startsAt: START,

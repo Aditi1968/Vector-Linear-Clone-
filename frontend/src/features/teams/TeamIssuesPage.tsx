@@ -21,12 +21,11 @@ const SKELETON_ROWS = 6
 /**
  * One team's issues.
  *
- * ## This list is complete, and that is the difference
+ * ## This list is the team's, and the server says so
  *
- * `issues(workspaceSlug:, teamId:)` is a real server-side filter. My Issues
- * and a project's issues are both matched in the browser over a page of the
- * workspace, and both say so; this one does not, because it does not have to.
- * The page ends where the connection ends.
+ * `filter: { teamId }` is a real server-side filter, so every row here is the
+ * team's and the page ends where the connection ends -- no caveat about what
+ * happened to be loaded, because there is nothing to caveat.
  *
  * The team is addressed by key and resolved through `teams(workspaceSlug:)`;
  * a key that names nothing gets a clean not-found rather than an empty list

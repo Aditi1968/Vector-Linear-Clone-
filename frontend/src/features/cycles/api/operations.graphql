@@ -15,13 +15,14 @@
 
 # Everything `Cycle` exposes bar its timestamps.
 #
-# Note what is *not* here, because two screens are shaped by its absence:
-# `Cycle` has no `teamId`, although `cycles(teamId:)` requires one to list
-# them. A cycle id is therefore addressable on its own but its team is not
-# recoverable from it -- which is why ../pages/CycleDetailPage.tsx filters
-# workspace-wide issues rather than that team's.
+# `teamId` is what makes a cycle id self-sufficient: a screen reached by a
+# direct link can recover the team the cycle belongs to, and therefore scope
+# a question to it. ../pages/CycleDetailPage.tsx needs it for exactly one
+# thing -- the issues it may offer to add -- because `issueSetCycle` refuses a
+# cycle that is not the issue's team's.
 fragment CycleFields on Cycle {
   id
+  teamId
   number
   name
   startsAt
@@ -56,37 +57,63 @@ query CycleTeams($workspaceSlug: String!) {
   }
 }
 
-# The issues a cycle's screen filters, and the constraint behind it.
+# The issues in one cycle.
 #
-# There is no `cycle.issues` field and no `issues(cycleId:)` argument, so
-# "the issues in this cycle" cannot be asked for; this asks for a page of the
-# workspace's issues and ../lib/grouping.ts keeps the ones whose `cycle.id`
-# matches.
+# `filter: { cycleId: $cycleId }` -- the server decides membership, so every
+# row that arrives is in this cycle and `totalCount` is how many there are.
+# `teamId` is not sent alongside it and would be redundant if it were: a cycle
+# belongs to one team, so its issues are that team's already.
 #
-# `teamId` is not sent even though a cycle belongs to exactly one team, and
-# that is not an oversight: `Cycle` exposes no `teamId`, so a screen holding
-# only a cycle id has no team to scope by. Passing the team the *picker*
-# happened to be on would be worse than not scoping -- it would silently show
-# nothing for a cycle reached by a direct link.
+# `cycle { id }` is no longer selected: the filter answers the question it was
+# there to answer, and a card that carries its own cycle id was only ever a
+# way to check the server's work.
 #
 # `priority` is not selected: the integer-to-name convention lives in the
 # issues feature and is that feature's to own.
 #
-# Cost: 25 x (5 + 2) = 175 of 1000.
-query CycleIssues($workspaceSlug: String!, $after: String) {
-  issues(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+# Cost: 25 x (4 + 2 + 1) = 175 of 1000.
+query CycleIssues($workspaceSlug: String!, $cycleId: UUID!, $after: String) {
+  issues(
+    workspaceSlug: $workspaceSlug
+    filter: { cycleId: $cycleId }
+    first: 25
+    after: $after
+  ) {
     nodes {
       id
       identifier
       title
       completedAt
-      cycle {
-        id
-      }
     }
     pageInfo {
       hasNextPage
       endCursor
+    }
+    totalCount
+  }
+}
+
+# The team's issues that are in no cycle, for the "add an issue" menu.
+#
+# Two keys, and both are load-bearing. `cycleId: null` is an explicit null and
+# it is the filter -- "the ones in no cycle" -- where an omitted key would
+# mean "any cycle" and offer the menu issues already scheduled elsewhere.
+# `teamId` comes from `Cycle.teamId`, because `issueSetCycle` refuses a cycle
+# that is not the issue's team's (`issues_cycle_fk`), so an issue from another
+# team is not a candidate at all.
+#
+# Not paginated: a menu of candidates, not a browser of the backlog. Cost:
+# 15 x 3 = 45 of 1000.
+query CycleUnscheduledIssues($workspaceSlug: String!, $teamId: UUID!) {
+  issues(
+    workspaceSlug: $workspaceSlug
+    filter: { teamId: $teamId, cycleId: null }
+    first: 15
+  ) {
+    nodes {
+      id
+      identifier
+      title
     }
   }
 }

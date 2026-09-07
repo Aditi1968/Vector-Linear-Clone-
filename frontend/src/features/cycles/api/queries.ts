@@ -8,9 +8,15 @@ import {
   CycleIssuesDocument,
   CycleListDocument,
   CycleTeamsDocument,
+  CycleUnscheduledIssuesDocument,
 } from './documents'
 import { describeError } from './errors'
-import type { CycleFields, CycleIssue, CycleTeam } from './types'
+import type {
+  CycleFields,
+  CycleIssue,
+  CycleTeam,
+  CycleUnscheduledIssue,
+} from './types'
 
 /** See ../../projects/api/queries.ts for why an id is checked before it is sent. */
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -18,6 +24,7 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const NO_CYCLES: readonly CycleFields[] = []
 const NO_TEAMS: readonly CycleTeam[] = []
 const NO_ISSUES: readonly CycleIssue[] = []
+const NO_UNSCHEDULED_ISSUES: readonly CycleUnscheduledIssue[] = []
 
 export interface UseCycleTeamsResult {
   teams: readonly CycleTeam[]
@@ -125,9 +132,10 @@ export function useCycleDetail(cycleId: string | undefined): UseCycleDetailResul
 }
 
 export interface UseCycleIssuesResult {
-  /** Every workspace issue loaded so far. Filtering by cycle is the caller's job. */
+  /** The issues in this cycle, as far as they have been paged in. */
   issues: readonly CycleIssue[]
-  loadedCount: number
+  /** How many are in the cycle altogether, paging ignored. */
+  totalCount: number
   hasNextPage: boolean
   isLoading: boolean
   isLoadingMore: boolean
@@ -136,32 +144,27 @@ export interface UseCycleIssuesResult {
 }
 
 /**
- * A page of the workspace's issues, for a cycle screen to filter.
+ * The issues in one cycle.
  *
- * ## Why this is not `cycle.issues`
+ * `filter: { cycleId }`, so membership is the server's answer rather than a
+ * match made here over a page of the workspace. Scoping to the cycle's team
+ * as well would be redundant: a cycle belongs to one team, so its issues are
+ * that team's already.
  *
- * Because there is no such field, and no `issues(cycleId:)` argument either.
- * "The issues in this cycle" is a question the API cannot be asked; it can
- * only be answered by fetching issues and matching `issue.cycle.id` here.
+ * Still paginated, so `issues` is what has been loaded and `totalCount` is
+ * how many there are; the screen states the difference while it exists.
  *
- * ## Why it is not even scoped to the cycle's team
- *
- * A cycle belongs to exactly one team, so `issues(teamId:)` would be the
- * right scope -- and `Cycle` exposes no `teamId`. A screen holding a cycle id
- * has no way to recover its team. Passing whichever team the *picker* happened
- * to be on would be worse than not scoping: a cycle opened from a direct link
- * would show nothing at all, and would look empty rather than unscoped.
- *
- * The honest consequence, which the screen states: what is shown is the
- * cycle's issues *among those loaded*, and loading more loads more of the
- * workspace. This is a missing backend filter, not something the UI can be
- * tuned around.
+ * The id comes from the route rather than from the loaded cycle, so this asks
+ * in the same round trip as `useCycleDetail`; an id that cannot be a UUID is
+ * not sent at all.
  */
-export function useCycleIssues(): UseCycleIssuesResult {
+export function useCycleIssues(cycleId: string | undefined): UseCycleIssuesResult {
   const workspaceSlug = useWorkspaceSlug()
+  const isRequestable = cycleId !== undefined && UUID_PATTERN.test(cycleId)
 
   const { data, error, networkStatus, fetchMore } = useQuery(CycleIssuesDocument, {
-    variables: { workspaceSlug, after: null },
+    variables: { workspaceSlug, cycleId: cycleId ?? '', after: null },
+    skip: !isRequestable,
     notifyOnNetworkStatusChange: true,
   })
 
@@ -181,15 +184,35 @@ export function useCycleIssues(): UseCycleIssuesResult {
     void fetchMore({ variables: { after: endCursor } }).catch(() => undefined)
   }, [endCursor, fetchMore, hasNextPage, isLoadingMore])
 
-  const issues = connection?.nodes ?? NO_ISSUES
-
   return {
-    issues,
-    loadedCount: issues.length,
+    issues: connection?.nodes ?? NO_ISSUES,
+    totalCount: connection?.totalCount ?? 0,
     hasNextPage,
     isLoading: networkStatus === NetworkStatus.loading,
     isLoadingMore,
     errorMessage: error === undefined ? null : describeError(error),
     loadMore,
   }
+}
+
+/**
+ * The team's issues that are in no cycle, for the "add an issue" menu.
+ *
+ * A second query rather than a slice of the panel's list, because the two ask
+ * opposite questions -- what is in this cycle, and what is in none. The team
+ * is required and comes from `Cycle.teamId`: `issueSetCycle` refuses a cycle
+ * that is not the issue's team's, so another team's issue is not a candidate
+ * and offering it would be offering a button that cannot work.
+ */
+export function useCycleUnscheduledIssues(
+  teamId: string | undefined,
+): readonly CycleUnscheduledIssue[] {
+  const workspaceSlug = useWorkspaceSlug()
+
+  const { data } = useQuery(CycleUnscheduledIssuesDocument, {
+    variables: { workspaceSlug, teamId: teamId ?? '' },
+    skip: teamId === undefined,
+  })
+
+  return data?.issues.nodes ?? NO_UNSCHEDULED_ISSUES
 }

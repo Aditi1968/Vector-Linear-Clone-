@@ -15,6 +15,7 @@ export {
   CycleIssuesDocument,
   CycleListDocument,
   CycleTeamsDocument,
+  CycleUnscheduledIssuesDocument,
   CycleUpdateDocument,
   IssueSetCycleDocument,
 } from '../../../generated/operations'

@@ -118,13 +118,13 @@ query ProjectMembers($workspaceSlug: String!) {
   }
 }
 
-# The issues a project's screen filters, and the constraint behind it.
+# The issues in one project.
 #
-# There is no `project.issues` field and no `issues(projectId:)` argument, so
-# "the issues in this project" cannot be asked for. This asks for a page of
-# the workspace's issues and ../lib/grouping.ts keeps the ones whose
-# `projectId` matches. `teamId` is deliberately not sent: a project spans
-# teams, so scoping to one would hide the issues of every other team on it.
+# `filter: { projectId: $projectId }` -- the server decides membership, so
+# every row that arrives belongs to this project and `totalCount` is how many
+# there are rather than how many a page happened to contain. `teamId` is
+# deliberately not sent: a project spans teams, so scoping to one would hide
+# the issues of every other team on it.
 #
 # `milestoneId` is selected because milestone progress is derived from it --
 # `ProjectMilestone` exposes no counts of its own.
@@ -133,9 +133,14 @@ query ProjectMembers($workspaceSlug: String!) {
 # lives in the issues feature and is that feature's to own, and this panel
 # shows what a project's work *is*, not how it is ranked.
 #
-# Cost: 25 x (6 + 2) = 200 of 1000.
-query ProjectIssues($workspaceSlug: String!, $after: String) {
-  issues(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+# Cost: 25 x (6 + 2 + 1) = 225 of 1000.
+query ProjectIssues($workspaceSlug: String!, $projectId: UUID!, $after: String) {
+  issues(
+    workspaceSlug: $workspaceSlug
+    filter: { projectId: $projectId }
+    first: 25
+    after: $after
+  ) {
     nodes {
       id
       identifier
@@ -147,6 +152,27 @@ query ProjectIssues($workspaceSlug: String!, $after: String) {
     pageInfo {
       hasNextPage
       endCursor
+    }
+    totalCount
+  }
+}
+
+# The issues no project has claimed, for the "add an issue" menu.
+#
+# `projectId: null` is an explicit null and it is doing work: on
+# `IssueFilterInput` a null on a nullable column is a filter -- "the ones with
+# no project" -- where an omitted key would mean "any project" and offer this
+# menu the issues already filed elsewhere.
+#
+# Not paginated: the menu is a short list of candidates and not a browser of
+# the backlog, so it asks for one page the size of the menu and stops. Cost:
+# 15 x 3 = 45 of 1000.
+query ProjectUnfiledIssues($workspaceSlug: String!) {
+  issues(workspaceSlug: $workspaceSlug, filter: { projectId: null }, first: 15) {
+    nodes {
+      id
+      identifier
+      title
     }
   }
 }

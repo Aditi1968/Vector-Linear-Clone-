@@ -63,18 +63,18 @@ export interface UseCycleActionsResult {
  * ## Which of these needs cache help
  *
  * `cycleUpdate` returns the cycle, so the normalised entity is corrected by
- * the response and both the list and the detail follow. `issueSetCycle`
- * selects `cycle { id }` on the issue, so the client-side filter follows the
- * same way.
+ * the response and both the list and the detail follow. Nothing to do.
  *
- * Create and delete change the *membership* of `cycles(teamId:)`, a plain
- * list field that neither response contains, so both refetch `CycleList`.
- * Refetching by operation name reruns the active query with the variables it
- * was mounted with -- which is the team currently on screen, and the only
- * team whose list could have changed. A `cache.modify` would need to know
- * that team id here, and this hook deliberately does not: `Cycle` exposes no
- * `teamId`, so after a delete there would be no way to find the list the
- * deleted cycle was in.
+ * The other three change the *membership* of a list, which normalising an
+ * entity never fixes, so each refetches by operation name -- which reruns
+ * whichever query is mounted with the variables it was mounted with.
+ *
+ * Create and delete change `cycles(teamId:)`, a plain list field that neither
+ * response contains. `issueSetCycle` changes two server-filtered connections:
+ * the cycle's issues and the team's unscheduled ones. It selects the issue,
+ * so the row itself is corrected -- but an issue taken out of the cycle would
+ * stay in the panel until a reload, because correcting a row does not move it
+ * out of a cached connection.
  */
 export function useCycleActions(): UseCycleActionsResult {
   const workspaceSlug = useWorkspaceSlug()
@@ -86,7 +86,9 @@ export function useCycleActions(): UseCycleActionsResult {
   const [remove, removeState] = useMutation(CycleDeleteDocument, {
     refetchQueries: ['CycleList'],
   })
-  const [setCycle, setCycleState] = useMutation(IssueSetCycleDocument)
+  const [setCycle, setCycleState] = useMutation(IssueSetCycleDocument, {
+    refetchQueries: ['CycleIssues', 'CycleUnscheduledIssues'],
+  })
 
   const createCycle = useCallback(
     async (teamId: string, draft: CycleDraft) => {

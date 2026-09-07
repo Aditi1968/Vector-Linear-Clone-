@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { DEFAULT_VIEW, applyBoardView, parseBoardView } from './viewState'
+import {
+  DEFAULT_VIEW,
+  NONE,
+  applyBoardView,
+  parseBoardView,
+  toIssueFilter,
+  toIssueOrder,
+} from './viewState'
 import type { BoardView } from './viewState'
 
 /**
@@ -98,5 +105,94 @@ describe('board view state', () => {
     const view = parseBoardView(new URLSearchParams('team=&assignee=&label=&project='))
 
     expect(view).toEqual(DEFAULT_VIEW)
+  })
+})
+
+const TEAM_ID = '00000000-0000-4000-8000-00000000ee01'
+
+/**
+ * The view, as the server's own arguments.
+ *
+ * The half of the round trip that did not exist while the board filtered in
+ * the browser, and the half with a trap in it: on `IssueFilterInput` an
+ * explicit null is a *filter* on the three nullable columns -- unassigned,
+ * unfiled, no cycle -- so "I am not filtering on this" can only be spelled by
+ * leaving the key out. A filter object carrying `assigneeId: null` for a
+ * board with no assignee filter is a valid request that returns a plausible
+ * board of the wrong issues, which no rendering assertion would catch.
+ */
+describe('the view as a server filter', () => {
+  it('sends the team and nothing else when nothing is filtered', () => {
+    // `toEqual` on the whole object, not a property check: the claim is that
+    // no other key exists, `undefined` ones included.
+    expect(toIssueFilter(DEFAULT_VIEW, TEAM_ID)).toEqual({ teamId: TEAM_ID })
+  })
+
+  it('leaves an unused filter out rather than sending a null', () => {
+    const filter = toIssueFilter({ ...DEFAULT_VIEW, priority: 2 }, TEAM_ID)
+
+    expect(Object.keys(filter).toSorted()).toEqual(['priority', 'teamId'])
+    expect('assigneeId' in filter).toBe(false)
+    expect('projectId' in filter).toBe(false)
+    expect('cycleId' in filter).toBe(false)
+  })
+
+  it('spells "the ones with none" as an explicit null, for each of the three', () => {
+    const filter = toIssueFilter(
+      { ...DEFAULT_VIEW, assignee: NONE, project: NONE, cycle: NONE },
+      TEAM_ID,
+    )
+
+    expect(filter).toEqual({
+      teamId: TEAM_ID,
+      assigneeId: null,
+      projectId: null,
+      cycleId: null,
+    })
+  })
+
+  it('carries every filter the controls offer', () => {
+    const filter = toIssueFilter(
+      {
+        ...DEFAULT_VIEW,
+        status: 'started',
+        assignee: 'a1',
+        label: 'l1',
+        priority: 1,
+        project: 'p1',
+        cycle: 'c1',
+      },
+      TEAM_ID,
+    )
+
+    // The status filter is on the *category*, uppercased into the schema's
+    // spelling: a team may call its started state anything.
+    expect(filter).toEqual({
+      teamId: TEAM_ID,
+      stateCategory: 'STARTED',
+      assigneeId: 'a1',
+      labelId: 'l1',
+      priority: 1,
+      projectId: 'p1',
+      cycleId: 'c1',
+    })
+  })
+})
+
+describe('the view as a server ordering', () => {
+  it('gives each sort the direction it is worth reading in', () => {
+    const order = (sort: BoardView['sort']) => toIssueOrder({ ...DEFAULT_VIEW, sort })
+
+    // Ascending is NULLS LAST on the server, and the priority key is
+    // `NULLIF(priority, 0)` -- so ascending is urgent first with the untriaged
+    // work at the end, which is what a board asked for by priority means.
+    expect(order('priority')).toEqual({ field: 'PRIORITY', direction: 'ASC' })
+
+    // Soonest first, undated last, for the same reason.
+    expect(order('due')).toEqual({ field: 'DUE_DATE', direction: 'ASC' })
+
+    // Newest first is descending on both timestamps.
+    expect(order('created')).toEqual({ field: 'CREATED_AT', direction: 'DESC' })
+    expect(order('updated')).toEqual({ field: 'UPDATED_AT', direction: 'DESC' })
   })
 })

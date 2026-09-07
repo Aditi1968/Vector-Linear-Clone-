@@ -29,6 +29,7 @@ import type {
   ProjectMilestoneFieldsFragment,
   ProjectRowFieldsFragment,
   ProjectTeamsQuery,
+  ProjectUnfiledIssuesQuery,
 } from '../../../generated/operations'
 
 /**
@@ -69,6 +70,15 @@ export type ProjectTeam = ProjectTeamsQuery['teams'][number]
  * fields a project screen needs and the issue list does not select.
  */
 export type ProjectIssue = ProjectIssuesQuery['issues']['nodes'][number]
+
+/**
+ * One candidate for the "add an issue" menu: an issue in no project.
+ *
+ * Narrower than `ProjectIssue`, because a menu entry shows a name and nothing
+ * else -- no `projectId`, which the filter has already answered, and no
+ * `completedAt`, which nothing in a menu renders.
+ */
+export type ProjectUnfiledIssue = ProjectUnfiledIssuesQuery['issues']['nodes'][number]
 
 /**
  * One entry of a payload's `errors`.

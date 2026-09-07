@@ -110,8 +110,10 @@ function MilestoneForm({
 
 export interface ProjectMilestonesProps {
   milestones: readonly ProjectMilestone[]
-  /** The project's issues, already filtered. Milestone progress is derived from them. */
+  /** The project's issues, as the server filtered them. Progress is derived from these. */
   issues: readonly ProjectIssue[]
+  /** Whether the project has issues on a page that has not been loaded. */
+  isPartial: boolean
   /** True while the whole issue set is still arriving, so progress is not yet meaningful. */
   isCounting: boolean
   isSaving: boolean
@@ -126,11 +128,12 @@ export interface ProjectMilestonesProps {
  * ## Where the progress comes from
  *
  * `ProjectMilestone` exposes no counts -- no `issueCount`, no
- * `completedCount`, nothing. The only route to a milestone's progress is the
- * issues that carry its `milestoneId`, which means it can only be computed
- * from the issues this screen has loaded. That is stated on the screen rather
- * than hidden: a bar claiming "3/4" that silently means "3 of the 4 I happen
- * to have" is worse than no bar.
+ * `completedCount`, nothing -- and there is no `milestoneId` filter on
+ * `IssueFilterInput` either. The only route to a milestone's progress is the
+ * project's issues that carry its `milestoneId`, counted here. That is exact
+ * once the project's issues are all loaded, and while they are not, `isPartial`
+ * says so in the label: a bar claiming "3/4" that silently means "3 of the 4 I
+ * happen to have" is worse than no bar.
  *
  * `completedAt` is non-null for canceled issues as well as completed ones
  * (the schema says so explicitly), so the count is of *closed* issues and is
@@ -140,6 +143,7 @@ export interface ProjectMilestonesProps {
 export function ProjectMilestones({
   milestones,
   issues,
+  isPartial,
   isCounting,
   isSaving,
   onCreate,
@@ -268,12 +272,16 @@ export function ProjectMilestones({
                       <ProgressIndicator
                         value={closed}
                         total={inMilestone.length}
-                        label={`${milestone.name}: closed issues among those loaded`}
+                        label={
+                          isPartial
+                            ? `${milestone.name}: closed issues among those loaded`
+                            : `${milestone.name}: closed issues`
+                        }
                         showLabel
                       />
                       <span>
-                        {inMilestone.length === 1 ? 'issue' : 'issues'} closed, of those
-                        loaded
+                        {inMilestone.length === 1 ? 'issue' : 'issues'} closed
+                        {isPartial ? ', of those loaded' : ''}
                       </span>
                     </>
                   )}

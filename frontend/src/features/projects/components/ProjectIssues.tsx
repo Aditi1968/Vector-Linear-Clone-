@@ -13,27 +13,18 @@ import {
   Spinner,
 } from '../../../components'
 import type { MenuItem } from '../../../components'
-import type { ProjectIssue, ProjectMilestone } from '../api'
+import type { ProjectIssue, ProjectMilestone, ProjectUnfiledIssue } from '../api'
 import { closedCount } from '../lib/projects'
 import styles from '../projects.module.css'
 
-/**
- * How many unassigned issues the "add an issue" menu offers.
- *
- * ponytail: a capped menu, not a searchable picker. The menu is built from
- * the issues this screen has already loaded, so a cap is what keeps it from
- * becoming a scrolling list of everything in the workspace. Replace with a
- * search field once the backend can filter issues server-side -- at which
- * point this whole component stops filtering client-side too.
- */
-const ADDABLE_LIMIT = 15
-
 export interface ProjectIssuesProps {
   projectId: string
-  /** The issues in this project, already filtered by the page. */
+  /** The issues in this project, as far as the server has been paged for them. */
   issues: readonly ProjectIssue[]
-  /** Every issue loaded, filtered or not. The "add" menu is built from these. */
-  loadedIssues: readonly ProjectIssue[]
+  /** How many are in the project altogether. */
+  totalCount: number
+  /** The issues in no project, which are what the "add" menu offers. */
+  unfiledIssues: readonly ProjectUnfiledIssue[]
   milestones: readonly ProjectMilestone[]
   isLoading: boolean
   isLoadingMore: boolean
@@ -48,18 +39,11 @@ export interface ProjectIssuesProps {
 /**
  * A project's issues.
  *
- * ## The constraint this component is shaped by
- *
- * There is no `project.issues` field and no `issues(projectId:)` argument.
- * The API can be asked for a page of the *workspace's* issues and nothing
- * narrower, so "in this project" is decided here, in the browser, over
- * whatever has been loaded.
- *
- * That is stated on screen rather than papered over. The footnote says what
- * the list is, "Load more" says it loads more of the workspace rather than
- * more of this project, and the progress indicator is labelled as counting
- * loaded issues. A panel that quietly showed a partial list as a complete one
- * would be the same UI with a lie in it.
+ * `filter: { projectId }` decides membership on the server, so this renders
+ * what it was given rather than sifting a page of the workspace for it. What
+ * survives from that arrangement is one honest sentence: the list is still
+ * paginated, so while `hasNextPage` the panel says how many of the project's
+ * issues are on screen. Once they are all here it says nothing.
  *
  * ## Progress
  *
@@ -72,7 +56,8 @@ export interface ProjectIssuesProps {
 export function ProjectIssues({
   projectId,
   issues,
-  loadedIssues,
+  totalCount,
+  unfiledIssues,
   milestones,
   isLoading,
   isLoadingMore,
@@ -84,11 +69,7 @@ export function ProjectIssues({
 }: ProjectIssuesProps) {
   const closed = closedCount(issues)
 
-  const addable = loadedIssues
-    .filter((issue) => issue.projectId === null)
-    .slice(0, ADDABLE_LIMIT)
-
-  const addItems: readonly MenuItem[] = addable.map((issue) => ({
+  const addItems: readonly MenuItem[] = unfiledIssues.map((issue) => ({
     id: issue.id,
     label: `${issue.identifier} ${issue.title}`,
     disabled: isSaving,
@@ -106,7 +87,7 @@ export function ProjectIssues({
 
         {addItems.length > 0 && (
           <Menu
-            label="Add a loaded issue to this project"
+            label="Add an unfiled issue to this project"
             items={addItems}
             icon={<PlusIcon />}
             size="sm"
@@ -133,7 +114,11 @@ export function ProjectIssues({
                 <ProgressIndicator
                   value={closed}
                   total={issues.length}
-                  label="Closed issues in this project, among those loaded"
+                  label={
+                    hasNextPage
+                      ? 'Closed issues in this project, among those loaded'
+                      : 'Closed issues in this project'
+                  }
                   showLabel
                 />
                 <span>closed &middot; completed or canceled</span>
@@ -144,11 +129,7 @@ export function ProjectIssues({
               <EmptyState
                 icon={<IssuesIcon />}
                 title="No issues in this project yet"
-                description={
-                  hasNextPage
-                    ? 'None among the issues loaded so far. Older issues may belong to it -- load more below.'
-                    : 'Every issue in this workspace has been checked; none is filed against this project.'
-                }
+                description="Nothing in this workspace is filed against this project."
               />
             ) : (
               <List label="Issues in this project">
@@ -209,18 +190,18 @@ export function ProjectIssues({
               </List>
             )}
 
-            <p className={styles.footnote}>
-              The API offers no per-project issue filter, so this list is
-              matched in the browser against the {loadedIssues.length} most
-              recent {loadedIssues.length === 1 ? 'issue' : 'issues'} in the
-              workspace. Loading more loads more of the workspace, not more of
-              this project.
-            </p>
-
+            {/* Only while the answer is partial. A count that matches what is
+                on screen is a sentence nobody needs to read. */}
             {hasNextPage && (
-              <Button size="sm" onClick={onLoadMore} loading={isLoadingMore}>
-                Load more workspace issues
-              </Button>
+              <>
+                <p className={styles.footnote} role="status">
+                  Showing {issues.length} of {totalCount} issues in this project.
+                </p>
+
+                <Button size="sm" onClick={onLoadMore} loading={isLoadingMore}>
+                  Load more
+                </Button>
+              </>
             )}
           </>
         )}
