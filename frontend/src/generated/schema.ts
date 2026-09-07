@@ -124,6 +124,7 @@ export type GithubIntegration = {
 export type GithubIntegrationStatus =
   | 'CONNECTED'
   | 'DISCONNECTED'
+  | 'PENDING'
   | 'UNCONFIGURED';
 
 export type GithubRepository = {
