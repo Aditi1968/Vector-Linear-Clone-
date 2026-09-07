@@ -6,8 +6,9 @@
  *   - the router, which needs `AppLayout` as the element of the
  *     `/:workspaceSlug` route;
  *   - screens, which need `PageHeader` and `PageContent` to sit correctly
- *     inside the shell, and `useRegisterCreateIssueAction` to drive the
- *     rail's "New issue" button.
+ *     inside the shell, `ViewControls` for the density and grouping options
+ *     that live in a header's trailing edge, and
+ *     `useRegisterCreateIssueAction` to drive the rail's "New issue" button.
  *
  * Nothing else in `src/app/layout/` is exported. `Sidebar`,
  * `WorkspaceSwitcher`, `AccountMenu`, the shell's action affordances and its
@@ -23,6 +24,16 @@ export type { PageHeaderProps } from './PageHeader'
 
 export { PageContent } from './PageContent'
 export type { PageContentProps } from './PageContent'
+
+/* The view options a screen drops into `PageHeader`'s `actions` slot, and the
+ * two preferences behind them. `useGroupMode` is exported on its own because
+ * a screen that offers the grouping toggle also has to read it -- density
+ * needs no such thing, because it is a CSS variable and nothing re-renders. */
+export { ViewControls } from './ViewControls'
+export type { ViewControlsProps } from './ViewControls'
+
+export { useDensity, useGroupMode, storedDensity, storedGroupMode } from './preferences'
+export type { Density, GroupMode } from './preferences'
 
 export { useRegisterCreateIssueAction, useCreateIssueAction } from './createIssueAction'
 export type {

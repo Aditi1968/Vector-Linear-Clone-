@@ -1,0 +1,14 @@
+/*
+ * Two capsules side by side, and they wrap rather than squeeze.
+ *
+ * `flex-wrap` and not `overflow: hidden`: at a narrow width the header's
+ * title column shrinks first (it has `flex: 1 1 auto`, these have `flex:
+ * none`), and when there is genuinely no room left the second capsule drops
+ * to a line of its own instead of being clipped in half.
+ */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4);
+}

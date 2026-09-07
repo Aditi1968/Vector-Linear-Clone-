@@ -1,11 +1,26 @@
+/**
+ * A capsule of segments, with the chosen one in silver.
+ *
+ * This is one of the two places the product inverts -- dark ink on light
+ * metal -- and the only one that is not a button. That is deliberate: the
+ * selected segment and the primary button read as the same material, so
+ * "the thing that is on" and "the thing that acts" are visibly one family.
+ * The segment uses the flat silver rather than the gradient because at 24px
+ * tall a gradient reads as a smudge.
+ *
+ * The capsule, not a rounded rectangle. `--radius-full` is reserved in the
+ * token file for the things that really are capsules -- buttons, segmented
+ * controls, tags -- and a segmented control drawn at `--radius-md` reads as a
+ * group of tabs, which is a different control with different keyboard
+ * behaviour.
+ */
 .root {
   display: inline-flex;
   align-items: center;
-  gap: var(--space-1);
   padding: var(--space-1);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-md);
-  background-color: var(--color-surface-subtle);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background-color: var(--color-surface);
 }
 
 .option {
@@ -14,12 +29,12 @@
   align-items: center;
   gap: var(--space-3);
 
-  height: calc(var(--control-height-sm) - var(--space-2));
-  padding-inline: var(--space-4);
-  border-radius: var(--radius-sm);
+  height: var(--control-height-xs);
+  padding-inline: var(--space-5);
+  border-radius: var(--radius-full);
 
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
   font-weight: var(--weight-medium);
   line-height: var(--leading-none);
   white-space: nowrap;
@@ -51,19 +66,26 @@
   opacity: 0;
 }
 
-.option:has(.input:checked) {
-  background-color: var(--color-surface);
-  border: var(--border-width) solid var(--color-border);
-  /* Compensate for the border this state adds, so the segment does not grow
-   * and shove its neighbours along by a pixel when selected. */
-  margin: calc(var(--border-width) * -1);
-  color: var(--color-text-primary);
-  box-shadow: var(--shadow-sm);
+/*
+ * No border and no shadow on the selected segment, so it does not change size
+ * when it is chosen and the neighbours do not shift by a pixel. The fill is
+ * the whole indicator, and at 16:1 against its own ink it does not need help.
+ */
+.option:has(.input:checked),
+.option:has(.input:checked):hover {
+  background-color: var(--color-primary-flat);
+  color: var(--color-text-on-primary);
 }
 
-/* The input is visually gone, so its focus ring would be too. `:has` moves the
- * indicator onto the label the user can actually see. */
+/*
+ * The input is visually gone, so its focus ring would be too; `:has` moves the
+ * indicator onto the label the user can actually see. The backdrop is
+ * re-pointed because the capsule sits on `--color-surface` rather than on the
+ * page, and the ring's offset band has to match what is behind it.
+ */
 .option:has(.input:focus-visible) {
+  --focus-ring-backdrop: var(--color-surface);
+
   box-shadow: var(--focus-ring);
 }
 

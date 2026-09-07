@@ -1,0 +1,126 @@
+/*
+ * One issue row.
+ *
+ * The grid is the design's: two glyph columns, the mono key, the title, the
+ * labels, and everything that reads right-aligned. Every track is a token, so
+ * the row and the group header above it line up without either restating a
+ * measurement.
+ */
+.row {
+  display: grid;
+  grid-template-columns:
+    var(--glyph-column) var(--glyph-column) var(--key-column)
+    minmax(0, 1fr) auto auto;
+  gap: var(--space-4);
+  align-items: center;
+
+  min-height: var(--row-height);
+  padding-block: 0;
+  padding-inline: var(--space-5);
+}
+
+/*
+ * The stretched link.
+ *
+ * The title cell holds a real `<a>`, and this grows its hit area to the whole
+ * row. Three things follow, and all three are why the row is not a `<button>`
+ * with an onClick: the row is one tab stop rather than none, Enter follows it
+ * because that is what Enter does on a link, and middle-click and "open in a
+ * new tab" work because it really is a link.
+ *
+ * `::after` rather than `position: absolute` on the anchor itself, so the
+ * anchor's own text still participates in the grid and truncates with it.
+ * `ListRow` is already `position: relative`, which is what this anchors to.
+ */
+.title > :where(a) {
+  color: inherit;
+  text-decoration: none;
+}
+
+.title > :where(a)::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+}
+
+/*
+ * The ring belongs on the row, not on the invisible stretched box.
+ *
+ * Focusing the link would otherwise draw a 2px ring around the ::after that
+ * covers the row -- visually correct by accident, but it paints over the row's
+ * own edges. Drawing it inset on the row is the same indicator in the place
+ * the user is actually looking, and `--focus-ring-inset` exists in the token
+ * file for exactly this case: a control in a dense row with no room to
+ * breathe.
+ */
+.title > :where(a):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.row:has(.title > :where(a):focus-visible) {
+  box-shadow: var(--focus-ring-inset);
+}
+
+.identifier {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: var(--numeric-tabular);
+  white-space: nowrap;
+}
+
+.title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-body);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.labels {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+}
+
+/*
+ * The trailing column. `justify-content: flex-end` and not `text-align`,
+ * because these are flex children and the column is `auto`-width: it is as
+ * wide as it needs and no wider, so the contents sit against the row's edge.
+ */
+.meta {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: flex-end;
+
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+  font-variant-numeric: var(--numeric-tabular);
+  white-space: nowrap;
+}
+
+/*
+ * Narrow: the labels column goes, and the key and meta close up.
+ *
+ * The two glyphs and the title stay, because they are the row -- what it is,
+ * how urgent, and what it is called. `48rem` is
+ * `--layout-breakpoint-compact`; media queries cannot read custom properties,
+ * so the literal is repeated here.
+ */
+@media (max-width: 47.999rem) {
+  .row {
+    grid-template-columns:
+      var(--glyph-column) var(--glyph-column) var(--key-column)
+      minmax(0, 1fr) auto;
+    gap: var(--space-3);
+    padding-inline: var(--space-4);
+  }
+
+  .labels {
+    display: none;
+  }
+}

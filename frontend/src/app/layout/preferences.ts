@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react'
 
 /**
- * The two shell preferences that survive a reload: the theme, and whether the
- * rail is collapsed.
+ * The shell preferences that survive a reload: the theme, whether the rail is
+ * collapsed, how tall a list row is, and whether lists are grouped.
  *
- * Both live in `localStorage` and both are read behind a `try`. Storage
+ * All of them live in `localStorage` and all are read behind a `try`. Storage
  * *throws* rather than returning null when a browser is set to block site
  * data, and it throws on read as well as on write -- so an unguarded
  * `localStorage.getItem` in a module that every screen mounts under is a
@@ -15,6 +15,8 @@ import { useCallback, useEffect, useState } from 'react'
 
 const THEME_KEY = 'vector.theme'
 const SIDEBAR_KEY = 'vector.sidebar.collapsed'
+const DENSITY_KEY = 'vector.density'
+const GROUP_MODE_KEY = 'vector.list.group'
 
 function read(key: string): string | null {
   try {
@@ -59,10 +61,17 @@ function isThemePreference(value: string | null): value is ThemePreference {
  * Put the preference on `<html>`, which is where src/styles/tokens.css looks
  * for it.
  *
- * `system` *removes* the attribute rather than setting it to "system".
- * tokens.css defines dark under `@media (prefers-color-scheme: dark)` guarded
- * by `:root:not([data-theme='light'])`, so the absence of the attribute is
- * what lets the OS preference through; any value at all would defeat it.
+ * `system` *removes* the attribute rather than setting it to "system", so the
+ * absence of the attribute is what lets the OS preference through; any value
+ * at all would defeat it.
+ *
+ * Vector ships one palette today: tokens.css puts the navy theme on bare
+ * `:root` and pins `color-scheme: dark`, so this control has nothing to
+ * switch between yet and the attribute it writes is not read by anything.
+ * It is kept because the preference is the user's and losing a stored choice
+ * is worse than carrying an inert attribute -- and because a light theme, if
+ * one is ever designed, arrives as a `:root[data-theme='light']` block and
+ * needs no change here.
  */
 function apply(preference: ThemePreference): void {
   const root = document.documentElement
@@ -149,4 +158,109 @@ export function useSidebarCollapsed(): [boolean, () => void] {
   }, [])
 
   return [collapsed, toggle]
+}
+
+/* ------------------------------------------------------------------ */
+/* Density                                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How tall one list row is.
+ *
+ * A workspace-wide preference and not a per-screen one, because it is a
+ * statement about the user's eyes rather than about the list they happen to
+ * be looking at. Someone who wants more rows on screen wants that everywhere.
+ */
+export type Density = 'dense' | 'comfortable'
+
+function isDensity(value: string | null): value is Density {
+  return value === 'dense' || value === 'comfortable'
+}
+
+/**
+ * Put the choice on `<html>`, which is where src/styles/tokens.css looks.
+ *
+ * One attribute re-points `--row-height`, and every row in the product
+ * follows -- lists, inbox, members, cycles -- because they all measure
+ * themselves against that token rather than restating a height each. Nothing
+ * re-renders; this is a CSS variable change.
+ *
+ * `dense` removes the attribute rather than setting it, so the default state
+ * of the document is the default density and there is no value to keep in
+ * sync with the stylesheet's `:root` block.
+ */
+function applyDensity(density: Density): void {
+  const root = document.documentElement
+
+  if (density === 'dense') {
+    root.removeAttribute('data-density')
+  } else {
+    root.setAttribute('data-density', density)
+  }
+}
+
+/** The stored density, or `dense` when there is none. */
+export function storedDensity(): Density {
+  const stored = read(DENSITY_KEY)
+
+  return isDensity(stored) ? stored : 'dense'
+}
+
+/** The density control's state, applied to the document and remembered. */
+export function useDensity(): [Density, (next: Density) => void] {
+  const [density, setDensity] = useState<Density>(storedDensity)
+
+  useEffect(() => {
+    applyDensity(density)
+  }, [density])
+
+  const choose = useCallback((next: Density) => {
+    setDensity(next)
+    write(DENSITY_KEY, next === 'dense' ? null : next)
+  }, [])
+
+  return [density, choose]
+}
+
+/* ------------------------------------------------------------------ */
+/* Grouping                                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Whether a list is one run of rows or a run per workflow state.
+ *
+ * Unlike density this changes what is rendered, so it is state a screen reads
+ * rather than an attribute on the document. It still lives here, and is still
+ * global, for the same reason: it is a preference about how someone reads a
+ * list, and having it reset every time they move between two lists is the
+ * behaviour people describe as "it keeps forgetting".
+ *
+ * A screen with nothing to group by simply does not offer the control. It
+ * must not silently coerce the stored value -- the preference is the user's,
+ * and a screen that cannot honour it today should leave it alone rather than
+ * write `flat` over a choice every other screen is respecting.
+ */
+export type GroupMode = 'flat' | 'grouped'
+
+function isGroupMode(value: string | null): value is GroupMode {
+  return value === 'flat' || value === 'grouped'
+}
+
+/** The stored grouping, or `flat` when there is none. */
+export function storedGroupMode(): GroupMode {
+  const stored = read(GROUP_MODE_KEY)
+
+  return isGroupMode(stored) ? stored : 'flat'
+}
+
+/** The grouping control's state, remembered across reloads. */
+export function useGroupMode(): [GroupMode, (next: GroupMode) => void] {
+  const [mode, setMode] = useState<GroupMode>(storedGroupMode)
+
+  const choose = useCallback((next: GroupMode) => {
+    setMode(next)
+    write(GROUP_MODE_KEY, next === 'flat' ? null : next)
+  }, [])
+
+  return [mode, choose]
 }

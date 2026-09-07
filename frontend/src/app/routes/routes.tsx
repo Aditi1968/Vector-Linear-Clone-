@@ -15,7 +15,79 @@ import { TeamIssuesPage, TeamPage } from '../../features/teams'
 import { AppLayout } from '../layout'
 import { NotFound } from './NotFound'
 import { ROUTE_SEGMENTS, WORKSPACE_SLUG_PARAM } from './paths'
+import { Placeholder } from './Placeholder'
 import { RouteError } from './RouteError'
+
+/**
+ * The routes whose screens are still to come.
+ *
+ * A table rather than twelve near-identical entries, because every one of
+ * them differs in exactly three strings and nothing else. The description is
+ * what the page says it will be -- a sentence about the screen, never a
+ * promise about when.
+ */
+const SECOND_WAVE = [
+  {
+    segment: ROUTE_SEGMENTS.triage,
+    title: 'Triage',
+    description: 'Work that has arrived but has not been accepted into a team yet.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.savedViews,
+    title: 'Saved views',
+    description: 'Filter sets someone named and kept, shared across the workspace.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.favorites,
+    title: 'Favorites',
+    description: 'The issues, projects and views you starred.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.initiatives,
+    title: 'Initiatives',
+    description: 'Projects grouped into the larger thing they are part of.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.roadmap,
+    title: 'Roadmap',
+    description: 'Projects and initiatives laid against a calendar.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.documents,
+    title: 'Documents',
+    description: 'Long-form writing that belongs to the workspace rather than to an issue.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.templates,
+    title: 'Templates',
+    description: 'Pre-filled issues, so recurring work is filed the same way each time.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.releases,
+    title: 'Releases',
+    description: 'What shipped, and what is going out next.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.environments,
+    title: 'Environments',
+    description: 'Where the product runs, and what is deployed to each.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.labelGroups,
+    title: 'Label groups',
+    description: 'Labels that are mutually exclusive, administered together.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.analytics,
+    title: 'Analytics',
+    description: 'Throughput, cycle time, and how the workspace is actually moving.',
+  },
+  {
+    segment: ROUTE_SEGMENTS.semanticSearch,
+    title: 'Semantic search',
+    description: 'Search by what an issue means rather than by the words it contains.',
+  },
+] as const
 
 /**
  * The route table, composed from three sources.
@@ -43,11 +115,21 @@ import { RouteError } from './RouteError'
  *
  * ## Screens that are not built yet
  *
- * None, as of the workspace screens landing. `./Placeholder.tsx` is still
- * exported from `./index.ts` and is still the right thing to mount for a
- * route whose screen is somebody else's to write: the route is real, the URL
- * is the one `paths` builds, and the page says outright that it does not
- * exist yet rather than leaving a dead entry in the rail.
+ * The twelve second-wave routes at the foot of the table. Each mounts
+ * `./Placeholder.tsx`, which is the right thing for a route whose screen is
+ * somebody else's to write: the route is real, the URL is the one `paths`
+ * builds, and the page says outright that it does not exist yet rather than
+ * leaving a dead link behind.
+ *
+ * Replacing one is a one-line change here -- swap the `element` for the real
+ * page -- and nothing else in this file moves. That is the point of listing
+ * them: the feature that lands owns its own directory and this entry, and no
+ * two features ever edit the same lines.
+ *
+ * Mounted eagerly rather than through `React.lazy`, because a placeholder is
+ * a heading and a sentence and there is no `<Suspense>` boundary in the shell
+ * to catch the promise. Whoever replaces one with a real screen can add both
+ * together.
  *
  * Exported as data rather than JSX elements so tests can mount a subtree with
  * a memory router without booting the whole application.
@@ -136,6 +218,10 @@ export const routes: RouteObject[] = [
         path: ROUTE_SEGMENTS.cycleDetail,
         element: <CycleDetailPage />,
       },
+      ...SECOND_WAVE.map(({ segment, title, description }) => ({
+        path: segment,
+        element: <Placeholder title={title} description={description} />,
+      })),
       {
         // Inside the parent, so an unknown URL still renders the shell.
         path: '*',
