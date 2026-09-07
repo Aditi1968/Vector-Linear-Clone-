@@ -190,7 +190,13 @@ OAUTH_STATE_COOKIE_NAME = "vector_slack_oauth"
 # Scoped to the OAuth routes, unlike the session cookie's "/". Nothing outside
 # this flow has any use for it, so nothing outside this flow is sent it -- one
 # fewer credential-shaped value riding on every request to the API.
-OAUTH_STATE_COOKIE_PATH = "/slack/oauth"
+# Site-wide, for the reason app/rest/github.py gives at STATE_COOKIE_PATH:
+# the flow starts under `/slack/oauth` or `/integrations/slack/oauth` and
+# Slack redirects to the registered callback under `/integrations`, which a
+# cookie scoped to `/slack/oauth` is never sent to. The protections the
+# narrower scope was standing in for -- HttpOnly, a short expiry, single use,
+# and the session digest checked in the callback -- are all still here.
+OAUTH_STATE_COOKIE_PATH = "/"
 
 # Ten minutes: long enough to read a consent screen and sign in to Slack,
 # short enough that an abandoned flow does not leave a valid state in a

@@ -87,7 +87,19 @@ STATE_COOKIE_NAME = "vector_github_state"
 # Scoped to this router. Narrower than the session cookie on purpose: nothing
 # outside the install flow has any use for it, and a cookie is sent to every
 # path it is scoped to.
-STATE_COOKIE_PATH = "/github"
+# Site-wide, and it has to be. The install begins at `/github/install` or
+# `/integrations/github/install`, but GitHub redirects to whichever callback
+# the App has registered -- here `/integrations/github/oauth/callback`. A
+# cookie scoped to `/github` is not sent to a path under `/integrations`, so
+# the narrower scope meant the callback saw NO state at all and refused a
+# flow that was entirely legitimate. There is no path expression covering
+# both mounts except the root.
+#
+# What the narrower scope was buying is bought elsewhere and still holds: the
+# cookie is HttpOnly, expires in ten minutes, is single-use and consumed on
+# every exit including the failures, and carries a digest of the session that
+# minted it, so a cookie planted by anyone else matches nothing.
+STATE_COOKIE_PATH = "/"
 
 # Ten minutes: long enough to read GitHub's permission screen and pick
 # repositories, short enough that an abandoned install does not leave a usable

@@ -258,7 +258,12 @@ async def test_the_state_cookie_is_not_readable_by_script():
     header = response.headers["set-cookie"]
 
     assert "httponly" in header.lower()
-    assert "path=/github" in header.lower()
+    # Site-wide. The App's registered callback lives under `/integrations`
+    # while the install begins under `/github`, and a cookie scoped to either
+    # prefix is never sent to the other -- which refused legitimate flows. The
+    # scope is not what protects this cookie; HttpOnly, the ten-minute expiry,
+    # single use, and the session digest checked in the callback are.
+    assert "path=/;" in header.lower() or header.lower().rstrip().endswith("path=/")
     assert "samesite=lax" in header.lower()
     # Not Secure in a test environment, which is what makes the cookie work
     # over plain http locally; production is the only environment that sets it.
