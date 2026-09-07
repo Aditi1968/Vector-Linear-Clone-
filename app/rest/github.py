@@ -143,6 +143,18 @@ class GithubHttpServices:
     memberships: MembershipService
     environment: Environment
 
+    # The callback URL this deployment's GitHub App has registered, or None.
+    # Carried here rather than read from settings at the point of use, so the
+    # authorize leg and the token exchange cannot present two different
+    # values -- GitHub compares them and refuses the exchange if they differ.
+    #
+    # Defaulted, because None is a real and correct state: an App with one
+    # registered callback needs no `redirect_uri` at all. A required field
+    # here would also make every existing construction -- the tests', and any
+    # future caller's -- a compile error over a value most of them have no
+    # opinion about.
+    oauth_callback_url: str | None = None
+
 
 def build_services() -> GithubHttpServices:
     """Compose the services these routes use, per request.
@@ -182,6 +194,7 @@ def build_services() -> GithubHttpServices:
             invitations=InvitationRepository(),
         ),
         environment=settings.environment,
+        oauth_callback_url=settings.github_oauth_callback_url,
     )
 
 
@@ -379,7 +392,19 @@ async def install(
     # `urlencode` rather than an f-string, because the client id is an
     # operator-supplied string and a '&' in it would otherwise silently split
     # into a parameter of its own.
-    query = urlencode({"client_id": config.client_id, "state": state})
+    parameters = {"client_id": config.client_id, "state": state}
+
+    # Sent only when the deployment configured one. GitHub falls back to the
+    # App's registered callback when `redirect_uri` is absent, so omitting it
+    # works for an App with exactly one -- but an App with several has no way
+    # to know which, and a value that does NOT match a registered one is
+    # rejected outright. Naming it makes the leg deterministic, and it is the
+    # same value the token exchange must present later: GitHub compares the
+    # two and refuses the exchange if they differ.
+    if services.oauth_callback_url:
+        parameters["redirect_uri"] = services.oauth_callback_url
+
+    query = urlencode(parameters)
 
     response = RedirectResponse(
         f"{GITHUB_AUTHORIZE_URL}?{query}",
@@ -405,7 +430,16 @@ async def install(
     return response
 
 
+# Two paths, one handler. `/oauth/callback` is what this deployment's GitHub
+# App has registered as its callback URL, and a registered URL is a value
+# GitHub holds rather than one this repository can choose -- a redirect has
+# already left the user's browser by the time a 404 would be discovered.
+# `/callback` stays because it is the older spelling and dropping it would
+# break any App still registered against it. Neither is a second
+# implementation: both decorate the same function, so the state check, the
+# claim and the refusals cannot drift between them.
 @router.get("/callback")
+@router.get("/oauth/callback")
 async def callback(
     request: Request,
     services: Annotated[GithubHttpServices, Depends(build_services)],

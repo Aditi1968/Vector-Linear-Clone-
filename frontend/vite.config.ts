@@ -23,6 +23,22 @@ const BACKEND_ORIGIN = 'http://127.0.0.1:8000'
 const GRAPHQL_PATH = '/graphql'
 
 /**
+ * The provider flows, which are browser redirects rather than fetches.
+ *
+ * "Connect GitHub" is an ordinary link to a backend route that answers 302
+ * to github.com. Served from Vite without a proxy entry, that link matched
+ * the SPA fallback instead: the browser got `index.html` with status 200,
+ * the router rendered not-found, and nothing anywhere reported an error.
+ * The integration was unreachable from the running application while every
+ * test stayed green, because no test goes through the dev server.
+ *
+ * `/integrations` is the prefix the deployment's GitHub App and Smee relay
+ * are configured against; the two bare prefixes are the older spellings the
+ * same routers still answer on.
+ */
+const PROVIDER_PATHS = ['/integrations', '/github', '/slack']
+
+/**
  * The proxy table, shared by `vite` and `vite preview`.
  *
  * Declared once and used twice because Vite reads `server.proxy` and
@@ -67,6 +83,14 @@ const proxy = {
     // logs honest about where the request claimed to be going.
     changeOrigin: false,
   },
+
+  // Same target and the same Host handling. `changeOrigin: false` matters
+  // more here than for `/graphql`: these routes set and read the OAuth state
+  // cookie, and a rewritten Host is how a cookie ends up scoped to somewhere
+  // the next request will not send it back from.
+  ...Object.fromEntries(
+    PROVIDER_PATHS.map((path) => [path, { target: BACKEND_ORIGIN, changeOrigin: false }]),
+  ),
 }
 
 export default defineConfig({
