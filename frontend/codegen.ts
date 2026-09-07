@@ -81,6 +81,27 @@ const SHARED = {
     UUID: 'string',
     DateTime: 'string',
     Date: 'string',
+
+    /*
+     * `JSON`, which today is one thing: a document's ProseMirror content.
+     *
+     * `unknown` rather than `any`, and the difference is the whole reason
+     * `strictScalars` is set below. `any` would let this value be spread,
+     * indexed and rendered with no check at all -- which is exactly the hole
+     * that setting exists to refuse, and it would refuse it right up until
+     * somebody silenced it by mapping the scalar to `any`.
+     *
+     * Not a structural ProseMirror type either, however tempting. The
+     * authority on that shape is `parse_content` in
+     * `app/domain/documents.py`, which validates the tree on the way in AND
+     * on the way out; a hand-written mirror of it here would be a second
+     * vocabulary that drifts from the first, and it would claim a guarantee
+     * this boundary cannot make -- the wire delivers whatever the server
+     * sent, and a type is not a parse. `unknown` forces the consumer to
+     * narrow, which is the honest contract for a value whose shape is
+     * checked somewhere else.
+     */
+    JSON: 'unknown',
   },
 
   /*

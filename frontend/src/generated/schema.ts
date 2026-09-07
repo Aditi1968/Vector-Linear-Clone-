@@ -22,6 +22,8 @@ export type Scalars = {
   Date: { input: string; output: string; }
   /** Date with time (isoformat) */
   DateTime: { input: string; output: string; }
+  /** The `JSON` scalar type represents JSON values as specified by [ECMA-404](https://ecma-international.org/wp-content/uploads/ECMA-404_2nd_edition_december_2017.pdf). */
+  JSON: { input: unknown; output: unknown; }
   UUID: { input: string; output: string; }
 };
 
@@ -108,6 +110,166 @@ export type CycleUpdateInput = {
   workspaceSlug: Scalars['String']['input'];
 };
 
+export type Document = {
+  __typename?: 'Document';
+  comments: DocumentCommentConnection;
+  content?: Maybe<Scalars['JSON']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  creatorId: Scalars['UUID']['output'];
+  id: Scalars['UUID']['output'];
+  initiativeId?: Maybe<Scalars['UUID']['output']>;
+  lastEditedBy: Scalars['UUID']['output'];
+  projectId?: Maybe<Scalars['UUID']['output']>;
+  revisions: DocumentRevisionConnection;
+  title: Scalars['String']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+
+export type DocumentCommentsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
+
+export type DocumentRevisionsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+};
+
+export type DocumentComment = {
+  __typename?: 'DocumentComment';
+  authorId: Scalars['UUID']['output'];
+  body: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  documentId: Scalars['UUID']['output'];
+  editedAt?: Maybe<Scalars['DateTime']['output']>;
+  id: Scalars['UUID']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type DocumentCommentConnection = {
+  __typename?: 'DocumentCommentConnection';
+  nodes: Array<DocumentComment>;
+  pageInfo: PageInfo;
+};
+
+export type DocumentCommentCreateInput = {
+  body: Scalars['String']['input'];
+  documentId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type DocumentCommentDeleteInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type DocumentCommentDeletePayload = {
+  __typename?: 'DocumentCommentDeletePayload';
+  deletedCommentId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type DocumentCommentPayload = {
+  __typename?: 'DocumentCommentPayload';
+  comment?: Maybe<DocumentComment>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type DocumentConnection = {
+  __typename?: 'DocumentConnection';
+  nodes: Array<Document>;
+  pageInfo: PageInfo;
+};
+
+export type DocumentCreateInput = {
+  content?: InputMaybe<Scalars['JSON']['input']>;
+  initiativeId?: InputMaybe<Scalars['UUID']['input']>;
+  projectId?: InputMaybe<Scalars['UUID']['input']>;
+  title: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type DocumentDeleteInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type DocumentDeletePayload = {
+  __typename?: 'DocumentDeletePayload';
+  deletedDocumentId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type DocumentEditInput = {
+  content?: InputMaybe<Scalars['JSON']['input']>;
+  id: Scalars['UUID']['input'];
+  snapshot?: Scalars['Boolean']['input'];
+  title?: InputMaybe<Scalars['String']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type DocumentPayload = {
+  __typename?: 'DocumentPayload';
+  document?: Maybe<Document>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type DocumentRestoreInput = {
+  documentId: Scalars['UUID']['input'];
+  revisionId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type DocumentRevision = {
+  __typename?: 'DocumentRevision';
+  authorId: Scalars['UUID']['output'];
+  content?: Maybe<Scalars['JSON']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  documentId: Scalars['UUID']['output'];
+  id: Scalars['UUID']['output'];
+  title: Scalars['String']['output'];
+};
+
+export type DocumentRevisionConnection = {
+  __typename?: 'DocumentRevisionConnection';
+  nodes: Array<DocumentRevision>;
+  pageInfo: PageInfo;
+};
+
+export type DuplicateSuggestion = {
+  __typename?: 'DuplicateSuggestion';
+  issue: Issue;
+  similarity: Scalars['Float']['output'];
+};
+
+export type Environment = {
+  __typename?: 'Environment';
+  createdAt: Scalars['DateTime']['output'];
+  id: Scalars['UUID']['output'];
+  kind: EnvironmentKind;
+  name: Scalars['String']['output'];
+};
+
+export type EnvironmentCreateInput = {
+  kind: EnvironmentKind;
+  name: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type EnvironmentKind =
+  | 'CUSTOM'
+  | 'DEVELOPMENT'
+  | 'PRODUCTION'
+  | 'STAGING';
+
+export type EnvironmentPayload = {
+  __typename?: 'EnvironmentPayload';
+  environment?: Maybe<Environment>;
+  errors: Array<ValidationErrorType>;
+};
+
 /** One shortcut in one person's sidebar. Exactly one of `teamId`, `projectId` and `savedViewId` is set. */
 export type Favorite = {
   __typename?: 'Favorite';
@@ -151,6 +313,40 @@ export type FavoriteReorderInput = {
   workspaceSlug: Scalars['String']['input'];
 };
 
+export type GithubCommit = {
+  __typename?: 'GithubCommit';
+  committedAt?: Maybe<Scalars['DateTime']['output']>;
+  /** The whole commit message. */
+  message: Scalars['String']['output'];
+  repository: Scalars['String']['output'];
+  repositoryId: Scalars['ID']['output'];
+  /** The full 40-character SHA, which is the commit's identity. */
+  sha: Scalars['String']['output'];
+  /** The first seven characters, which is what a list shows. A rendering and never an identity: the abbreviation is ambiguous by construction. */
+  shortSha: Scalars['String']['output'];
+  /** The message's first line, which is what a list shows. */
+  summary: Scalars['String']['output'];
+  url?: Maybe<Scalars['String']['output']>;
+};
+
+export type GithubDevelopment = {
+  __typename?: 'GithubDevelopment';
+  /** A deterministic branch name for this issue -- eng-142-fix-slack-oauth-callback. Safe to paste into `git checkout -b` for any title: unicode is folded, punctuation collapses, and a title that folds to nothing leaves the identifier alone. Creating it needs no GitHub permission and this field creates nothing; the identifier leads so that a pull request opened from the branch links back without anyone typing the identifier twice. */
+  branchName: Scalars['String']['output'];
+  commits: Array<GithubCommit>;
+  pullRequests: Array<GithubPullRequest>;
+};
+
+
+export type GithubDevelopmentCommitsArgs = {
+  first?: Scalars['Int']['input'];
+};
+
+
+export type GithubDevelopmentPullRequestsArgs = {
+  first?: Scalars['Int']['input'];
+};
+
 export type GithubDisconnectInput = {
   workspaceSlug: Scalars['String']['input'];
 };
@@ -169,6 +365,36 @@ export type GithubIntegrationStatus =
   | 'DISCONNECTED'
   | 'PENDING'
   | 'UNCONFIGURED';
+
+export type GithubLinkSource =
+  | 'BODY'
+  | 'BRANCH'
+  | 'TITLE';
+
+export type GithubPullRequest = {
+  __typename?: 'GithubPullRequest';
+  /** The branch the pull request is from, or null where the payload omitted it -- a deleted or cross-fork head. */
+  branch?: Maybe<Scalars['String']['output']>;
+  /** Which of the pull request's title, body and branch name this issue's identifier appears in. More than one is ordinary, and each is retracted independently: editing the title removes the title's link and leaves the branch's. */
+  linkedBy: Array<GithubLinkSource>;
+  mergedAt?: Maybe<Scalars['DateTime']['output']>;
+  number: Scalars['Int']['output'];
+  /** The repository this pull request is on, as owner/name. */
+  repository: Scalars['String']['output'];
+  repositoryId: Scalars['ID']['output'];
+  state: GithubPullRequestState;
+  title: Scalars['String']['output'];
+  /** GitHub's own updated_at, not Vector's. Null where the payload carried none. */
+  updatedAt?: Maybe<Scalars['DateTime']['output']>;
+  /** The link GitHub reported, stored rather than rebuilt from the owner, name and number: GitHub owns its URL layout, and a rebuilt link is a guess that breaks silently. */
+  url?: Maybe<Scalars['String']['output']>;
+};
+
+export type GithubPullRequestState =
+  | 'CLOSED'
+  | 'DRAFT'
+  | 'MERGED'
+  | 'OPEN';
 
 export type GithubRepository = {
   __typename?: 'GithubRepository';
@@ -335,6 +561,7 @@ export type Issue = {
   creatorId?: Maybe<Scalars['UUID']['output']>;
   cycle?: Maybe<Cycle>;
   description?: Maybe<Scalars['String']['output']>;
+  development: GithubDevelopment;
   /** A calendar day, not an instant: the same day for every viewer, in every timezone. */
   dueDate?: Maybe<Scalars['Date']['output']>;
   estimate?: Maybe<Scalars['Int']['output']>;
@@ -417,6 +644,34 @@ export type IssueArchivePayload = {
   issue?: Maybe<Issue>;
 };
 
+export type IssueBulkArchiveInput = {
+  issueIds: Array<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type IssueBulkPayload = {
+  __typename?: 'IssueBulkPayload';
+  count: Scalars['Int']['output'];
+  errors: Array<ValidationErrorType>;
+  issues: Array<IssueSummary>;
+};
+
+/** One change applied to many issues, or to none of them. Every field is optional and omitting one leaves that value alone on every issue. At most 100 issues may be named; a longer list is refused rather than truncated. */
+export type IssueBulkUpdateInput = {
+  addLabelIds?: Array<Scalars['UUID']['input']>;
+  assigneeId?: InputMaybe<Scalars['UUID']['input']>;
+  cycleId?: InputMaybe<Scalars['UUID']['input']>;
+  dueDate?: InputMaybe<Scalars['Date']['input']>;
+  estimate?: InputMaybe<Scalars['Int']['input']>;
+  issueIds: Array<Scalars['UUID']['input']>;
+  milestoneId?: InputMaybe<Scalars['UUID']['input']>;
+  priority?: InputMaybe<Scalars['Int']['input']>;
+  projectId?: InputMaybe<Scalars['UUID']['input']>;
+  removeLabelIds?: Array<Scalars['UUID']['input']>;
+  workflowStateId?: InputMaybe<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
 export type IssueClearParentInput = {
   issueId: Scalars['UUID']['input'];
   workspaceSlug: Scalars['String']['input'];
@@ -428,6 +683,19 @@ export type IssueConnection = {
   pageInfo: PageInfo;
   /** How many live issues match, ignoring paging -- the number a column header states, as opposed to how many have been loaded. */
   totalCount: Scalars['Int']['output'];
+};
+
+export type IssueCreateFromTemplateInput = {
+  teamId: Scalars['UUID']['input'];
+  templateId: Scalars['UUID']['input'];
+  title?: InputMaybe<Scalars['String']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type IssueCreateFromTemplatePayload = {
+  __typename?: 'IssueCreateFromTemplatePayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
 };
 
 export type IssueCreateInput = {
@@ -565,6 +833,24 @@ export type IssueSetProjectPayload = {
   issue?: Maybe<Issue>;
 };
 
+export type IssueSubscriber = {
+  __typename?: 'IssueSubscriber';
+  /** When this person started watching, which does not move if they are auto-subscribed again. */
+  createdAt: Scalars['DateTime']['output'];
+  userId: Scalars['UUID']['output'];
+};
+
+export type IssueSubscriptionInput = {
+  issueId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type IssueSubscriptionPayload = {
+  __typename?: 'IssueSubscriptionPayload';
+  errors: Array<ValidationErrorType>;
+  subscribed: Scalars['Boolean']['output'];
+};
+
 export type IssueSummary = {
   __typename?: 'IssueSummary';
   completedAt?: Maybe<Scalars['DateTime']['output']>;
@@ -582,6 +868,64 @@ export type IssueSummaryConnection = {
   __typename?: 'IssueSummaryConnection';
   nodes: Array<IssueSummary>;
   pageInfo: PageInfo;
+};
+
+export type IssueTemplate = {
+  __typename?: 'IssueTemplate';
+  assigneeId?: Maybe<Scalars['UUID']['output']>;
+  createdAt: Scalars['DateTime']['output'];
+  cycleId?: Maybe<Scalars['UUID']['output']>;
+  description?: Maybe<Scalars['String']['output']>;
+  estimate?: Maybe<Scalars['Int']['output']>;
+  id: Scalars['UUID']['output'];
+  labelIds: Array<Scalars['UUID']['output']>;
+  name: Scalars['String']['output'];
+  priority?: Maybe<Scalars['Int']['output']>;
+  projectId?: Maybe<Scalars['UUID']['output']>;
+  teamId?: Maybe<Scalars['UUID']['output']>;
+  title?: Maybe<Scalars['String']['output']>;
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type IssueTemplateCreateInput = {
+  template: IssueTemplateFieldsInput;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type IssueTemplateDeleteInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type IssueTemplateDeletePayload = {
+  __typename?: 'IssueTemplateDeletePayload';
+  errors: Array<ValidationErrorType>;
+  id?: Maybe<Scalars['UUID']['output']>;
+};
+
+export type IssueTemplateFieldsInput = {
+  assigneeId?: InputMaybe<Scalars['UUID']['input']>;
+  cycleId?: InputMaybe<Scalars['UUID']['input']>;
+  description?: InputMaybe<Scalars['String']['input']>;
+  estimate?: InputMaybe<Scalars['Int']['input']>;
+  labelIds?: Array<Scalars['UUID']['input']>;
+  name: Scalars['String']['input'];
+  priority?: InputMaybe<Scalars['Int']['input']>;
+  projectId?: InputMaybe<Scalars['UUID']['input']>;
+  teamId?: InputMaybe<Scalars['UUID']['input']>;
+  title?: InputMaybe<Scalars['String']['input']>;
+};
+
+export type IssueTemplateSavePayload = {
+  __typename?: 'IssueTemplateSavePayload';
+  errors: Array<ValidationErrorType>;
+  template?: Maybe<IssueTemplate>;
+};
+
+export type IssueTemplateUpdateInput = {
+  id: Scalars['UUID']['input'];
+  template: IssueTemplateFieldsInput;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type IssueUpdateInput = {
@@ -605,6 +949,8 @@ export type Label = {
   __typename?: 'Label';
   color: Scalars['String']['output'];
   createdAt: Scalars['DateTime']['output'];
+  /** The label group this label belongs to, or null for one that belongs to none. An id rather than the group itself: a label picker renders a hundred of these and would otherwise resolve a group per row, and the groups are already on the page through `labelGroups`. */
+  groupId?: Maybe<Scalars['UUID']['output']>;
   id: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
@@ -633,10 +979,56 @@ export type LabelDeletePayload = {
   errors: Array<ValidationErrorType>;
 };
 
+export type LabelGroup = {
+  __typename?: 'LabelGroup';
+  createdAt: Scalars['DateTime']['output'];
+  /** Whether an issue may wear at most one label from this group. Enforced by the database, not by this server: attaching a second label from an exclusive group is refused, and so is turning exclusivity on for a group whose labels already share an issue. */
+  exclusive: Scalars['Boolean']['output'];
+  id: Scalars['UUID']['output'];
+  name: Scalars['String']['output'];
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type LabelGroupCreateInput = {
+  exclusive?: InputMaybe<Scalars['Boolean']['input']>;
+  name: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type LabelGroupDeleteInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type LabelGroupDeletePayload = {
+  __typename?: 'LabelGroupDeletePayload';
+  deletedGroupId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type LabelGroupPayload = {
+  __typename?: 'LabelGroupPayload';
+  errors: Array<ValidationErrorType>;
+  group?: Maybe<LabelGroup>;
+};
+
+export type LabelGroupUpdateInput = {
+  exclusive: Scalars['Boolean']['input'];
+  id: Scalars['UUID']['input'];
+  name: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
 export type LabelPayload = {
   __typename?: 'LabelPayload';
   errors: Array<ValidationErrorType>;
   label?: Maybe<Label>;
+};
+
+export type LabelSetGroupInput = {
+  groupId?: InputMaybe<Scalars['UUID']['input']>;
+  labelId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type LabelUpdateInput = {
@@ -687,6 +1079,14 @@ export type Mutation = {
   cycleCreate: CyclePayload;
   cycleDelete: CycleDeletePayload;
   cycleUpdate: CyclePayload;
+  documentCommentCreate: DocumentCommentPayload;
+  documentCommentDelete: DocumentCommentDeletePayload;
+  documentCreate: DocumentPayload;
+  documentDelete: DocumentDeletePayload;
+  documentEdit: DocumentPayload;
+  documentRestore: DocumentPayload;
+  embeddingsRefresh: Scalars['Int']['output'];
+  environmentCreate: EnvironmentPayload;
   favoriteAdd: FavoritePayload;
   favoriteRemove: FavoriteDeletePayload;
   favoriteReorder: FavoritePayload;
@@ -706,8 +1106,11 @@ export type Mutation = {
   /** Withdraw an invitation. Requires the admin or owner role. */
   invitationRevoke: InvitationRevokePayload;
   issueArchive: IssueArchivePayload;
+  issueBulkArchive: IssueBulkPayload;
+  issueBulkUpdate: IssueBulkPayload;
   issueClearParent: IssueParentPayload;
   issueCreate: IssueCreatePayload;
+  issueCreateFromTemplate: IssueCreateFromTemplatePayload;
   issueLabelAttach: IssueLabelPayload;
   issueLabelDetach: IssueLabelPayload;
   issueRelationCreate: IssueRelationCreatePayload;
@@ -715,9 +1118,18 @@ export type Mutation = {
   issueSetCycle: IssueSetCyclePayload;
   issueSetParent: IssueParentPayload;
   issueSetProject: IssueSetProjectPayload;
+  issueSubscribe: IssueSubscriptionPayload;
+  issueTemplateCreate: IssueTemplateSavePayload;
+  issueTemplateDelete: IssueTemplateDeletePayload;
+  issueTemplateUpdate: IssueTemplateSavePayload;
+  issueUnsubscribe: IssueSubscriptionPayload;
   issueUpdate: IssueUpdatePayload;
   labelCreate: LabelPayload;
   labelDelete: LabelDeletePayload;
+  labelGroupCreate: LabelGroupPayload;
+  labelGroupDelete: LabelGroupDeletePayload;
+  labelGroupUpdate: LabelGroupPayload;
+  labelSetGroup: LabelPayload;
   labelUpdate: LabelPayload;
   login: LoginPayload;
   logout: LogoutPayload;
@@ -739,6 +1151,9 @@ export type Mutation = {
   projectUpdate: ProjectPayload;
   projectUpdatePost: ProjectUpdatePayload;
   register: RegisterPayload;
+  releaseCreate: ReleasePayload;
+  releaseDelete: ReleaseDeletePayload;
+  releaseStatusSet: ReleasePayload;
   savedViewCreate: SavedViewPayload;
   savedViewDelete: SavedViewDeletePayload;
   savedViewUpdate: SavedViewPayload;
@@ -749,6 +1164,11 @@ export type Mutation = {
   slackTestNotification: SlackTestNotificationPayload;
   /** Create a team, seeded with the default workflow states. Requires the admin or owner role. */
   teamCreate: TeamPayload;
+  triageAccept: TriagePayload;
+  triageChangeTeam: TriagePayload;
+  triageDecline: TriagePayload;
+  triageEnter: TriagePayload;
+  triageMarkDuplicate: TriagePayload;
   /** Create a workspace. The authenticated caller becomes its owner. */
   workspaceCreate: WorkspacePayload;
 };
@@ -777,6 +1197,47 @@ export type MutationCycleDeleteArgs = {
 
 export type MutationCycleUpdateArgs = {
   input: CycleUpdateInput;
+};
+
+
+export type MutationDocumentCommentCreateArgs = {
+  input: DocumentCommentCreateInput;
+};
+
+
+export type MutationDocumentCommentDeleteArgs = {
+  input: DocumentCommentDeleteInput;
+};
+
+
+export type MutationDocumentCreateArgs = {
+  input: DocumentCreateInput;
+};
+
+
+export type MutationDocumentDeleteArgs = {
+  input: DocumentDeleteInput;
+};
+
+
+export type MutationDocumentEditArgs = {
+  input: DocumentEditInput;
+};
+
+
+export type MutationDocumentRestoreArgs = {
+  input: DocumentRestoreInput;
+};
+
+
+export type MutationEmbeddingsRefreshArgs = {
+  limit?: Scalars['Int']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type MutationEnvironmentCreateArgs = {
+  input: EnvironmentCreateInput;
 };
 
 
@@ -861,6 +1322,16 @@ export type MutationIssueArchiveArgs = {
 };
 
 
+export type MutationIssueBulkArchiveArgs = {
+  input: IssueBulkArchiveInput;
+};
+
+
+export type MutationIssueBulkUpdateArgs = {
+  input: IssueBulkUpdateInput;
+};
+
+
 export type MutationIssueClearParentArgs = {
   input: IssueClearParentInput;
 };
@@ -868,6 +1339,11 @@ export type MutationIssueClearParentArgs = {
 
 export type MutationIssueCreateArgs = {
   input: IssueCreateInput;
+};
+
+
+export type MutationIssueCreateFromTemplateArgs = {
+  input: IssueCreateFromTemplateInput;
 };
 
 
@@ -906,6 +1382,31 @@ export type MutationIssueSetProjectArgs = {
 };
 
 
+export type MutationIssueSubscribeArgs = {
+  input: IssueSubscriptionInput;
+};
+
+
+export type MutationIssueTemplateCreateArgs = {
+  input: IssueTemplateCreateInput;
+};
+
+
+export type MutationIssueTemplateDeleteArgs = {
+  input: IssueTemplateDeleteInput;
+};
+
+
+export type MutationIssueTemplateUpdateArgs = {
+  input: IssueTemplateUpdateInput;
+};
+
+
+export type MutationIssueUnsubscribeArgs = {
+  input: IssueSubscriptionInput;
+};
+
+
 export type MutationIssueUpdateArgs = {
   id: Scalars['UUID']['input'];
   input: IssueUpdateInput;
@@ -919,6 +1420,26 @@ export type MutationLabelCreateArgs = {
 
 export type MutationLabelDeleteArgs = {
   input: LabelDeleteInput;
+};
+
+
+export type MutationLabelGroupCreateArgs = {
+  input: LabelGroupCreateInput;
+};
+
+
+export type MutationLabelGroupDeleteArgs = {
+  input: LabelGroupDeleteInput;
+};
+
+
+export type MutationLabelGroupUpdateArgs = {
+  input: LabelGroupUpdateInput;
+};
+
+
+export type MutationLabelSetGroupArgs = {
+  input: LabelSetGroupInput;
 };
 
 
@@ -1012,6 +1533,21 @@ export type MutationRegisterArgs = {
 };
 
 
+export type MutationReleaseCreateArgs = {
+  input: ReleaseCreateInput;
+};
+
+
+export type MutationReleaseDeleteArgs = {
+  input: ReleaseDeleteInput;
+};
+
+
+export type MutationReleaseStatusSetArgs = {
+  input: ReleaseStatusSetInput;
+};
+
+
 export type MutationSavedViewCreateArgs = {
   input: SavedViewCreateInput;
 };
@@ -1057,6 +1593,31 @@ export type MutationTeamCreateArgs = {
 };
 
 
+export type MutationTriageAcceptArgs = {
+  input: TriageAcceptInput;
+};
+
+
+export type MutationTriageChangeTeamArgs = {
+  input: TriageChangeTeamInput;
+};
+
+
+export type MutationTriageDeclineArgs = {
+  input: TriageDeclineInput;
+};
+
+
+export type MutationTriageEnterArgs = {
+  input: TriageEnterInput;
+};
+
+
+export type MutationTriageMarkDuplicateArgs = {
+  input: TriageMarkDuplicateInput;
+};
+
+
 export type MutationWorkspaceCreateArgs = {
   input: WorkspaceCreateInput;
 };
@@ -1082,7 +1643,8 @@ export type NotificationConnection = {
 export type NotificationKind =
   | 'ASSIGNED'
   | 'BLOCKED'
-  | 'COMMENTED';
+  | 'COMMENTED'
+  | 'STATUS_CHANGED';
 
 export type NotificationMarkAllReadInput = {
   workspaceSlug: Scalars['String']['input'];
@@ -1276,6 +1838,9 @@ export type Query = {
   __typename?: 'Query';
   cycle?: Maybe<Cycle>;
   cycles: Array<Cycle>;
+  document?: Maybe<Document>;
+  documents: DocumentConnection;
+  environments: Array<Environment>;
   /** This viewer's favorites in this workspace, in their own order. Per-user and per-workspace: the same person in two workspaces has two independent lists. */
   favorites: Array<Favorite>;
   githubIntegration: GithubIntegration;
@@ -1284,8 +1849,15 @@ export type Query = {
   /** Invitations to this workspace that have not been accepted or expired. Admins and owners only. */
   invitations: Array<WorkspaceInvitation>;
   issue?: Maybe<Issue>;
+  issueDuplicateSuggestions: Array<DuplicateSuggestion>;
+  issueSubscribers: Array<IssueSubscriber>;
+  issueTemplate?: Maybe<IssueTemplate>;
+  issueTemplates: Array<IssueTemplate>;
+  issueViewerIsSubscribed: Scalars['Boolean']['output'];
   issues: IssueConnection;
   label?: Maybe<Label>;
+  labelGroup?: Maybe<LabelGroup>;
+  labelGroups: Array<LabelGroup>;
   labels: LabelConnection;
   me?: Maybe<User>;
   myWorkspace: WorkspaceMembership;
@@ -1294,6 +1866,8 @@ export type Query = {
   notifications: NotificationConnection;
   project?: Maybe<Project>;
   projects: ProjectConnection;
+  release?: Maybe<Release>;
+  releases: ReleaseConnection;
   savedView?: Maybe<SavedView>;
   savedViews: SavedViewConnection;
   search: SearchResults;
@@ -1302,6 +1876,8 @@ export type Query = {
   slackNotificationSettings: SlackNotificationSettings;
   /** The teams in a workspace, each with the workflow states its issues can occupy. */
   teams: Array<Team>;
+  triageCount: Scalars['Int']['output'];
+  triageIssues: TriageIssueConnection;
   /** Everyone in a workspace, with the role each holds. Members only. */
   workspaceMembers: Array<WorkspaceMember>;
 };
@@ -1315,6 +1891,26 @@ export type QueryCycleArgs = {
 
 export type QueryCyclesArgs = {
   teamId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryDocumentArgs = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryDocumentsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+  initiativeId?: InputMaybe<Scalars['UUID']['input']>;
+  projectId?: InputMaybe<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryEnvironmentsArgs = {
   workspaceSlug: Scalars['String']['input'];
 };
 
@@ -1353,6 +1949,39 @@ export type QueryIssueArgs = {
 };
 
 
+export type QueryIssueDuplicateSuggestionsArgs = {
+  description?: InputMaybe<Scalars['String']['input']>;
+  excludeIssueId?: InputMaybe<Scalars['UUID']['input']>;
+  first?: Scalars['Int']['input'];
+  title: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryIssueSubscribersArgs = {
+  issueId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryIssueTemplateArgs = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryIssueTemplatesArgs = {
+  teamId?: InputMaybe<Scalars['UUID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryIssueViewerIsSubscribedArgs = {
+  issueId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
 export type QueryIssuesArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   filter?: InputMaybe<IssueFilterInput>;
@@ -1364,6 +1993,17 @@ export type QueryIssuesArgs = {
 
 export type QueryLabelArgs = {
   id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryLabelGroupArgs = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryLabelGroupsArgs = {
   workspaceSlug: Scalars['String']['input'];
 };
 
@@ -1400,6 +2040,19 @@ export type QueryProjectArgs = {
 
 
 export type QueryProjectsArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryReleaseArgs = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryReleasesArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
   workspaceSlug: Scalars['String']['input'];
@@ -1447,6 +2100,20 @@ export type QueryTeamsArgs = {
 };
 
 
+export type QueryTriageCountArgs = {
+  teamId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryTriageIssuesArgs = {
+  after?: InputMaybe<Scalars['String']['input']>;
+  first?: Scalars['Int']['input'];
+  teamId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
 export type QueryWorkspaceMembersArgs = {
   workspaceSlug: Scalars['String']['input'];
 };
@@ -1461,6 +2128,67 @@ export type RegisterPayload = {
   __typename?: 'RegisterPayload';
   errors: Array<ValidationErrorType>;
   user?: Maybe<User>;
+};
+
+export type Release = {
+  __typename?: 'Release';
+  commitSha: Scalars['String']['output'];
+  createdAt: Scalars['DateTime']['output'];
+  deployedAt?: Maybe<Scalars['DateTime']['output']>;
+  environmentId: Scalars['UUID']['output'];
+  id: Scalars['UUID']['output'];
+  issueIds: Array<Scalars['UUID']['output']>;
+  name: Scalars['String']['output'];
+  notes: Scalars['String']['output'];
+  previousCommitSha?: Maybe<Scalars['String']['output']>;
+  pullRequestNumbers: Array<Scalars['Int']['output']>;
+  repositoryId: Scalars['ID']['output'];
+  status: ReleaseStatus;
+  updatedAt: Scalars['DateTime']['output'];
+};
+
+export type ReleaseConnection = {
+  __typename?: 'ReleaseConnection';
+  nodes: Array<Release>;
+  pageInfo: PageInfo;
+};
+
+export type ReleaseCreateInput = {
+  commitSha: Scalars['String']['input'];
+  environmentId: Scalars['UUID']['input'];
+  name: Scalars['String']['input'];
+  previousCommitSha?: InputMaybe<Scalars['String']['input']>;
+  repositoryId: Scalars['ID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type ReleaseDeleteInput = {
+  id: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type ReleaseDeletePayload = {
+  __typename?: 'ReleaseDeletePayload';
+  deletedReleaseId?: Maybe<Scalars['UUID']['output']>;
+  errors: Array<ValidationErrorType>;
+};
+
+export type ReleasePayload = {
+  __typename?: 'ReleasePayload';
+  errors: Array<ValidationErrorType>;
+  release?: Maybe<Release>;
+};
+
+export type ReleaseStatus =
+  | 'DEPLOYED'
+  | 'FAILED'
+  | 'PENDING'
+  | 'ROLLED_BACK';
+
+export type ReleaseStatusSetInput = {
+  id: Scalars['UUID']['input'];
+  status: ReleaseStatus;
+  workspaceSlug: Scalars['String']['input'];
 };
 
 export type SavedView = {
@@ -1698,6 +2426,53 @@ export type TeamPayload = {
   __typename?: 'TeamPayload';
   errors: Array<ValidationErrorType>;
   team?: Maybe<Team>;
+};
+
+export type TriageAcceptInput = {
+  issueId: Scalars['UUID']['input'];
+  workflowStateId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type TriageChangeTeamInput = {
+  issueId: Scalars['UUID']['input'];
+  teamId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type TriageDeclineInput = {
+  issueId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type TriageEnterInput = {
+  issueId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type TriageIssue = {
+  __typename?: 'TriageIssue';
+  /** When this issue entered the queue. The queue is ordered by it, oldest first, so this is also the issue's position in the list. */
+  enteredAt: Scalars['DateTime']['output'];
+  issue: IssueSummary;
+};
+
+export type TriageIssueConnection = {
+  __typename?: 'TriageIssueConnection';
+  nodes: Array<TriageIssue>;
+  pageInfo: PageInfo;
+};
+
+export type TriageMarkDuplicateInput = {
+  duplicateOfId: Scalars['UUID']['input'];
+  issueId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type TriagePayload = {
+  __typename?: 'TriagePayload';
+  errors: Array<ValidationErrorType>;
+  issue?: Maybe<Issue>;
 };
 
 export type User = {

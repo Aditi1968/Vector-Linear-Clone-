@@ -59,6 +59,16 @@ function describeNotification(
       return who === null
         ? 'An issue you follow is now blocked'
         : `${who} marked an issue you follow as blocked`
+    case 'STATUS_CHANGED':
+      // Added with subscribers: a watcher hears about a state move on an
+      // issue they follow, which is the whole point of watching one. The
+      // sentence says "you follow" rather than naming the state, because the
+      // notification carries the kind and the issue and not the transition --
+      // rendering "moved to Done" here would be inventing the half the row
+      // does not have.
+      return who === null
+        ? 'An issue you follow changed status'
+        : `${who} changed the status of an issue you follow`
   }
 }
 
