@@ -36,6 +36,11 @@ type CommentDeletePayload {
 
 type Cycle {
   id: UUID!
+
+  """
+  The team this cycle belongs to. Fixed for the cycle's life -- a cycle cannot be moved between teams -- so a route or a cache may be keyed on it.
+  """
+  teamId: UUID!
   number: Int!
   name: String
   startsAt: DateTime!
@@ -228,6 +233,11 @@ input IssueClearParentInput {
 type IssueConnection {
   nodes: [Issue!]!
   pageInfo: PageInfo!
+
+  """
+  How many live issues match, ignoring paging -- the number a column header states, as opposed to how many have been loaded.
+  """
+  totalCount: Int!
 }
 
 input IssueCreateInput {
@@ -246,6 +256,20 @@ type IssueCreatePayload {
   errors: [ValidationErrorType!]!
 }
 
+"""
+What narrows an issue list. Every field is optional and every one of them narrows: nothing here can widen a list beyond the workspace the request was authorized for, so an id belonging to another workspace selects nothing.
+"""
+input IssueFilterInput {
+  teamId: UUID
+  assigneeId: UUID
+  workflowStateId: UUID
+  stateCategory: WorkflowStateCategory
+  labelId: UUID
+  priority: Int
+  projectId: UUID
+  cycleId: UUID
+}
+
 input IssueLabelInput {
   workspaceSlug: String!
   issueId: UUID!
@@ -255,6 +279,22 @@ input IssueLabelInput {
 type IssueLabelPayload {
   issue: Issue
   errors: [ValidationErrorType!]!
+}
+
+"""
+What an issue list is sorted by. PRIORITY is urgency and not the raw column: 0 means no priority rather than the lowest one, so ascending is Urgent, High, Medium, Low and then the untriaged. DUE_DATE ascending puts the soonest first and the undated last.
+"""
+enum IssueOrderField {
+  PRIORITY
+  CREATED_AT
+  UPDATED_AT
+  DUE_DATE
+}
+
+"""How an issue list is sorted."""
+input IssueOrderInput {
+  field: IssueOrderField! = CREATED_AT
+  direction: OrderDirection! = DESC
 }
 
 type IssueParentPayload {
@@ -538,6 +578,12 @@ type NotificationMarkReadPayload {
   errors: [ValidationErrorType!]!
 }
 
+"""Which end of an ordering a list starts from."""
+enum OrderDirection {
+  ASC
+  DESC
+}
+
 type PageInfo {
   hasNextPage: Boolean!
   endCursor: String
@@ -651,7 +697,7 @@ input ProjectUpdateInput {
 
 type Query {
   issue(workspaceSlug: String!, id: UUID!): Issue
-  issues(workspaceSlug: String!, teamId: UUID = null, first: Int! = 50, after: String = null): IssueConnection!
+  issues(workspaceSlug: String!, filter: IssueFilterInput = null, orderBy: IssueOrderInput = null, first: Int! = 50, after: String = null): IssueConnection!
   me: User
 
   """
