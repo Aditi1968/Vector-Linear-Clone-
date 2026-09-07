@@ -593,6 +593,44 @@ def _failure_for(error: SlackApiError) -> str:
     return "slack_refused"
 
 
+async def fetch_token(
+    store: SlackTokenStore,
+    stored: tuple[str, str],
+    *,
+    workspace_id: UUID,
+) -> str:
+    """Turn a stored (backend, reference) pair into the live bot token.
+
+    One function so that every path presenting a credential to Slack cannot
+    end up with a different opinion about a row written by a store this process
+    does not have. Without the check the reference would be handed back as if
+    it were the secret and sent to Slack as an Authorization header -- a
+    failure that looks like an expired token and is actually a store mismatch.
+
+    A module function rather than a method, because there are now two callers
+    with nothing else in common: `SlackService`, which reaches it on behalf of
+    an admin who has been authorized, and the delivery loop in
+    `app.services.notifications`, which runs on no request and has no viewer to
+    authorize. Neither is entitled to its own copy of this check.
+
+    It performs NO authorization of its own, and must not be read as a
+    boundary. `SlackService.bot_token` does that with `require_admin`; the
+    delivery loop's equivalent is that the workspace it passes came out of a
+    row the database matched, not out of anything a client sent.
+
+    Returns the token and never logs, stores or attaches it to an exception.
+    """
+    backend, reference = stored
+
+    if backend != store.backend:
+        raise RuntimeError(
+            f"stored Slack token uses the {backend!r} store; "
+            f"this process is configured with {store.backend!r}"
+        )
+
+    return await store.fetch(workspace_id=workspace_id, reference=reference)
+
+
 def authorize_url(
     *, client_id: str, state: str, redirect_uri: str | None = None
 ) -> str:
@@ -824,30 +862,16 @@ class SlackService:
         *,
         workspace_id: UUID,
     ) -> str:
-        """Turn a stored (backend, reference) pair into the live token.
-
-        Extracted so `bot_token` and the two Web API paths cannot end up with
-        two different opinions about a row written by a store this process does
-        not have. Without the check the reference would be handed back as if it
-        were the secret and sent to Slack as an Authorization header -- a
-        failure that looks like an expired token and is actually a store
-        mismatch.
+        """This service's route to the module function below.
 
         Takes no scope and performs no authorization. Every caller has already
         done `require_admin`; a second check here would suggest this is a
         boundary, and it is not -- it is the private half of one.
         """
-        backend, reference = stored
-
-        if backend != self._token_store.backend:
-            raise RuntimeError(
-                f"stored Slack token uses the {backend!r} store; "
-                f"this process is configured with {self._token_store.backend!r}"
-            )
-
-        return await self._token_store.fetch(
+        return await fetch_token(
+            self._token_store,
+            stored,
             workspace_id=workspace_id,
-            reference=reference,
         )
 
     # --- channels, settings and preferences -----------------------------

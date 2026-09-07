@@ -1,17 +1,22 @@
+import asyncio
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 
 from app.config import get_settings
-from app.db import connect, disconnect
+from app.db import connect, disconnect, get_pool
 from app.graphql.router import build_graphql_router
 from app.graphql.schema import build_schema
 from app.http_limits import add_request_body_limit
+from app.repositories.events import EventRepository
+from app.repositories.slack import SlackRepository
 from app.rest.github import router as github_router
 from app.rest.health import router as health_router
 from app.rest.slack import router as slack_router
+from app.services.notifications import SlackNotifier, run_delivery_loop
 from app.services.passwords import warm_password_hashing
+from app.services.slack import DatabaseTokenStore, SlackWebClient
 
 
 @asynccontextmanager
@@ -25,10 +30,60 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # which is exactly the timing difference the decoy exists to erase.
     await warm_password_hashing()
 
+    delivery = asyncio.create_task(run_delivery_loop(_build_notifier()))
+
     try:
         yield
     finally:
+        # Cancelled before the pool goes, and awaited rather than merely
+        # cancelled. A task still mid-query when `disconnect()` runs would be
+        # holding a connection the pool is trying to close, which surfaces as
+        # an error on shutdown for work nobody is waiting for. `suppress` is
+        # for the CancelledError the loop re-raises on its way out, which is
+        # this frame's own cancellation arriving as expected rather than a
+        # failure.
+        delivery.cancel()
+
+        with suppress(asyncio.CancelledError):
+            await delivery
+
         await disconnect()
+
+
+def _build_notifier() -> SlackNotifier:
+    """Compose the Slack delivery adapter the background loop drains through.
+
+    Built unconditionally, including on a deployment with no Slack app at all,
+    and that is deliberate rather than an oversight. The events are written by
+    every write path whether or not Slack exists, so a loop that only ran when
+    Slack was configured would leave `domain_events` accumulating pending rows
+    forever on every deployment that never connects it -- and
+    `domain_events_pending_idx` growing with them. Running always means those
+    rows are closed as SKIPPED within seconds and the index stays empty, which
+    is the honest record: nothing was sent, and nothing was going to be.
+
+    It also means connecting Slack does not replay history into a brand new
+    channel. Everything that happened before the connection is already closed;
+    the first message a channel receives is about something that happened after
+    somebody chose it.
+
+    The pool is owned by the lifespan above; this only borrows it, exactly as
+    `app.graphql.context.get_context` and `app.rest.github.build_services` do.
+    """
+    settings = get_settings()
+
+    return SlackNotifier(
+        pool=get_pool(),
+        events=EventRepository(),
+        # The repository and not `SlackService`: every method on that class
+        # takes an `AuthorizedWorkspaceScope`, correctly, because they are
+        # things an admin does -- and this loop runs on no request and has no
+        # admin to build one from.
+        slack=SlackRepository(),
+        token_store=DatabaseTokenStore(),
+        web=SlackWebClient(),
+        base_url=settings.public_base_url,
+    )
 
 
 def create_app() -> FastAPI:

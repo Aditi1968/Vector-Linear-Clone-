@@ -25,6 +25,22 @@ class Settings(BaseSettings):
     database_url: SecretStr
     environment: Environment
 
+    # Where this deployment's front end is served, as an origin
+    # ("https://app.vector.dev"), for the one thing that cannot ask a request:
+    # the deep link in a Slack message.
+    #
+    # Every other URL this application builds comes from a request that has a
+    # Host header, or from a value a provider already holds. This one is built
+    # by a background loop running on no request at all, so there is nothing to
+    # infer an origin from -- and inferring one from a proxy-supplied header
+    # would be a link whose host is whatever that proxy said.
+    #
+    # Optional, and None means the message goes out WITHOUT a link rather than
+    # with a guessed one. A notification pointing at the wrong host is worse
+    # than one pointing nowhere: the first sends somebody to a login page on a
+    # domain that is not theirs. See `app.domain.events.message_for`.
+    public_base_url: str | None = None
+
     # --- GitHub App -----------------------------------------------------
     #
     # Every field below is optional, and that is the whole design. Vector is

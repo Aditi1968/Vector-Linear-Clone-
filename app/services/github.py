@@ -51,6 +51,7 @@ from app.domain.github import (
 )
 from app.domain.tenancy import AuthorizedWorkspaceScope, WorkspaceScope
 from app.repositories.github import GithubRepository
+from app.services.events import record_pull_request_merged
 
 
 # Who may see or change a workspace's GitHub integration.
@@ -1350,6 +1351,30 @@ class GithubService:
         out-of-order defence: the links come from the title, so applying them
         from a payload too old to store would retract, from an older title,
         links the current title still supports.
+
+        A MERGE additionally emits a domain event, and three things about that
+        are deliberate.
+
+        It goes through `app.services.events`, which knows nothing about Slack
+        -- no import from this module reaches a Slack client, a channel or a
+        bot token, and a grep proving that is a test. A webhook handler that
+        could post directly is a handler where the preference toggle does not
+        apply, the redelivery posts twice, the failure is invisible, and the
+        HTTP call happens inside this transaction with a pool connection held.
+        This module's job ends at recording that a merge happened.
+
+        It runs AFTER the links are derived, because the event fans out over
+        them: one row per Vector issue the pull request is about. Before them
+        it would announce a merge to nobody, or -- worse, on a re-derivation --
+        to whoever the previous title named.
+
+        It is emitted on EVERY delivery that reports a merged pull request, not
+        only the one that first reported it, and the duplicate suppression is a
+        primary key rather than a condition here. GitHub sends the whole
+        `pull_request` object on every later edit of an already-merged pull
+        request, each under a delivery id `github_deliveries` has never seen, so
+        a check of "did this payload change the merge" would have to be right
+        about a provider's semantics forever. The key is right by construction.
         """
         pull = payload.get("pull_request")
         repository_id = _payload_repository_id(payload)
@@ -1374,6 +1399,10 @@ class GithubService:
         head = pull.get("head")
         head_ref = _head_ref(head.get("ref")) if isinstance(head, Mapping) else None
 
+        # Named rather than inlined into the call below, because it is now read
+        # twice: once as the column and once as the answer to "is this a merge".
+        merged_at = _instant(pull.get("merged_at")) if state == "closed" else None
+
         applied = await self._repository.upsert_pull_request(
             connection,
             scope=scope,
@@ -1382,7 +1411,7 @@ class GithubService:
             title=title,
             state=state,
             draft=pull.get("draft") is True,
-            merged_at=(_instant(pull.get("merged_at")) if state == "closed" else None),
+            merged_at=merged_at,
             head_ref=head_ref,
             url=_url(pull.get("html_url")),
             github_updated_at=_instant(pull.get("updated_at")),
@@ -1400,6 +1429,15 @@ class GithubService:
             body=pull.get("body"),
             head_ref=head_ref,
         )
+
+        if merged_at is not None:
+            await record_pull_request_merged(
+                connection,
+                scope=scope,
+                repository_id=repository_id,
+                number=number,
+                title=title,
+            )
 
     async def _link_pull_request(
         self,

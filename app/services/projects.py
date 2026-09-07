@@ -26,6 +26,7 @@ from app.domain.tenancy import WorkspaceScope
 from app.repositories.initiatives import InitiativeRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.projects import ProjectRepository
+from app.services.events import record_project_update
 
 
 # The same alias, for the same reason, as in app/repositories/projects.py --
@@ -923,6 +924,19 @@ class ProjectService:
         and "who a request claims says so"; `project_updates_author_fk` is the
         second half of that and refuses an id that is not a member here,
         whatever this code passes.
+
+        THREE writes, then, once the domain events are counted -- and their
+        position between the other two is load-bearing rather than tidy.
+        `record_project_update` decides whether the health MOVED by comparing
+        against the stored value, so it has to run before `set_health` stamps
+        the new one; running it afterwards would compare the new value with
+        itself and announce a change never, for anybody. Inside the same
+        transaction, so a rolled-back update announces nothing.
+
+        Nothing about Slack is reachable from here. This module records that a
+        project was updated; whether any workspace wants that announced, where,
+        and what happens when Slack refuses are decided by
+        `app.services.notifications`, reading the rows this leaves behind.
         """
         self._validate_update_fields(health=health, body=body)
 
@@ -939,6 +953,16 @@ class ProjectService:
                     )
                 except asyncpg.ForeignKeyViolationError as error:
                     _raise_mapped(error)
+
+                # Before `set_health`, and see the docstring: the health event
+                # is decided by comparing against the value still stored.
+                await record_project_update(
+                    connection,
+                    scope=scope,
+                    project_id=project_id,
+                    health=health,
+                    body=body,
+                )
 
                 await self._repository.set_health(
                     connection,
