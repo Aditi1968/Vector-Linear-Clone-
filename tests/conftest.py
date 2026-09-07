@@ -820,3 +820,54 @@ def postgres_dsn():
         # Unconditional: a failure above must not leave a container running,
         # and a failure to remove one must not mask the failure above it.
         _remove_container(container)
+
+
+# The provider variables a real deployment sets, and a developer's `.env`
+# very likely holds. Named exactly rather than matched by prefix, so a new
+# one has to be added here deliberately -- a prefix match would silently
+# start clearing something a test meant to set.
+PROVIDER_ENVIRONMENT_VARIABLES = (
+    "GITHUB_APP_ID",
+    "GITHUB_APP_PRIVATE_KEY",
+    "GITHUB_PRIVATE_KEY_PATH",
+    "GITHUB_WEBHOOK_SECRET",
+    "GITHUB_CLIENT_ID",
+    "GITHUB_CLIENT_SECRET",
+    "GITHUB_OAUTH_CALLBACK_URL",
+    "GITHUB_REDIRECT_ALLOWLIST",
+    "SLACK_CLIENT_ID",
+    "SLACK_CLIENT_SECRET",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_OAUTH_CALLBACK_URL",
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_ambient_provider_credentials(monkeypatch):
+    """No test sees the provider credentials this machine happens to hold.
+
+    Autouse and unconditional, because the failure it prevents is one nobody
+    reads as a failure. `tests/test_slack_composition.py` builds a `Settings`
+    with some fields passed and the rest left out, to assert that a PARTIAL
+    configuration is not a configuration -- and pydantic-settings fills the
+    omitted fields from the environment. On a machine with real Slack
+    credentials the "absent" signing secret was present after all, so the
+    suite reported that a half-configured deployment counts as configured.
+    It passed in CI, which sets none of these, and failed only for the person
+    who had actually done the provider setup.
+
+    That asymmetry is the whole reason this is autouse rather than a fixture
+    each suite opts into: the tests most likely to be written without it are
+    the provider tests, and the developer most likely to be misled is the one
+    with working credentials.
+
+    This clears the environment. `.env` is a second source and is not
+    affected here -- a construction that must ignore that too passes
+    `_env_file=None`, which `settings_with` in the Slack suite does.
+
+    A test that WANTS a provider variable sets it with `monkeypatch.setenv`;
+    monkeypatch applies in order, so a later set inside the test wins over
+    this.
+    """
+    for name in PROVIDER_ENVIRONMENT_VARIABLES:
+        monkeypatch.delenv(name, raising=False)

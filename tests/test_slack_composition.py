@@ -46,11 +46,35 @@ def settings_with(**slack: str) -> Settings:
     from the process would read whatever the developer's shell or `.env`
     happens to hold -- which is the one thing a test about optionality must
     not depend on.
+
+    Keywords alone were NOT enough, and this docstring used to claim they
+    were. pydantic-settings fills every field the caller OMITS from its other
+    sources, so on a machine with real Slack credentials the fields these
+    tests deliberately leave unset arrived anyway, and a partial
+    configuration reported itself as configured.
+
+    So nothing is omitted. Every Slack field is passed explicitly, defaulting
+    to None, and the caller's values are layered on top -- which says what
+    these tests actually mean ("this field is ABSENT") instead of hoping that
+    saying nothing produces it. That closes every source at once, rather than
+    closing them one at a time: `_env_file=None` stops the dotenv file but
+    not an exported shell variable, and the autouse fixture in
+    tests/conftest.py clears the environment but not a file. A construction
+    that names its own values needs neither to be correct.
     """
+    fields: dict[str, object] = {
+        "slack_client_id": None,
+        "slack_client_secret": None,
+        "slack_signing_secret": None,
+        "slack_oauth_callback_url": None,
+    }
+    fields.update(slack)
+
     return Settings(
+        _env_file=None,
         database_url=SecretStr(PLACEHOLDER_DSN),
         environment="test",
-        **slack,
+        **fields,
     )
 
 
@@ -191,3 +215,32 @@ def test_the_slack_types_are_registered_once_each():
 
     assert QUERY_TYPES.count(SlackQuery) == 1
     assert MUTATION_TYPES.count(SlackMutation) == 1
+
+
+def test_ambient_provider_credentials_do_not_reach_these_settings(monkeypatch):
+    """A machine with real credentials must not change what this suite proves.
+
+    The regression guard for the two leaks above, asserted from the outside
+    rather than by inspecting how `settings_with` is written: whatever the
+    environment holds, a Settings built here with no Slack fields is
+    unconfigured.
+
+    `setenv` runs after the autouse fixture in conftest has cleared these, so
+    this genuinely reintroduces the condition -- it is the developer's `.env`
+    and exported shell, reconstructed. If either source is ever reconnected,
+    `slack_configured` flips to True and this fails, which is the failure the
+    original bug never produced.
+    """
+    monkeypatch.setenv("SLACK_CLIENT_ID", "ambient.id")
+    monkeypatch.setenv("SLACK_CLIENT_SECRET", "ambient-secret")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "ambient-signing")
+
+    assert settings_with().slack_configured is False
+
+    # And a genuinely partial configuration stays partial rather than being
+    # completed from the environment -- the exact shape the bug produced.
+    partial = settings_with(slack_client_id="123.456")
+
+    assert partial.slack_client_secret is None
+    assert partial.slack_signing_secret is None
+    assert partial.slack_configured is False
