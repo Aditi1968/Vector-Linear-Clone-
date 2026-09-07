@@ -1,0 +1,76 @@
+# Every GraphQL document the board sends. Two.
+#
+# Source file; `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`. Operation names are unique across every
+# `.graphql` file under `src/`, because codegen emits one module from all of
+# them -- hence the `Board` prefix.
+#
+# ## Both documents reuse fragments the issues feature declares
+#
+# `IssueRowFields` and `ValidationFields` are defined in
+# `src/features/issues/api/operations.graphql` and are in scope here because
+# the generator loads every document as one set. That reuse is not a
+# convenience: a board card shows the same facts a list row does, and a
+# fragment shared with the list is what guarantees the two cannot select
+# different fields of the same cached `Issue:<uuid>` and leave one of them
+# reading a partial entity.
+#
+# The page-size rule that governs `first: 25` below is documented at length in
+# that same file: `first` must be a LITERAL, because the backend's complexity
+# limiter cannot read a variable at validation time and charges the field at
+# `ASSUMED_PAGE_SIZE = 100` instead of at 25.
+
+# One page of a team's issues.
+#
+# `teamId` is required here where `IssueList` omits it entirely, and that is
+# the whole reason this document exists rather than the board reusing the
+# list's. Columns are the selected team's `workflowStates`, and a workspace-
+# wide page would fill them with issues belonging to teams whose boards have
+# entirely different states -- an issue would arrive with a `workflowStateId`
+# that matches no column on screen and would simply vanish.
+#
+# The cache keys this field on `['workspaceSlug', 'teamId']`
+# (`src/lib/graphql/cache.ts`), so switching teams reads a different list
+# rather than merging two, and pages accumulate per team.
+#
+# Cost: 25 x (20 per node + 2 on pageInfo) = 550 of 1000.
+query BoardIssues($workspaceSlug: String!, $teamId: UUID!, $after: String) {
+  issues(workspaceSlug: $workspaceSlug, teamId: $teamId, first: 25, after: $after) {
+    nodes {
+      ...IssueRowFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# Move a card to another column.
+#
+# `issueUpdate` with only `workflowStateId` in the patch -- every field of
+# `IssueUpdateInput` is optional and an omitted one is left alone, so this
+# says "change the status and nothing else" rather than resubmitting the card.
+#
+# It selects `IssueRowFields` and not `IssueDetailFields`, which is the one
+# thing here worth stating. The rule the issues feature documents is that a
+# mutation must not select FEWER fields than the list, or Apollo normalises a
+# partial `Issue:<uuid>` over the cached list and the row reads back as null.
+# This selects exactly the list's fields, which satisfies that -- and it is
+# what makes an honest optimistic response possible at all: the board holds
+# rows, so a row is the only shape it can predict. Asking for the detail
+# fragment would mean inventing a `description` the board has never seen.
+#
+# Both failure channels are selected because the server uses both: `errors`
+# inside the payload is a rejected patch arriving in `data`, while an outage
+# is a rejected promise from `mutate`.
+mutation BoardIssueMove($id: UUID!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) {
+    issue {
+      ...IssueRowFields
+    }
+    errors {
+      ...ValidationFields
+    }
+  }
+}

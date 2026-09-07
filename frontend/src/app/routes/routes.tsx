@@ -1,6 +1,7 @@
 import type { RouteObject } from 'react-router-dom'
 
 import { RequireAuth, authRoutes } from '../../features/auth'
+import { BoardScreen } from '../../features/board'
 import { CycleDetailPage, CycleListPage } from '../../features/cycles'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
 import { onboardingRoutes } from '../../features/onboarding'
@@ -80,6 +81,12 @@ export const routes: RouteObject[] = [
       },
       { path: ROUTE_SEGMENTS.issues, element: <IssueListPage /> },
       { path: ROUTE_SEGMENTS.issueDetail, element: <IssueDetailPage /> },
+      {
+        // Which team's board, and how it is filtered, sorted and grouped, are
+        // all query parameters rather than segments -- one view, one link.
+        path: ROUTE_SEGMENTS.board,
+        element: <BoardScreen />,
+      },
       {
         path: ROUTE_SEGMENTS.myIssues,
         element: (

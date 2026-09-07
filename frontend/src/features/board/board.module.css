@@ -1,0 +1,325 @@
+/*
+ * Styles for the board.
+ *
+ * Every colour, space, radius and size comes from `src/styles/tokens.css`.
+ * There is not one literal hex value below, and not one `outline: none`
+ * without a `box-shadow` ring replacing it.
+ *
+ * Absent because `src/styles/base.css` owns them: `box-sizing`, heading and
+ * list resets, form-control font inheritance, the `:focus-visible` ring and
+ * the reduced-motion override.
+ */
+
+.screen {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/* ---------------------------------------------------------- the controls */
+
+/*
+ * Wraps rather than scrolls. Nine pickers is a lot of chrome, and a bar that
+ * scrolls sideways hides the controls furthest from the default view -- which
+ * are the filters, the ones a user goes looking for.
+ */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: end;
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-subtle);
+}
+
+.control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.controlLabel {
+  color: var(--color-text-secondary);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+/* Aligned with the pickers rather than with their labels. */
+.clear {
+  margin-inline-start: auto;
+}
+
+/* ------------------------------------------------------- the honest note */
+
+/*
+ * What the server did not do.
+ *
+ * Deliberately body text above the board and not a dismissible tip: it is a
+ * standing property of this screen, not a one-time hint, and a column that is
+ * empty for either of two reasons is unreadable without it.
+ */
+.scopeNote {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  margin: 0;
+  max-width: var(--layout-content-max-width);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.loadMore {
+  flex: none;
+}
+
+.loadingMore,
+.inlineError {
+  display: inline-flex;
+  gap: var(--space-4);
+  align-items: center;
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.inlineError {
+  color: var(--color-text-danger);
+}
+
+/* ------------------------------------------------------------- the board */
+
+/*
+ * Columns on one horizontal axis, scrolling sideways when there are more than
+ * fit. `overflow-x` here and nowhere else: the page itself must never scroll
+ * horizontally, so the overflow is contained to the strip that has it.
+ *
+ * `align-items: start` so a tall column does not stretch its empty neighbours
+ * to match -- a column's height is information about how much is in it.
+ */
+.board {
+  display: flex;
+  gap: var(--space-5);
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: var(--space-4);
+}
+
+.column {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 18rem;
+  max-width: 100%;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-subtle);
+}
+
+/*
+ * Every column that can receive the card currently being dragged.
+ *
+ * Highlighting all of them at once, rather than tracking which one the pointer
+ * is over: `dragenter`/`dragleave` fire for every child element a drag crosses,
+ * so a per-column hover state needs a counter to stop it flickering, and that
+ * counter is exactly the fragile bookkeeping a board should not have. "These
+ * are the targets" is the useful half of the message anyway.
+ */
+.column[data-droppable] {
+  border-style: dashed;
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-subtle);
+}
+
+.columnHead {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  margin: 0;
+  padding-inline: var(--space-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+.columnName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* "loaded", never a bare number -- see BoardColumn's note on the count. */
+.columnCount {
+  margin-inline-start: auto;
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-regular);
+  white-space: nowrap;
+}
+
+.columnEmpty {
+  margin: 0;
+  padding: var(--space-5) var(--space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* -------------------------------------------------------------- the card */
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  /* The focus ring on the title is drawn against the card, not the page. */
+  --focus-ring-backdrop: var(--color-surface);
+}
+
+/* A move is in flight. Faded rather than disabled: the card is still a link,
+ * still focusable and still readable -- only its position is provisional. */
+.card[data-moving] {
+  opacity: 0.6;
+}
+
+.cardHead {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  min-height: var(--control-height-sm);
+}
+
+/* ENG-42. Monospaced and tabular, as everywhere else in the product. */
+.identifier {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.cardMenu {
+  margin-inline-start: auto;
+}
+
+/*
+ * The title, and the card's only link.
+ *
+ * Clamped to three lines rather than truncated to one: a card is where an
+ * issue is read, and one line of a sentence is not enough to tell two issues
+ * apart.
+ */
+.cardTitle {
+  display: -webkit-box;
+  overflow: hidden;
+  color: inherit;
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  text-decoration: none;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.cardTitle:hover {
+  color: var(--color-text-accent);
+}
+
+.cardLabels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.labelOverflow {
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.cardMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+}
+
+.chip {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+  max-width: 12ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.due[data-overdue] {
+  color: var(--color-text-danger);
+  font-weight: var(--weight-medium);
+}
+
+.estimate {
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-hover);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Pushed to the trailing edge, where the eye already looks for a face. */
+.cardAssignee {
+  display: inline-flex;
+  margin-inline-start: auto;
+}
+
+/* ---------------------------------------------------------- placeholders */
+
+.notice {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+/* Shaped like the board it is about to become, so nothing jumps when the
+ * cards arrive. Three columns is a hint about layout, not a promise about how
+ * many the team has. */
+.skeletonBoard {
+  display: flex;
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.skeletonColumn {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--space-4);
+  width: 18rem;
+  max-width: 100%;
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+}

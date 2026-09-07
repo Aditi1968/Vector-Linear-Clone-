@@ -1,6 +1,7 @@
 export {
   AlertIcon,
   BlockedIcon,
+  BoardIcon,
   CheckIcon,
   ChevronDownIcon,
   ChevronLeftIcon,

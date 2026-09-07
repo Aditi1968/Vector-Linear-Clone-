@@ -116,6 +116,22 @@ export function ProjectIcon(props: IconProps) {
   )
 }
 
+/**
+ * The board: the same issues, stood up in columns.
+ *
+ * Deliberately `IssuesIcon` rotated -- three rules turned on their side --
+ * because that is exactly what the screen is. The columns are of unequal
+ * height, so the glyph reads as a board with uneven columns rather than as a
+ * bar chart.
+ */
+export function BoardIcon(props: IconProps) {
+  return (
+    <svg {...BASE_PROPS} {...props}>
+      <path d="M3.4 2.9v10.2M8 2.9v6.6M12.6 2.9v8.4" />
+    </svg>
+  )
+}
+
 /** A cycle: a loop that closes, with the arrowhead showing it repeats. */
 export function CycleIcon(props: IconProps) {
   return (
