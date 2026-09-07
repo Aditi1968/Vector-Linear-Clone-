@@ -148,8 +148,9 @@ function IntegrationPanel({
               This workspace has claimed a {name} installation and {name} has
               not confirmed it yet. Nothing is connected until it does, and
               nothing about the account or its repositories is shown until
-              then. This usually takes a moment; if it does not clear, run the
-              installation again.
+              then. This usually takes a moment. If it has not cleared after a
+              few minutes, remove the app on {name} and install it again --
+              that is what makes {name} send the confirmation afresh.
             </p>
             <p>
               <a href={`${startPath}?workspace=${encodeURIComponent(workspaceSlug)}`}>

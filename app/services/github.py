@@ -93,6 +93,18 @@ CLAIM_TTL: Final = timedelta(minutes=15)
 # app. Every `installation_repositories` action is absent for the same reason
 # and a stronger one -- those payloads carry private repository names, which
 # is exactly what an unconfirmed claim must never be able to collect.
+#
+# ponytail: a delivery that ARRIVES BEFORE the claim is dropped, so an
+# `installation.created` that beats the browser redirect leaves the workspace
+# PENDING until the window closes. It is recoverable rather than terminal --
+# removing the app on GitHub and installing it again dispatches a fresh
+# `created`, which the next claim is in time for -- and the two actions above
+# catch some of the rest. The upgrade, if that recovery turns out to be one
+# too many steps, is to record the unclaimed delivery (installation id,
+# account, repository list, witnessed_at) in a table no workspace can read and
+# let a claim landing inside the same window confirm against it. Not built
+# now: it is a second copy of another organisation's data at rest, for a race
+# that costs an admin one reinstall.
 CONFIRMING_ACTIONS: Final = frozenset(
     {"created", "new_permissions_accepted", "unsuspend"}
 )
