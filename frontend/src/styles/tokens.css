@@ -1,45 +1,43 @@
 /**
  * Vector design tokens.
  *
+ * Every value in this file was read off `design/Vector App.dc.html`, which is
+ * the authority for how Vector looks. Nothing here is invented; the handful of
+ * values the design does not state outright are derived from ones it does, and
+ * each is marked `DERIVED` with the rule that produced it.
+ *
  * Two layers, and the split is the point:
  *
  *   1. PRIMITIVES (`--vector-*`) are raw values. This file is the only place
  *      in the codebase where a hex colour, a font stack, or a shadow geometry
- *      is written down.
+ *      is written down. Nothing outside this file references one.
  *   2. SEMANTICS (`--color-*`, `--space-*`, `--text-*`, ...) name a *role*
  *      and point at a primitive.
  *
  * Components consume semantics only. A component that reaches for
- * `--vector-cyan-600` has hardcoded a colour just as surely as if it had
+ * `--vector-navy-800` has hardcoded a colour just as surely as if it had
  * written the hex, because it has recorded *which* colour rather than *what
- * the colour is for*. `--color-accent` survives a rebrand and a theme switch;
- * `--vector-cyan-600` survives neither.
+ * the colour is for*.
  *
- * ## Theming
+ * ## One theme
  *
- * Three blocks define the semantic layer, in this order:
- *
- *   :root                                       -- light, the complete set
- *   @media (prefers-color-scheme: dark)         -- OS preference, guarded so
- *     :root:not([data-theme='light'])              an explicit light choice wins
- *   :root[data-theme='dark']                    -- explicit choice, wins over OS
- *
- * No colour is defined *only* inside a media query. Light is the base and is
- * always complete, so a token that a later dark override forgets degrades to a
- * light value -- wrong, but visible and debuggable -- rather than to `unset`,
- * which resolves to transparent or black and takes the text with it.
- *
- * A toggle sets or clears `data-theme` on `<html>` and wins in both
- * directions: `[data-theme='light']` defeats the OS's dark preference via the
- * `:not()` guard, and `[data-theme='dark']` defeats the OS's light default by
- * source order.
+ * Vector is a dark navy application. The design ships exactly one palette, so
+ * `:root` carries it and there is no light block to keep in sync. `color-scheme`
+ * is pinned to `dark` so the UA paints native controls, scrollbars and the
+ * canvas to match. If a light theme is ever designed, it arrives as a
+ * `:root[data-theme='light']` block that restates the semantic layer only --
+ * the structural tokens (spacing, radii, type, motion, layering) are shared,
+ * because a theme is a palette and not a second design.
  *
  * ## Contrast
  *
- * Every foreground/background pair below was measured, not eyeballed: WCAG AA
- * (4.5:1) for text, 3:1 for glyphs, focus rings and the boundaries of form
- * controls. Ratios are recorded beside the tokens so an edit that breaks one
- * is caught in review rather than in an audit.
+ * Foreground/background pairs were measured against the app ground
+ * (`#050a14`), not eyeballed: WCAG AA (4.5:1) for text, 3:1 for glyphs, focus
+ * rings and the boundaries of form controls. Ratios are recorded beside the
+ * tokens so an edit that breaks one is caught in review rather than in an
+ * audit. Where the design's own value missed the 3:1 bar for a control
+ * boundary, the token moved to the next value *in the design's palette* that
+ * clears it -- see `--color-border-control`.
  */
 
 :root {
@@ -47,228 +45,300 @@
   /* PRIMITIVES -- raw values, referenced only by the semantic layer     */
   /* ================================================================== */
 
-  /* Neutrals. A slightly cool ramp: pure grey reads as dirty next to the
-   * cyan accent, and a faint blue cast is what makes a dense monochrome
-   * interface look intentional rather than unfinished.
+  /* --- Navy ---------------------------------------------------------- */
+  /* The ground the whole product sits on. A near-black with a distinct blue
+   * cast: pure grey reads as dirty next to the cyan accent, and the cast is
+   * what makes a dense monochrome interface look intentional.
    *
-   * The ramp is denser at the dark end (750/850/950/1000) than a 100-step
-   * scale would be. Dark UI needs steps that a light UI does not: the
-   * difference between a page background and a panel sitting on it is a few
-   * points of luminance down there, where at the light end it is tens. */
-  --vector-gray-0: #ffffff;
-  --vector-gray-25: #fcfcfd;
-  --vector-gray-50: #f7f8fa;
-  --vector-gray-100: #eef0f4;
-  --vector-gray-200: #e4e7ec;
-  --vector-gray-300: #d3d8e0;
-  --vector-gray-400: #a6aeba;
-  --vector-gray-450: #868fa0; /* 3.3:1 on gray-0 -- control boundaries */
-  --vector-gray-500: #69717f; /* 4.9:1 on gray-0 -- lightest light-mode text */
-  --vector-gray-600: #5c6573; /* 5.9:1 on gray-0 */
-  --vector-gray-650: #4c5563;
-  --vector-gray-700: #3f4754;
-  --vector-gray-750: #333a46;
-  --vector-gray-800: #272d38;
-  --vector-gray-850: #1d222b;
-  --vector-gray-900: #151922; /* 17.6:1 on gray-0 */
-  --vector-gray-950: #0e1118;
-  --vector-gray-1000: #080a0e;
-  /* Dark-mode-only neutrals: a light-mode ramp read upside down gives text
-   * that is either glaring white or muddy, because perceived lightness is not
-   * symmetric about the middle of the scale. */
-  --vector-gray-dim: #626c7d; /* 3.3:1 on gray-900 -- dark control boundaries */
-  --vector-gray-mute: #8d96a4; /* 5.9:1 on gray-900 -- dark muted text */
+   * The ramp is very dense at the dark end because dark UI needs steps a light
+   * UI does not -- the difference between the page and a panel sitting on it is
+   * a few points of luminance down there, where at the light end it is tens. */
+  --vector-navy-1000: #04080f; /* rail -- the only thing darker than ground */
+  --vector-navy-975: #050a14; /* ground -- the page canvas */
+  --vector-navy-950: #060b16; /* ground, alternate (landing hero) */
+  --vector-navy-925: #080e1b; /* raised: board columns, panel gradient foot */
+  --vector-navy-900: #080f1d; /* an unread row, a hair off ground */
+  --vector-navy-875: #0a1120; /* surface -- cards, panels, the rail's controls */
+  --vector-navy-850: #0b1322; /* row hover */
+  --vector-navy-825: #0c1424; /* panel gradient head */
+  --vector-navy-800: #101a2e; /* pressed/active fill; also the faintest rule */
+  --vector-navy-750: #101d33; /* accent wash -- selected row, palette hover */
+  --vector-navy-700: #16223a; /* the default 1px rule */
+  --vector-navy-650: #1a2740; /* avatar disc */
+  --vector-navy-600: #1b2a45; /* raised-panel edge */
+  --vector-navy-550: #1d3550; /* accent-tinted edge */
+  --vector-navy-500: #22314c; /* strong edge -- inputs, pills, cards */
+  --vector-navy-450: #24354f; /* the silver button's own edge */
+  --vector-navy-400: #2a3c58; /* kbd cap edge */
+  --vector-navy-350: #37527a; /* edge on hover */
 
-  /* Accent. Cyan, and specifically not indigo: indigo is the house colour of
-   * this entire product category, and an accent you have already seen in four
-   * other trackers is not an identity. Cyan reads as instrumentation -- which
-   * is the right register for a tool named after a quantity -- and it is far
-   * enough from the status hues (amber started, green completed, red urgent)
-   * to stay legible inside a 14px glyph sitting next to them. */
-  --vector-cyan-50: #eaf9fc;
-  --vector-cyan-100: #cdeff6;
-  --vector-cyan-200: #9fdfec;
-  --vector-cyan-300: #5cc5db; /* 9.4:1 on gray-950 -- dark-mode accent text */
-  --vector-cyan-400: #23a5c0;
-  --vector-cyan-500: #0b87a3; /* 4.2:1 on gray-0 -- focus ring, glyphs */
-  --vector-cyan-600: #0a7189; /* 5.6:1 on gray-0 -- accent text and fills */
-  --vector-cyan-700: #0a5c70; /* 7.6:1 on gray-0 */
-  --vector-cyan-800: #0b4a5a;
-  --vector-cyan-900: #0a3b48;
-  --vector-cyan-950: #082c36;
+  /* --- Slate --------------------------------------------------------- */
+  /* Everything that carries a word. Read upside down from a light ramp these
+   * would be either glaring or muddy -- perceived lightness is not symmetric
+   * about the middle of the scale -- so they are picked directly. */
+  --vector-slate-400: #626c7d; /*  3.7:1 on ground -- glyphs, control edges */
+  --vector-slate-500: #74809a; /*  5.0:1 on ground -- meta text */
+  --vector-slate-600: #8d96a4; /*  6.5:1 on ground */
+  --vector-slate-700: #98a5bb; /*  7.9:1 on ground -- secondary/muted text */
+  --vector-slate-800: #a6aeba; /*  9.0:1 on ground */
+  --vector-slate-900: #c9d4e6; /* 13.4:1 on ground -- secondary text */
+  --vector-slate-950: #dfe6f2; /* 15.6:1 on ground -- row titles */
+  --vector-slate-975: #e4eaf5; /* 16.2:1 on ground -- BODY TEXT */
+  --vector-slate-985: #e9eef7; /* headings */
+  --vector-slate-1000: #eef2f9; /* the brightest thing on the page */
 
-  --vector-red-50: #fef1f1;
-  --vector-red-200: #f6cccb;
-  --vector-red-300: #f09a98; /* 8.8:1 on gray-950 */
-  --vector-red-400: #e4645f; /* 5.7:1 on gray-950 */
-  --vector-red-500: #d94540;
-  --vector-red-600: #c8322f; /* 5.3:1 on gray-0 */
-  --vector-red-700: #a72724;
-  --vector-red-900: #4a1211;
-  --vector-red-950: #2b0d0d;
+  /* --- Silver -------------------------------------------------------- */
+  /* The primary control is a brushed silver gradient, not a flat fill. It is
+   * the most distinctive thing in the interface and the only element that
+   * inverts: dark ink on light metal, in a product that is otherwise entirely
+   * light ink on dark ground. */
+  --vector-silver-100: #ffffff;
+  --vector-silver-200: #eef2f9;
+  --vector-silver-300: #e9eef7; /* the flat variant -- an active pill */
+  --vector-silver-500: #c9d4e5;
+  --vector-silver-600: #b6c3d8;
+  --vector-silver-ink: #08101d; /* what sits on silver */
 
-  --vector-green-50: #edf9f2;
-  --vector-green-200: #bfe5d0;
-  --vector-green-300: #7fd0a5; /* 10.3:1 on gray-950 */
-  --vector-green-400: #41b57f;
-  --vector-green-500: #229a63; /* 3.6:1 on gray-0 -- glyphs */
-  --vector-green-600: #1a7f4b; /* 5.0:1 on gray-0 */
-  --vector-green-700: #14653c; /* 7.1:1 on gray-0 */
-  --vector-green-900: #0a2e1d;
-  --vector-green-950: #082115;
+  /* --- Cyan ---------------------------------------------------------- */
+  /* And specifically not indigo: indigo is the house colour of this entire
+   * product category, and an accent you have already seen in four other
+   * trackers is not an identity. Cyan reads as instrumentation -- the right
+   * register for a tool named after a quantity -- and it is far enough from
+   * the status hues (amber started, green completed, red urgent) to stay
+   * legible inside a 14px glyph sitting next to them. */
+  --vector-cyan-300: #5cc5db; /* 9.9:1 on ground */
+  --vector-cyan-200: #9fdfec; /* hover, and the bright end of a progress bar */
+  --vector-cyan-ink: #04222b; /* what sits on a flat cyan fill -- 8.3:1 */
 
-  --vector-amber-50: #fdf6e8;
-  --vector-amber-200: #f6dfa8;
-  --vector-amber-300: #efc768; /* 11.7:1 on gray-950 */
-  --vector-amber-400: #e0a72c;
-  --vector-amber-500: #c78a10;
-  --vector-amber-600: #a5710c; /* 4.2:1 on gray-0 -- glyphs */
-  --vector-amber-700: #835a0b; /* 6.1:1 on gray-0 -- text */
-  --vector-amber-900: #382706;
-  --vector-amber-950: #241a06;
+  /* --- Status hues --------------------------------------------------- */
+  --vector-amber-300: #efc768; /* started / high priority -- 11.2:1 */
+  --vector-green-300: #7fd0a5; /* completed -- 10.4:1 */
+  --vector-red-400: #e4645f; /* urgent / danger / overdue -- 5.9:1 */
+  /* The danger zone is the one region the design tints rather than outlines. */
+  --vector-red-900: #6b2c2c; /* danger edge */
+  --vector-red-950: #3a1f24; /* danger edge, subtle */
+  --vector-red-975: #231014; /* danger fill, hover */
+  --vector-red-1000: #160d12; /* danger fill */
+  /* DERIVED: success and warning fills, by the same recipe the design used for
+   * danger -- the hue held, dropped to the ground's luminance band. Needed for
+   * toast and banner variants the design does not draw. */
+  --vector-green-1000: #0b1a13;
+  --vector-green-950: #1e3a2b;
+  --vector-amber-1000: #191305;
+  --vector-amber-950: #3a2e14;
 
-  /* Type. System stacks: a webfont is a network dependency and a layout-shift
-   * source, and neither is worth paying for chrome the user reads past. */
+  /* --- Type ---------------------------------------------------------- */
+  /* Space Grotesk for everything, IBM Plex Mono for identifiers. Loaded in
+   * index.html; both stacks fall through to a system face, so a blocked or
+   * slow font swaps rather than blanks. */
   --vector-font-sans:
-    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
-    Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    'Space Grotesk', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
   --vector-font-mono:
-    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
-    monospace;
+    'IBM Plex Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas,
+    'Liberation Mono', monospace;
 
-  /* Shadows. Tinted with the neutral hue rather than pure black -- black
-   * shadows on a cool grey surface read as grime. */
-  --vector-shadow-color: 218deg 25% 18%;
-  --vector-shadow-alpha-sm: 0.06;
-  --vector-shadow-alpha-md: 0.08;
-  --vector-shadow-alpha-lg: 0.12;
+  /* --- Shadow -------------------------------------------------------- */
+  /* Near-black and heavy. Against a near-black page a light shadow does
+   * nothing; it is the 1px border that separates a floating panel from the
+   * page, and the shadow only says how far above it floats. */
+  --vector-shadow-color: 220deg 40% 2%;
+  --vector-shadow-alpha-sm: 0.4;
+  --vector-shadow-alpha-md: 0.5;
+  --vector-shadow-alpha-lg: 0.6;
 
   /* ================================================================== */
-  /* SEMANTIC -- LIGHT. What components are allowed to use.              */
+  /* SEMANTIC. What components are allowed to use.                       */
   /* ================================================================== */
 
-  /* Tells the UA which treatment to paint native controls, scrollbars and the
-   * canvas in. Overridden in the dark blocks below. */
-  color-scheme: light;
+  color-scheme: dark;
 
   /* --- Background layers ------------------------------------------- */
-  /* `sunken` sits *behind* content (the sidebar rail); `app` is the page
-   * canvas; surfaces sit on top. Three layers is enough for this product and
-   * few enough that "which one" is never a guess. */
-  --color-bg-sunken: var(--vector-gray-50);
-  --color-bg-app: var(--vector-gray-0);
+  /* `sunken` sits *behind* content (the rail); `app` is the page canvas;
+   * surfaces sit on top. Three layers is enough for this product and few
+   * enough that "which one" is never a guess. */
+  --color-bg-sunken: var(--vector-navy-1000);
+  --color-bg-app: var(--vector-navy-975);
 
   /* --- Surface layers ---------------------------------------------- */
-  --color-surface: var(--vector-gray-0);
-  --color-surface-raised: var(--vector-gray-0);
-  --color-surface-subtle: var(--vector-gray-50);
-  --color-surface-hover: var(--vector-gray-100);
-  --color-surface-active: var(--vector-gray-200);
-  --color-surface-selected: var(--vector-cyan-50);
+  --color-surface: var(--vector-navy-875);
+  --color-surface-raised: var(--vector-navy-925);
+  --color-surface-subtle: var(--vector-navy-900);
+  --color-surface-hover: var(--vector-navy-850);
+  --color-surface-active: var(--vector-navy-800);
+  --color-surface-selected: var(--vector-navy-750);
   /* A wash over the page behind a modal. Not `opacity` on the page itself,
-   * which would fade the dialog with it. */
-  --color-overlay-scrim: hsl(218deg 25% 18% / 0.32);
+   * which would fade the dialog with it. Heavier than a light-theme scrim
+   * would be: the page behind is already dark. */
+  --color-overlay-scrim: rgb(3 7 15 / 0.66);
 
   /* --- Borders ------------------------------------------------------ */
-  /* Four weights, and `control` is the one people get wrong. A divider
-   * between rows is decorative and may be faint; the outline of a text input
-   * is the only thing telling the user a control is there, so WCAG 1.4.11
-   * puts it at 3:1 and `--color-border` does not clear that bar. */
-  --color-border-subtle: var(--vector-gray-100);
-  --color-border: var(--vector-gray-200);
-  --color-border-strong: var(--vector-gray-300);
-  --color-border-control: var(--vector-gray-450);
+  /* Four weights, and `control` is the one people get wrong. A divider between
+   * rows is decorative and may be faint; the outline of a text input is the
+   * only thing telling the user a control is there, so WCAG 1.4.11 puts it at
+   * 3:1.
+   *
+   * The design draws input borders in `--vector-navy-500` (#22314c), which is
+   * 1.5:1 on ground -- decisive as a *card* edge, invisible as the boundary of
+   * a control. `--color-border-control` therefore moves up to the next value in
+   * the design's own palette that clears 3:1 (`--vector-slate-400`, 3.7:1).
+   * Cards, panels and pills keep the design's value via `--color-border-strong`;
+   * only things a user is meant to type into or operate get the heavier edge. */
+  --color-border-subtle: var(--vector-navy-800);
+  --color-border: var(--vector-navy-700);
+  --color-border-strong: var(--vector-navy-500);
+  --color-border-hover: var(--vector-navy-350);
+  --color-border-raised: var(--vector-navy-600);
+  --color-border-control: var(--vector-slate-400); /* 3.7:1 -- WCAG 1.4.11 */
 
   /* --- Text --------------------------------------------------------- */
-  --color-text-primary: var(--vector-gray-900);
-  --color-text-secondary: var(--vector-gray-600);
-  --color-text-muted: var(--vector-gray-500);
-  --color-text-on-accent: var(--vector-gray-0);
-  --color-text-accent: var(--vector-cyan-600);
-  --color-text-danger: var(--vector-red-600);
-  --color-text-success: var(--vector-green-700);
-  --color-text-warning: var(--vector-amber-700);
-  /* Text inside a control the UI has switched off. Deliberately *not* a text
-   * token below AA: a disabled control still has to be readable, because "I
-   * cannot use this yet" is information the user needs. It is distinguished
-   * from enabled text by weight and by an adjacent visible marker, never by
-   * contrast alone. */
-  --color-text-disabled: var(--vector-gray-500);
-  /* Decorative only -- separator dots, watermark rules. Below AA by design;
-   * never put a word the user has to read in it. */
-  --color-text-faint: var(--vector-gray-400);
+  --color-text-primary: var(--vector-slate-975);
+  --color-text-bright: var(--vector-slate-1000);
+  --color-text-heading: var(--vector-slate-985);
+  --color-text-body: var(--vector-slate-950);
+  --color-text-secondary: var(--vector-slate-900);
+  --color-text-muted: var(--vector-slate-700);
+  /* 5.0:1 -- passes AA. Named `faint` for its role in the hierarchy, not
+   * because it is below the bar; there is no sub-AA text token in this palette
+   * and no word in the product is painted below 4.5:1. */
+  --color-text-faint: var(--vector-slate-500);
+  /* A disabled control still has to be readable: "I cannot use this yet" is
+   * information the user needs. Distinguished from enabled text by weight and
+   * by an adjacent visible marker, never by contrast alone. */
+  --color-text-disabled: var(--vector-slate-700);
+  --color-text-accent: var(--vector-cyan-300);
+  --color-text-danger: var(--vector-red-400);
+  --color-text-success: var(--vector-green-300);
+  --color-text-warning: var(--vector-amber-300);
+  /* Ink for the two inverted fills. */
+  --color-text-on-accent: var(--vector-cyan-ink); /* on flat cyan   -- 8.3:1 */
+  --color-text-on-primary: var(--vector-silver-ink); /* on silver   -- 16:1  */
 
   /* --- Accent ------------------------------------------------------- */
-  --color-accent: var(--vector-cyan-600);
-  --color-accent-hover: var(--vector-cyan-700);
-  --color-accent-active: var(--vector-cyan-800);
-  --color-accent-subtle: var(--vector-cyan-50);
-  --color-accent-subtle-hover: var(--vector-cyan-100);
-  --color-accent-border: var(--vector-cyan-200);
-  --color-accent-glyph: var(--vector-cyan-500);
+  /* Unlike a light-theme palette, the fill and the text are the same value:
+   * cyan-300 is bright enough to read as text on navy and dark ink reads on it
+   * as a fill, so the accent does not need to split into two ramps. */
+  --color-accent: var(--vector-cyan-300);
+  --color-accent-hover: var(--vector-cyan-200);
+  --color-accent-active: var(--vector-cyan-200);
+  --color-accent-subtle: var(--vector-navy-750);
+  --color-accent-subtle-hover: var(--vector-navy-550);
+  --color-accent-border: var(--vector-navy-550);
+  --color-accent-glyph: var(--vector-cyan-300);
+
+  /* --- The primary control ------------------------------------------ */
+  /* Brushed silver, top-lit. A flat fill here loses the product's single most
+   * recognisable control, so this is a gradient token rather than a colour. */
+  --gradient-primary: linear-gradient(
+    180deg,
+    var(--vector-silver-200),
+    var(--vector-silver-600)
+  );
+  --gradient-primary-hover: linear-gradient(
+    180deg,
+    var(--vector-silver-100),
+    var(--vector-silver-500)
+  );
+  --color-primary-border: var(--vector-navy-450);
+  /* The flat sibling: the selected segment of a segmented control, which is
+   * too small to read a gradient. */
+  --color-primary-flat: var(--vector-silver-300);
+
+  /* --- Other gradients ---------------------------------------------- */
+  --gradient-progress: linear-gradient(
+    90deg,
+    var(--vector-cyan-300),
+    var(--vector-cyan-200)
+  );
+  --gradient-panel: linear-gradient(
+    180deg,
+    var(--vector-navy-825),
+    var(--vector-navy-925)
+  );
+  --gradient-mark: linear-gradient(
+    160deg,
+    var(--vector-navy-600),
+    var(--vector-navy-875)
+  );
+  /* The glow behind the signed-out screens. */
+  --gradient-aura: radial-gradient(
+    70% 55% at 50% 12%,
+    rgb(92 197 219 / 0.12),
+    rgb(5 10 20 / 0) 70%
+  );
 
   /* --- Status: danger / success / warning / info -------------------- */
-  --color-danger: var(--vector-red-600);
-  --color-danger-hover: var(--vector-red-700);
-  --color-danger-subtle: var(--vector-red-50);
-  --color-danger-border: var(--vector-red-200);
-  --color-danger-text: var(--vector-red-600);
+  /* Only danger gets a tinted fill; the design outlines everything else in
+   * `--color-border-strong` and lets the *text* carry the hue, which is why a
+   * label pill and a project-state pill look like siblings. */
+  --color-danger: var(--vector-red-400);
+  --color-danger-hover: var(--vector-red-975);
+  --color-danger-subtle: var(--vector-red-1000);
+  --color-danger-border: var(--vector-red-900);
+  --color-danger-border-subtle: var(--vector-red-950);
+  --color-danger-text: var(--vector-red-400);
 
-  --color-success: var(--vector-green-600);
-  --color-success-hover: var(--vector-green-700);
-  --color-success-subtle: var(--vector-green-50);
-  --color-success-border: var(--vector-green-200);
-  --color-success-text: var(--vector-green-700);
+  --color-success: var(--vector-green-300);
+  --color-success-hover: var(--vector-green-950);
+  --color-success-subtle: var(--vector-green-1000);
+  --color-success-border: var(--vector-green-950);
+  --color-success-text: var(--vector-green-300);
 
-  --color-warning: var(--vector-amber-600);
-  --color-warning-hover: var(--vector-amber-700);
-  --color-warning-subtle: var(--vector-amber-50);
-  --color-warning-border: var(--vector-amber-200);
-  --color-warning-text: var(--vector-amber-700);
+  --color-warning: var(--vector-amber-300);
+  --color-warning-hover: var(--vector-amber-950);
+  --color-warning-subtle: var(--vector-amber-1000);
+  --color-warning-border: var(--vector-amber-950);
+  --color-warning-text: var(--vector-amber-300);
 
-  --color-info: var(--vector-cyan-600);
-  --color-info-subtle: var(--vector-cyan-50);
-  --color-info-border: var(--vector-cyan-200);
-  --color-info-text: var(--vector-cyan-700);
+  --color-info: var(--vector-cyan-300);
+  --color-info-subtle: var(--vector-navy-750);
+  --color-info-border: var(--vector-navy-550);
+  --color-info-text: var(--vector-cyan-300);
 
   /* --- Workflow state categories ------------------------------------ */
-  /* Mirrors the server's `WorkflowStateCategory`. These tint the status
-   * glyph; they never carry the meaning alone -- StatusIndicator draws a
-   * different *silhouette* per category precisely so that the colour is
-   * redundant for anyone who cannot separate these hues. */
-  --color-status-backlog: var(--vector-gray-450);
-  --color-status-unstarted: var(--vector-gray-600);
-  --color-status-started: var(--vector-amber-600);
-  --color-status-completed: var(--vector-green-600);
-  --color-status-canceled: var(--vector-gray-500);
+  /* Mirrors the server's `WorkflowStateCategory`. These tint the status glyph;
+   * they never carry the meaning alone -- StatusIndicator draws a different
+   * *silhouette* per category (dashed ring, plain ring, diamond, tick, cross)
+   * precisely so that the colour is redundant for anyone who cannot separate
+   * these hues. All five clear 3:1 on ground. */
+  --color-status-backlog: var(--vector-slate-400);
+  --color-status-unstarted: var(--vector-slate-800);
+  --color-status-started: var(--vector-amber-300);
+  --color-status-completed: var(--vector-green-300);
+  --color-status-canceled: var(--vector-slate-600);
 
   /* --- Priority ----------------------------------------------------- */
-  /* Restrained on purpose. Only `urgent` and `high` are coloured; a five-hue
-   * priority scale turns every list into a fruit salad and stops red from
-   * meaning anything. Magnitude is carried by the glyph's bar count. */
-  --color-priority-none: var(--vector-gray-450);
-  --color-priority-low: var(--vector-gray-500);
-  --color-priority-medium: var(--vector-gray-600);
-  --color-priority-high: var(--vector-amber-600);
-  --color-priority-urgent: var(--vector-red-600);
+  /* The low three are greys of increasing lightness and the top two are hues,
+   * so the scale reads as one gradient of urgency rather than a fruit salad.
+   * Magnitude is carried by the glyph's bar count, so the colour is again
+   * redundant. */
+  --color-priority-none: var(--vector-slate-400);
+  --color-priority-low: var(--vector-slate-600);
+  --color-priority-medium: var(--vector-slate-800);
+  --color-priority-high: var(--vector-amber-300);
+  --color-priority-urgent: var(--vector-red-400);
 
-  /* --- Avatar tints -------------------------------------------------- */
+  /* --- Avatar -------------------------------------------------------- */
   /* An avatar's hue is derived per-person from their name and arrives as an
-   * inline `--avatar-hue`; only the saturation/lightness pair is a theme
-   * decision, so it lives here. Splitting it this way is what keeps every one
-   * of the 360 possible hues legible in both themes without checking any of
-   * them: lightness is fixed, so the contrast is fixed. */
-  --avatar-bg: 42% 91%;
-  --avatar-fg: 52% 26%;
+   * inline `--avatar-hue`; only the lightness/saturation pair is a theme
+   * decision, so it lives here. Splitting it this way keeps every one of the
+   * 360 possible hues legible without checking any of them: lightness is
+   * fixed, so the contrast is fixed. The pair below reproduces the design's
+   * `#1a2740` disc with `#c9d4e6` initials at hue 220. */
+  --avatar-bg: 18% 43%;
+  --avatar-fg: 85% 41%;
+  /* An unassigned slot is an empty dashed ring, not a grey disc. */
+  --avatar-empty-border: 1px dashed var(--color-border-strong);
 
   /* --- Focus ring --------------------------------------------------- */
-  /* Ring *plus* offset ring in the page colour, so the indicator stays
-   * visible when the focused control sits directly on a coloured background
-   * and a plain outline would blend into it. Components that sit on a
-   * different surface re-point `--focus-ring-backdrop` locally. */
+  /* The accent, at 9.9:1 on ground -- three times the 3:1 the guidelines ask
+   * of a focus indicator. Ring *plus* offset ring in the page colour, so the
+   * indicator stays visible when the focused control sits directly on a
+   * coloured background and a plain outline would blend into it. Components on
+   * a different surface re-point `--focus-ring-backdrop` locally. */
   --focus-ring-width: 2px;
   --focus-ring-offset: 2px;
-  --focus-ring-color: var(--vector-cyan-500);
+  --focus-ring-color: var(--color-accent);
   --focus-ring-backdrop: var(--color-bg-app);
   --focus-ring: 0 0 0 var(--focus-ring-offset) var(--focus-ring-backdrop),
     0 0 0 calc(var(--focus-ring-offset) + var(--focus-ring-width))
@@ -278,29 +348,37 @@
   --focus-ring-inset: inset 0 0 0 var(--focus-ring-width) var(--focus-ring-color);
 
   /* --- Spacing ------------------------------------------------------ */
-  /* A 4px base with two half-steps at the small end. Dense UI spends most of
-   * its budget between 4 and 12px, and a pure 4/8/16 ramp forces a choice
-   * between "touching" and "loose" exactly where the decisions matter. */
+  /* A 4px base with half-steps at the small end. Dense UI spends most of its
+   * budget between 4 and 16px, and a pure 4/8/16 ramp forces a choice between
+   * "touching" and "loose" exactly where the decisions matter. The three
+   * fractional steps are the gaps the design leans on hardest. */
   --space-0: 0;
   --space-1: 0.125rem; /*  2px */
   --space-2: 0.25rem; /*  4px */
   --space-3: 0.375rem; /*  6px */
+  --space-3-5: 0.625rem; /* 10px */
   --space-4: 0.5rem; /*  8px */
   --space-5: 0.75rem; /* 12px */
+  --space-5-5: 0.875rem; /* 14px */
   --space-6: 1rem; /* 16px */
+  --space-6-5: 1.25rem; /* 20px */
   --space-7: 1.5rem; /* 24px */
   --space-8: 2rem; /* 32px */
   --space-9: 3rem; /* 48px */
   --space-10: 4rem; /* 64px */
 
   /* --- Radii -------------------------------------------------------- */
-  /* Small. A 12px radius on a 28px control is a pill, and pills read as
-   * marketing; crisp near-rectangles read as instrument panel. */
-  --radius-sm: 3px;
-  --radius-md: 5px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-full: 9999px;
+  /* Two families. Rectangles are small -- a 12px radius on a 28px control is a
+   * pill, and pills read as marketing where crisp near-rectangles read as
+   * instrument panel. Actual pills (`--radius-full`) are then reserved for the
+   * things that really are capsules: buttons, segmented controls, tags. */
+  --radius-sm: 4px; /* a kbd cap */
+  --radius-md: 6px; /* a nav item, an icon button */
+  --radius-lg: 8px; /* an input, a group header, a menu item */
+  --radius-xl: 12px; /* a card, a panel, a dialog */
+  --radius-2xl: 14px; /* the command palette, a project card */
+  --radius-3xl: 16px; /* the signed-out card */
+  --radius-full: 999px;
 
   /* --- Borders ------------------------------------------------------ */
   --border-width: 1px;
@@ -310,64 +388,84 @@
   --font-mono: var(--vector-font-mono);
 
   /* Base is 13px, not 16px. This is an information-dense tool whose primary
-   * surface is a list of hundreds of rows; 16px body text is a reading size
-   * and costs roughly a fifth of the rows on screen. `rem` throughout, so a
-   * user who raises their browser's font size still scales the whole UI. */
-  --text-2xs: 0.6875rem; /* 11px -- badges, meta */
-  --text-xs: 0.75rem; /* 12px -- secondary/meta */
-  --text-sm: 0.8125rem; /* 13px -- BODY DEFAULT */
-  --text-md: 0.875rem; /* 14px -- emphasised body */
-  --text-lg: 1rem; /* 16px -- section titles */
-  --text-xl: 1.25rem; /* 20px -- page titles */
-  --text-2xl: 1.5rem; /* 24px -- display */
+   * surface is a list of hundreds of rows; 16px body text is a reading size and
+   * costs roughly a fifth of the rows on screen. `rem` throughout, so a user
+   * who raises their browser's font size still scales the whole UI.
+   *
+   * `meta` and `body-sm` are the two half-steps the design uses constantly and
+   * that a doubling scale has no room for. They are named for their role
+   * rather than slotted into the t-shirt ramp, because they are not sizes you
+   * pick by relative magnitude -- they are the size row meta is, and the size
+   * panel prose is. */
+  --text-3xs: 0.65625rem; /* 10.5px -- uppercase section micro-labels */
+  --text-2xs: 0.6875rem; /* 11px   -- mono keys, counts, kbd */
+  --text-meta: 0.71875rem; /* 11.5px -- row meta, pill labels, segments */
+  --text-xs: 0.75rem; /* 12px   -- secondary text */
+  --text-body-sm: 0.78125rem; /* 12.5px -- panel prose, secondary controls */
+  --text-sm: 0.8125rem; /* 13px   -- BODY DEFAULT */
+  --text-md: 0.875rem; /* 14px   -- emphasised body */
+  --text-lg: 1rem; /* 16px   -- section titles */
+  --text-xl: 1.25rem; /* 20px   -- page titles */
+  --text-2xl: 1.5rem; /* 24px   -- display */
+  --text-3xl: 1.625rem; /* 26px   -- the signed-out headline */
 
   --leading-none: 1;
-  --leading-tight: 1.25;
+  --leading-tight: 1.3;
   --leading-normal: 1.5;
   --leading-relaxed: 1.65;
 
   --weight-regular: 400;
   --weight-medium: 500;
   --weight-semibold: 600;
+  --weight-bold: 700;
 
-  /* Negative tracking on large type only; small text needs its default
-   * spacing to stay legible. `caps` is for the uppercase micro-labels that
-   * head a list section, where unspaced capitals set solid. */
+  /* Negative tracking on headings only; small text needs its default spacing
+   * to stay legible. `caps` is for the uppercase micro-labels that head a list
+   * section, where unspaced capitals set solid. `brand` is the wordmark. */
   --tracking-tight: -0.011em;
+  --tracking-tighter: -0.02em; /* display sizes, 24px and up */
   --tracking-normal: 0;
   --tracking-wide: 0.02em;
   --tracking-caps: 0.06em;
+  --tracking-caps-wide: 0.08em;
+  --tracking-brand: 0.2em;
+
+  /* Dates, counts, keys and estimates run down a column and have to line up.
+   * Applied wherever digits are compared vertically. */
+  --numeric-tabular: tabular-nums;
 
   /* --- Elevation ---------------------------------------------------- */
   /* Used sparingly and only for things that genuinely float (menus, dialogs,
-   * toasts). Depth inside the page comes from layered surfaces and 1px
-   * borders; a card with a drop shadow around every list section is how a
-   * dense tool ends up looking like a pricing page. */
+   * toasts, the palette). Depth inside the page comes from layered surfaces
+   * and 1px borders; a card with a drop shadow around every list section is
+   * how a dense tool ends up looking like a pricing page. */
   --shadow-sm: 0 1px 2px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-sm));
   --shadow-md:
     0 2px 4px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-sm)),
-    0 4px 12px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-md));
+    0 8px 24px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-md));
   --shadow-lg:
     0 4px 8px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-sm)),
-    0 12px 32px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-lg));
+    0 30px 90px hsl(var(--vector-shadow-color) / var(--vector-shadow-alpha-lg));
 
   /* --- Motion ------------------------------------------------------- */
   /* Chrome feedback should be perceptible but never something you wait on.
-   * Anything over ~120ms on a hover state reads as lag in a dense UI. */
+   * Anything over ~120ms on a hover state reads as lag in a dense UI. The four
+   * durations are the design's own: a scrim fades in 120ms, the palette lands
+   * in 160ms, a panel rises in 180ms. */
   --duration-instant: 60ms;
-  --duration-fast: 100ms;
+  --duration-fast: 120ms;
   --duration-moderate: 160ms;
-  --duration-slow: 240ms;
+  --duration-slow: 180ms;
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
-  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-out: ease-out;
 
   /* --- Layering ----------------------------------------------------- */
   /* Named, and few. The failure mode this prevents is `z-index: 9999`
    * appearing in a component because nobody knew what it had to beat.
    *
-   * Note that a `<dialog>` opened as a modal is painted in the browser's top
-   * layer and ignores z-index entirely. The scale below only orders things
-   * that are still in the normal flow. */
+   * A `<dialog>` opened as a modal is painted in the browser's top layer and
+   * ignores z-index entirely; the scale below only orders things that are
+   * still in the normal flow. */
   --z-base: 0;
   --z-raised: 1;
   --z-sticky: 10;
@@ -377,23 +475,35 @@
   --z-skip-link: 1000;
 
   /* --- Layout ------------------------------------------------------- */
-  --layout-sidebar-width: 14.5rem;
+  --layout-sidebar-width: 14.5rem; /* 232px */
+  --layout-sidebar-width-collapsed: 3.375rem; /* 54px */
+  --layout-header-height: 3.5rem; /* 56px */
+  --layout-inspector-width: 24rem; /* 384px */
+  --layout-palette-width: 40rem; /* 640px */
   --layout-content-padding-inline: var(--space-7);
-  --layout-content-padding-block: var(--space-6);
+  --layout-content-padding-block: var(--space-6-5);
   --layout-content-max-width: 68rem;
-  /* Minimum hit target for chrome controls. Below AAA's 44px because this is
-   * a pointer-first desktop tool, but large enough that the controls are not
-   * a precision task. */
-  --control-height-sm: 1.75rem; /* 28px */
-  --control-height-md: 2rem; /* 32px */
-  /* One dense list row. Fixed, so rows do not jitter as their content varies
-   * and a future virtualised list can compute offsets without measuring. */
-  --row-height: 2.25rem; /* 36px */
+  /* Minimum hit target for chrome controls. Below AAA's 44px because this is a
+   * pointer-first desktop tool, but large enough that the controls are not a
+   * precision task. */
+  --control-height-xs: 1.5rem; /* 24px -- a segment, a chip */
+  --control-height-sm: 1.75rem; /* 28px -- a nav item, a secondary button */
+  --control-height-md: 2rem; /* 32px -- an input */
+  --control-height-lg: 2.25rem; /* 36px -- a primary form field */
+  /* One list row, at each density. Fixed, so rows do not jitter as their
+   * content varies and a future virtualised list can compute offsets without
+   * measuring. `--row-height` is the live value: the shell re-points it when
+   * density changes, and everything downstream follows. */
+  --row-height-dense: 2.25rem; /* 36px */
+  --row-height-comfortable: 2.875rem; /* 46px */
+  --row-height: var(--row-height-dense);
   /* The column every status/priority glyph is drawn into. A fixed width means
    * the titles down a list all start on the same x, which is most of what
    * makes a dense list scannable. */
   --glyph-size: 0.875rem; /* 14px */
   --glyph-column: 1.25rem; /* 20px */
+  /* The mono issue key column, wide enough for `ENG-1234`. */
+  --key-column: 4.25rem; /* 68px */
 
   /* The single viewport width at which the shell stops being a two-column
    * layout. Recorded here as the one source of truth -- but note that CSS
@@ -403,186 +513,55 @@
   --layout-breakpoint-compact: 48rem;
 }
 
+/* Comfortable density is a single class on the shell. One declaration, and
+ * every row in the product -- lists, inbox, members, cycles -- grows, because
+ * they all measure themselves against `--row-height` rather than restating a
+ * height each. */
+:root[data-density='comfortable'] {
+  --row-height: var(--row-height-comfortable);
+}
+
 /* ==================================================================== */
-/* SEMANTIC -- DARK                                                      */
+/* Keyframes                                                             */
 /*                                                                       */
-/* Only tokens whose *value* differs are restated. Everything structural */
-/* -- spacing, radii, type, motion, layering -- is shared, because a     */
-/* theme is a palette and not a second design.                           */
+/* Global on purpose. CSS Modules scopes `@keyframes` to the file that    */
+/* declares it, so three components animating "the same" rise would each  */
+/* own a private copy that drifts. These three are the product's entire   */
+/* motion vocabulary and they live where the durations do.               */
 /*                                                                       */
-/* The two rule bodies below are identical apart from their selector.    */
-/* That duplication is deliberate. Hoisting it into one selector list    */
-/* is impossible here: the media-query arm has to carry the              */
-/* `:not([data-theme='light'])` guard and the explicit arm must not, and */
-/* CSS has no way to share a declaration block between two rules without */
-/* a build step this project does not have.                              */
+/* `prefers-reduced-motion` collapses all three in base.css.             */
 /* ==================================================================== */
 
-@media (prefers-color-scheme: dark) {
-  /* `:not([data-theme='light'])` is what lets an explicit light choice beat
-   * the OS preference. Without it a "light" toggle would be a no-op for every
-   * user whose system is dark -- the users for whom the toggle matters most. */
-  :root:not([data-theme='light']) {
-    color-scheme: dark;
-
-    --color-bg-sunken: var(--vector-gray-1000);
-    --color-bg-app: var(--vector-gray-950);
-
-    --color-surface: var(--vector-gray-900);
-    --color-surface-raised: var(--vector-gray-850);
-    --color-surface-subtle: var(--vector-gray-850);
-    --color-surface-hover: var(--vector-gray-800);
-    --color-surface-active: var(--vector-gray-750);
-    --color-surface-selected: var(--vector-cyan-950);
-    /* Heavier than the light scrim: the page behind is already dark, so a 32%
-     * wash barely separates the dialog from it. */
-    --color-overlay-scrim: hsl(218deg 30% 4% / 0.62);
-
-    --color-border-subtle: var(--vector-gray-850);
-    --color-border: var(--vector-gray-800);
-    --color-border-strong: var(--vector-gray-750);
-    --color-border-control: var(--vector-gray-dim);
-
-    --color-text-primary: var(--vector-gray-100);
-    --color-text-secondary: var(--vector-gray-400);
-    --color-text-muted: var(--vector-gray-mute);
-    /* cyan-600 is dark enough that white sits on it at 5.6:1, and that holds
-     * in both themes -- so the on-accent colour does not flip. */
-    --color-text-on-accent: var(--vector-gray-0);
-    --color-text-accent: var(--vector-cyan-300);
-    --color-text-danger: var(--vector-red-400);
-    --color-text-success: var(--vector-green-400);
-    --color-text-warning: var(--vector-amber-300);
-    --color-text-disabled: var(--vector-gray-mute);
-    --color-text-faint: var(--vector-gray-dim);
-
-    /* Fills stay at the mid ramp so white text keeps working on them; only
-     * the *text* and *glyph* roles move to the light end. That asymmetry is
-     * the whole trick to inverting a palette without re-picking it. */
-    --color-accent: var(--vector-cyan-600);
-    --color-accent-hover: var(--vector-cyan-500);
-    --color-accent-active: var(--vector-cyan-400);
-    --color-accent-subtle: var(--vector-cyan-950);
-    --color-accent-subtle-hover: var(--vector-cyan-900);
-    --color-accent-border: var(--vector-cyan-800);
-    --color-accent-glyph: var(--vector-cyan-300);
-
-    --color-danger-subtle: var(--vector-red-950);
-    --color-danger-border: var(--vector-red-900);
-    --color-danger-text: var(--vector-red-300);
-
-    --color-success-subtle: var(--vector-green-950);
-    --color-success-border: var(--vector-green-900);
-    --color-success-text: var(--vector-green-300);
-
-    --color-warning-subtle: var(--vector-amber-950);
-    --color-warning-border: var(--vector-amber-900);
-    --color-warning-text: var(--vector-amber-300);
-
-    --color-info-subtle: var(--vector-cyan-950);
-    --color-info-border: var(--vector-cyan-900);
-    --color-info-text: var(--vector-cyan-300);
-
-    --color-status-backlog: var(--vector-gray-dim);
-    --color-status-unstarted: var(--vector-gray-400);
-    --color-status-started: var(--vector-amber-300);
-    --color-status-completed: var(--vector-green-300);
-    --color-status-canceled: var(--vector-gray-mute);
-
-    --color-priority-none: var(--vector-gray-dim);
-    --color-priority-low: var(--vector-gray-mute);
-    --color-priority-medium: var(--vector-gray-400);
-    --color-priority-high: var(--vector-amber-300);
-    --color-priority-urgent: var(--vector-red-400);
-
-    --avatar-bg: 34% 21%;
-    --avatar-fg: 62% 76%;
-
-    --focus-ring-color: var(--vector-cyan-300);
-
-    /* Shadows do almost nothing against a near-black page, so they get darker
-     * and heavier rather than lighter; the 1px border on a floating panel is
-     * what actually separates it from the page in this theme. */
-    --vector-shadow-color: 220deg 40% 2%;
-    --vector-shadow-alpha-sm: 0.4;
-    --vector-shadow-alpha-md: 0.5;
-    --vector-shadow-alpha-lg: 0.6;
+/* Content arriving in place: a composer opening, a panel mounting. */
+@keyframes vin {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-:root[data-theme='dark'] {
-  color-scheme: dark;
+/* A scrim, or anything that must not move while it appears. */
+@keyframes vfade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
 
-  --color-bg-sunken: var(--vector-gray-1000);
-  --color-bg-app: var(--vector-gray-950);
-
-  --color-surface: var(--vector-gray-900);
-  --color-surface-raised: var(--vector-gray-850);
-  --color-surface-subtle: var(--vector-gray-850);
-  --color-surface-hover: var(--vector-gray-800);
-  --color-surface-active: var(--vector-gray-750);
-  --color-surface-selected: var(--vector-cyan-950);
-  --color-overlay-scrim: hsl(218deg 30% 4% / 0.62);
-
-  --color-border-subtle: var(--vector-gray-850);
-  --color-border: var(--vector-gray-800);
-  --color-border-strong: var(--vector-gray-750);
-  --color-border-control: var(--vector-gray-dim);
-
-  --color-text-primary: var(--vector-gray-100);
-  --color-text-secondary: var(--vector-gray-400);
-  --color-text-muted: var(--vector-gray-mute);
-  --color-text-on-accent: var(--vector-gray-0);
-  --color-text-accent: var(--vector-cyan-300);
-  --color-text-danger: var(--vector-red-400);
-  --color-text-success: var(--vector-green-400);
-  --color-text-warning: var(--vector-amber-300);
-  --color-text-disabled: var(--vector-gray-mute);
-  --color-text-faint: var(--vector-gray-dim);
-
-  --color-accent: var(--vector-cyan-600);
-  --color-accent-hover: var(--vector-cyan-500);
-  --color-accent-active: var(--vector-cyan-400);
-  --color-accent-subtle: var(--vector-cyan-950);
-  --color-accent-subtle-hover: var(--vector-cyan-900);
-  --color-accent-border: var(--vector-cyan-800);
-  --color-accent-glyph: var(--vector-cyan-300);
-
-  --color-danger-subtle: var(--vector-red-950);
-  --color-danger-border: var(--vector-red-900);
-  --color-danger-text: var(--vector-red-300);
-
-  --color-success-subtle: var(--vector-green-950);
-  --color-success-border: var(--vector-green-900);
-  --color-success-text: var(--vector-green-300);
-
-  --color-warning-subtle: var(--vector-amber-950);
-  --color-warning-border: var(--vector-amber-900);
-  --color-warning-text: var(--vector-amber-300);
-
-  --color-info-subtle: var(--vector-cyan-950);
-  --color-info-border: var(--vector-cyan-900);
-  --color-info-text: var(--vector-cyan-300);
-
-  --color-status-backlog: var(--vector-gray-dim);
-  --color-status-unstarted: var(--vector-gray-400);
-  --color-status-started: var(--vector-amber-300);
-  --color-status-completed: var(--vector-green-300);
-  --color-status-canceled: var(--vector-gray-mute);
-
-  --color-priority-none: var(--vector-gray-dim);
-  --color-priority-low: var(--vector-gray-mute);
-  --color-priority-medium: var(--vector-gray-400);
-  --color-priority-high: var(--vector-amber-300);
-  --color-priority-urgent: var(--vector-red-400);
-
-  --avatar-bg: 34% 21%;
-  --avatar-fg: 62% 76%;
-
-  --focus-ring-color: var(--vector-cyan-300);
-
-  --vector-shadow-color: 220deg 40% 2%;
-  --vector-shadow-alpha-sm: 0.4;
-  --vector-shadow-alpha-md: 0.5;
-  --vector-shadow-alpha-lg: 0.6;
+/* The command palette, dropping from above and settling. */
+@keyframes vpal {
+  from {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.99);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
