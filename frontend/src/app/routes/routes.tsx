@@ -8,10 +8,11 @@ import { MembersPage } from '../../features/members'
 import { MyIssuesPage } from '../../features/myIssues'
 import { onboardingRoutes } from '../../features/onboarding'
 import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
+import { SearchPage } from '../../features/search'
+import { SettingsPage } from '../../features/settings'
 import { TeamIssuesPage, TeamPage } from '../../features/teams'
 import { AppLayout } from '../layout'
 import { NotFound } from './NotFound'
-import { Placeholder } from './Placeholder'
 import { ROUTE_SEGMENTS, WORKSPACE_SLUG_PARAM } from './paths'
 import { RouteError } from './RouteError'
 
@@ -41,11 +42,11 @@ import { RouteError } from './RouteError'
  *
  * ## Screens that are not built yet
  *
- * Several entries below render `Placeholder`, and that is deliberate. The
- * route is real, the URL is the one `paths` builds, the sidebar entry that
- * reaches it is real, and the screen says outright that it does not exist
- * yet. Swapping the `element` is the whole job of the agent who builds one --
- * see ./Placeholder.tsx.
+ * None, as of the workspace screens landing. `./Placeholder.tsx` is still
+ * exported from `./index.ts` and is still the right thing to mount for a
+ * route whose screen is somebody else's to write: the route is real, the URL
+ * is the one `paths` builds, and the page says outright that it does not
+ * exist yet rather than leaving a dead entry in the rail.
  *
  * Exported as data rather than JSX elements so tests can mount a subtree with
  * a memory router without booting the whole application.
@@ -106,21 +107,11 @@ export const routes: RouteObject[] = [
       },
       {
         path: ROUTE_SEGMENTS.settings,
-        element: (
-          <Placeholder
-            title="Settings"
-            description="Workspace settings, including the GitHub and Slack integrations."
-          />
-        ),
+        element: <SettingsPage />,
       },
       {
         path: ROUTE_SEGMENTS.search,
-        element: (
-          <Placeholder
-            title="Search"
-            description="Search this workspace's issues and projects."
-          />
-        ),
+        element: <SearchPage />,
       },
       {
         path: ROUTE_SEGMENTS.projects,

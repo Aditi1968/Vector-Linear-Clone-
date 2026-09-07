@@ -1,0 +1,54 @@
+# The search document.
+#
+# Source file. `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`; edit here, never there.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`.
+# Hence `WorkspaceSearch`.
+
+# One search, over issues and projects together.
+#
+# ## The page size and the complexity budget
+#
+# `first` is a literal, never a variable -- `app/graphql/limits.py` prices a
+# list field at `page size x fields below it` during *validation*, and a
+# variable has no value then, so `first: $first` is charged at
+# `ASSUMED_PAGE_SIZE = 100` whatever we meant to ask for.
+#
+# `search` is the one field in this schema whose page size covers *two* lists,
+# so the selection below is deliberately narrow: 20 x (7 on issues + 5 on
+# projects) = 240 of 1000. Spreading `IssueRowFields` here instead would cost
+# 20 x 20 = 400 on the issues alone, for labels, cycles and estimates that a
+# result row does not show.
+#
+# There is no cursor: `search` returns two plain lists and no `pageInfo`, so
+# there is nothing to paginate and no field policy to write. The result is
+# the top matches, and ./SearchPage.tsx says so rather than implying the list
+# is everything.
+#
+# ## The query string is passed through untouched
+#
+# The backend resolves an identifier -- "ENG-42" -- to that issue directly.
+# Uppercasing, trimming punctuation or splitting on the hyphen here would
+# break exactly the input this is best at. Whitespace is trimmed before the
+# request only to decide whether there is a query at all.
+query WorkspaceSearch($workspaceSlug: String!, $query: String!) {
+  search(workspaceSlug: $workspaceSlug, query: $query, first: 20) {
+    issues {
+      id
+      identifier
+      title
+      priority
+      teamId
+      workflowStateId
+      assigneeId
+    }
+    projects {
+      id
+      name
+      state
+      targetDate
+      updatedAt
+    }
+  }
+}
