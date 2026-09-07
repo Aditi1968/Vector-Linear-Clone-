@@ -924,3 +924,103 @@ def test_the_junit_report_shape_the_guard_reads_is_the_one_pytest_writes():
 
     assert report.tag == "testsuites"
     assert report.find("testsuite") is not None
+
+
+# Provider variables whose value is a credential. `GITHUB_APP_ID` and the two
+# callback URLs are deliberately absent: an app id and a redirect URL are
+# public facts about a deployment, and a gate that flagged them would be one
+# people learn to ignore.
+PROVIDER_SECRET_VARIABLES = (
+    "GITHUB_APP_PRIVATE_KEY",
+    "GITHUB_WEBHOOK_SECRET",
+    "GITHUB_CLIENT_SECRET",
+    "SLACK_CLIENT_SECRET",
+    "SLACK_SIGNING_SECRET",
+    "SLACK_CLIENT_ID",
+    "GITHUB_CLIENT_ID",
+)
+
+
+def test_no_tracked_file_assigns_a_provider_secret():
+    """A real provider credential must not sit in a file git can carry.
+
+    `.env` is gitignored and is where these belong. `.env.example` is TRACKED,
+    is the file whose job is to name the variables without their values, and
+    is therefore exactly the file a real value gets pasted into by someone
+    filling in their configuration -- it has happened twice in this
+    repository, both times while genuinely trying to record a working setup.
+
+    The check is for an assignment with a non-empty, non-placeholder value, so
+    the example file does its job: `SLACK_CLIENT_SECRET=` and
+    `SLACK_CLIENT_SECRET=your-secret-here` both pass, and a real one does not.
+
+    Untracked files are not examined. This is about what git can distribute,
+    not about what is on the machine -- the point is that a developer's own
+    working copy stays theirs while nothing reaches a remote.
+
+    Only files where `NAME=value` MEANS a configuration assignment are read:
+    dotenv files and shell scripts. In Python the same shape is a keyword
+    argument -- `tests/test_github.py` passes `GITHUB_CLIENT_SECRET=
+    FAKE_CLIENT_SECRET` to a helper -- and flagging those would make the gate
+    noisy enough to be disabled, which is the only way a gate truly fails.
+    A secret written as a Python literal is a different shape and is what
+    gitleaks is for.
+
+    The failure names the FILE and the VARIABLE and never the value. A gate
+    that printed the secret to prove it found one would put it in the CI log
+    of every run that failed.
+    """
+    assignment = re.compile(
+        r"^\s*(?:export\s+)?("
+        + "|".join(PROVIDER_SECRET_VARIABLES)
+        + r")\s*=\s*(\S.*)$",
+        re.MULTILINE,
+    )
+
+    # Values that are obviously not credentials, so the example file can show
+    # the shape of one.
+    placeholders = re.compile(
+        r"^(?:['\"]?)(?:x+|y+|\.{3}|<[^>]*>|\$\{[^}]*\}|"
+        r"(?:your|my|the|a)[-_].*|.*(?:placeholder|example|changeme|redacted|"
+        r"here|todo|fixme|dummy|sample).*)(?:['\"]?)$",
+        re.IGNORECASE,
+    )
+
+    listed = subprocess.run(
+        ["git", "ls-files", "--cached"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    findings = []
+
+    for name in listed.stdout.splitlines():
+        path = REPO_ROOT / name.strip()
+
+        if not path.is_file():
+            continue
+
+        if not (
+            path.name.startswith(".env")
+            or path.suffix in {".env", ".sh", ".bash", ".ps1"}
+        ):
+            continue
+
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+
+        for variable, value in assignment.findall(text):
+            if placeholders.match(value.strip()):
+                continue
+
+            findings.append(f"{name.strip()}: {variable}")
+
+    assert not findings, (
+        "a tracked file assigns a provider credential: "
+        f"{sorted(set(findings))}. Real values belong in .env, which is "
+        "gitignored; .env.example names the variable and leaves it empty."
+    )
