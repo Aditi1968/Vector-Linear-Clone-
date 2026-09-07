@@ -340,6 +340,8 @@ def graphql_context(**services) -> VectorContext:
         "slack_service",
         "activity_service",
         "template_service",
+        "triage_service",
+        "bulk_service",
     }
     environment = services.pop("environment", "test")
     unexpected = set(services) - slots

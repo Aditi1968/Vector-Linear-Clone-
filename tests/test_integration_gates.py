@@ -295,6 +295,7 @@ def _domain_module(entity_name: str) -> str:
         "NotificationEntity": "notifications",
         "CommentEntity": "comments",
         "LabelEntity": "labels",
+        "LabelGroupEntity": "labels",
         "CycleEntity": "cycles",
         "ProjectEntity": "projects",
         "UserEntity": "auth",

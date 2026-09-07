@@ -454,6 +454,35 @@ type IssueArchivePayload {
   errors: [ValidationErrorType!]!
 }
 
+input IssueBulkArchiveInput {
+  workspaceSlug: String!
+  issueIds: [UUID!]!
+}
+
+type IssueBulkPayload {
+  issues: [IssueSummary!]!
+  count: Int!
+  errors: [ValidationErrorType!]!
+}
+
+"""
+One change applied to many issues, or to none of them. Every field is optional and omitting one leaves that value alone on every issue. At most 100 issues may be named; a longer list is refused rather than truncated.
+"""
+input IssueBulkUpdateInput {
+  workspaceSlug: String!
+  issueIds: [UUID!]!
+  workflowStateId: UUID
+  assigneeId: UUID
+  priority: Int
+  estimate: Int
+  dueDate: Date
+  projectId: UUID
+  milestoneId: UUID
+  cycleId: UUID
+  addLabelIds: [UUID!]! = []
+  removeLabelIds: [UUID!]! = []
+}
+
 input IssueClearParentInput {
   workspaceSlug: String!
   issueId: UUID!
@@ -727,6 +756,11 @@ type Label {
   id: UUID!
   name: String!
   color: String!
+
+  """
+  The label group this label belongs to, or null for one that belongs to none. An id rather than the group itself: a label picker renders a hundred of these and would otherwise resolve a group per row, and the groups are already on the page through `labelGroups`.
+  """
+  groupId: UUID
   createdAt: DateTime!
   updatedAt: DateTime!
 }
@@ -752,9 +786,55 @@ type LabelDeletePayload {
   errors: [ValidationErrorType!]!
 }
 
+type LabelGroup {
+  id: UUID!
+  name: String!
+
+  """
+  Whether an issue may wear at most one label from this group. Enforced by the database, not by this server: attaching a second label from an exclusive group is refused, and so is turning exclusivity on for a group whose labels already share an issue.
+  """
+  exclusive: Boolean!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input LabelGroupCreateInput {
+  workspaceSlug: String!
+  name: String!
+  exclusive: Boolean = null
+}
+
+input LabelGroupDeleteInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type LabelGroupDeletePayload {
+  deletedGroupId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type LabelGroupPayload {
+  group: LabelGroup
+  errors: [ValidationErrorType!]!
+}
+
+input LabelGroupUpdateInput {
+  workspaceSlug: String!
+  id: UUID!
+  name: String!
+  exclusive: Boolean!
+}
+
 type LabelPayload {
   label: Label
   errors: [ValidationErrorType!]!
+}
+
+input LabelSetGroupInput {
+  workspaceSlug: String!
+  labelId: UUID!
+  groupId: UUID = null
 }
 
 input LabelUpdateInput {
@@ -832,6 +912,10 @@ type Mutation {
   labelCreate(input: LabelCreateInput!): LabelPayload!
   labelUpdate(input: LabelUpdateInput!): LabelPayload!
   labelDelete(input: LabelDeleteInput!): LabelDeletePayload!
+  labelGroupCreate(input: LabelGroupCreateInput!): LabelGroupPayload!
+  labelGroupUpdate(input: LabelGroupUpdateInput!): LabelGroupPayload!
+  labelGroupDelete(input: LabelGroupDeleteInput!): LabelGroupDeletePayload!
+  labelSetGroup(input: LabelSetGroupInput!): LabelPayload!
   issueLabelAttach(input: IssueLabelInput!): IssueLabelPayload!
   issueLabelDetach(input: IssueLabelInput!): IssueLabelPayload!
   commentCreate(input: CommentCreateInput!): CommentCreatePayload!
@@ -884,6 +968,13 @@ type Mutation {
   issueTemplateUpdate(input: IssueTemplateUpdateInput!): IssueTemplateSavePayload!
   issueTemplateDelete(input: IssueTemplateDeleteInput!): IssueTemplateDeletePayload!
   issueCreateFromTemplate(input: IssueCreateFromTemplateInput!): IssueCreateFromTemplatePayload!
+  triageEnter(input: TriageEnterInput!): TriagePayload!
+  triageAccept(input: TriageAcceptInput!): TriagePayload!
+  triageDecline(input: TriageDeclineInput!): TriagePayload!
+  triageMarkDuplicate(input: TriageMarkDuplicateInput!): TriagePayload!
+  triageChangeTeam(input: TriageChangeTeamInput!): TriagePayload!
+  issueBulkUpdate(input: IssueBulkUpdateInput!): IssueBulkPayload!
+  issueBulkArchive(input: IssueBulkArchiveInput!): IssueBulkPayload!
 }
 
 type Notification {
@@ -1108,6 +1199,8 @@ type Query {
   """
   invitations(workspaceSlug: String!): [WorkspaceInvitation!]!
   label(workspaceSlug: String!, id: UUID!): Label
+  labelGroups(workspaceSlug: String!): [LabelGroup!]!
+  labelGroup(workspaceSlug: String!, id: UUID!): LabelGroup
   labels(workspaceSlug: String!, first: Int! = 50, after: String = null): LabelConnection!
   cycle(workspaceSlug: String!, id: UUID!): Cycle
   cycles(workspaceSlug: String!, teamId: UUID!): [Cycle!]!
@@ -1133,6 +1226,8 @@ type Query {
   issueViewerIsSubscribed(workspaceSlug: String!, issueId: UUID!): Boolean!
   issueTemplates(workspaceSlug: String!, teamId: UUID = null): [IssueTemplate!]!
   issueTemplate(workspaceSlug: String!, id: UUID!): IssueTemplate
+  triageIssues(workspaceSlug: String!, teamId: UUID!, first: Int! = 25, after: String = null): TriageIssueConnection!
+  triageCount(workspaceSlug: String!, teamId: UUID!): Int!
 }
 
 input RegisterInput {
@@ -1380,6 +1475,53 @@ input TeamCreateInput {
 
 type TeamPayload {
   team: Team
+  errors: [ValidationErrorType!]!
+}
+
+input TriageAcceptInput {
+  workspaceSlug: String!
+  issueId: UUID!
+  workflowStateId: UUID!
+}
+
+input TriageChangeTeamInput {
+  workspaceSlug: String!
+  issueId: UUID!
+  teamId: UUID!
+}
+
+input TriageDeclineInput {
+  workspaceSlug: String!
+  issueId: UUID!
+}
+
+input TriageEnterInput {
+  workspaceSlug: String!
+  issueId: UUID!
+}
+
+type TriageIssue {
+  issue: IssueSummary!
+
+  """
+  When this issue entered the queue. The queue is ordered by it, oldest first, so this is also the issue's position in the list.
+  """
+  enteredAt: DateTime!
+}
+
+type TriageIssueConnection {
+  nodes: [TriageIssue!]!
+  pageInfo: PageInfo!
+}
+
+input TriageMarkDuplicateInput {
+  workspaceSlug: String!
+  issueId: UUID!
+  duplicateOfId: UUID!
+}
+
+type TriagePayload {
+  issue: Issue
   errors: [ValidationErrorType!]!
 }
 

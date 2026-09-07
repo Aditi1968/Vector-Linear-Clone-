@@ -303,8 +303,16 @@ INSERT_LABEL = """
     VALUES ($1, $2, $3, '#ff0000')
 """
 
+# The label's own `exclusivity_key` is READ from `labels` rather than supplied,
+# which is the shape every attach in the application uses. Migration 021 made
+# that column NOT NULL and pinned it to the label with a composite foreign key,
+# so a seed that invented a value would be storing an association whose
+# exclusivity claim its label does not hold.
 INSERT_ISSUE_LABEL = """
-    INSERT INTO issue_labels (workspace_id, issue_id, label_id) VALUES ($1, $2, $3)
+    INSERT INTO issue_labels (workspace_id, issue_id, label_id, exclusivity_key)
+    SELECT $1, $2, labels.id, labels.exclusivity_key
+    FROM labels
+    WHERE labels.workspace_id = $1 AND labels.id = $3
 """
 
 # The workflow state is resolved by CATEGORY from the issue's own team, as a

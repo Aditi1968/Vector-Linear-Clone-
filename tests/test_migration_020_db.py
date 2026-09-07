@@ -1040,6 +1040,7 @@ async def templates(postgres_dsn, connection):
     """
     from app.repositories.issue_labels import IssueLabelRepository
     from app.repositories.issues import IssueRepository
+    from app.repositories.label_groups import LabelGroupRepository
     from app.repositories.labels import LabelRepository
     from app.repositories.teams import TeamRepository
     from app.repositories.templates import TemplateRepository
@@ -1063,6 +1064,7 @@ async def templates(postgres_dsn, connection):
                 pool=pool,
                 repository=LabelRepository(),
                 issue_label_repository=IssueLabelRepository(),
+                group_repository=LabelGroupRepository(),
             ),
         )
     finally:

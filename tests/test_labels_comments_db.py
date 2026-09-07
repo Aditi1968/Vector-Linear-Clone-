@@ -46,6 +46,7 @@ from app.domain.errors import ValidationError
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.comments import CommentRepository
 from app.repositories.issue_labels import IssueLabelRepository
+from app.repositories.label_groups import LabelGroupRepository
 from app.repositories.labels import LabelRepository
 from app.services.comments import CommentService
 from app.services.labels import LabelService
@@ -194,6 +195,7 @@ async def wired(postgres_dsn):
                     pool=pool,
                     repository=LabelRepository(),
                     issue_label_repository=IssueLabelRepository(),
+                    group_repository=LabelGroupRepository(),
                 ),
                 CommentService(pool=pool, repository=CommentRepository()),
                 connection,

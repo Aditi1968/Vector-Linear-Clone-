@@ -7,12 +7,23 @@ from app.graphql.inputs.label import (
     IssueLabelInput,
     LabelCreateInput,
     LabelDeleteInput,
+    LabelGroupCreateInput,
+    LabelGroupDeleteInput,
+    LabelGroupUpdateInput,
+    LabelSetGroupInput,
     LabelUpdateInput,
 )
 from app.graphql.scope import authorized_scope
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import IssueLabelPayload, IssueType
-from app.graphql.types.label import LabelDeletePayload, LabelPayload, LabelType
+from app.graphql.types.label import (
+    LabelDeletePayload,
+    LabelGroupDeletePayload,
+    LabelGroupPayload,
+    LabelGroupType,
+    LabelPayload,
+    LabelType,
+)
 
 
 def _errors(exc: ValidationError) -> list[ValidationErrorType]:
@@ -130,6 +141,93 @@ class LabelMutation:
             return LabelDeletePayload(deleted_label_id=None, errors=_errors(exc))
 
         return LabelDeletePayload(deleted_label_id=deleted_id, errors=[])
+
+    @strawberry.mutation
+    async def label_group_create(
+        self, info: Info, input: LabelGroupCreateInput
+    ) -> LabelGroupPayload:
+        scope = await authorized_scope(info, input.workspace_slug)
+
+        try:
+            entity = await info.context.label_service.create_group(
+                scope=scope,
+                name=input.name,
+                exclusive=input.exclusive,
+            )
+        except ValidationError as exc:
+            return LabelGroupPayload(group=None, errors=_errors(exc))
+
+        return LabelGroupPayload(group=LabelGroupType.from_entity(entity), errors=[])
+
+    @strawberry.mutation
+    async def label_group_update(
+        self, info: Info, input: LabelGroupUpdateInput
+    ) -> LabelGroupPayload:
+        """Rename a group, or change whether it is exclusive.
+
+        Turning exclusivity ON can be refused with GROUP_IN_USE, and the
+        refusal is the database's rather than this server's: migration 021
+        propagates the flag down to `issue_labels`, so an issue already wearing
+        two of this group's labels makes the update violate a unique index. The
+        resolver does not decide that and could not check it without a race.
+        """
+        scope = await authorized_scope(info, input.workspace_slug)
+
+        try:
+            entity = await info.context.label_service.update_group(
+                scope=scope,
+                group_id=input.id,
+                name=input.name,
+                exclusive=input.exclusive,
+            )
+        except ValidationError as exc:
+            return LabelGroupPayload(group=None, errors=_errors(exc))
+
+        return LabelGroupPayload(group=LabelGroupType.from_entity(entity), errors=[])
+
+    @strawberry.mutation
+    async def label_group_delete(
+        self, info: Info, input: LabelGroupDeleteInput
+    ) -> LabelGroupDeletePayload:
+        """Delete a group; its labels survive, ungrouped.
+
+        Nothing cascades onto an issue. The labels keep every issue they were
+        on and only the grouping goes -- which also means every exclusivity
+        rule the group imposed stops applying, without any issue changing.
+        """
+        scope = await authorized_scope(info, input.workspace_slug)
+
+        try:
+            deleted_id = await info.context.label_service.delete_group(
+                scope=scope,
+                group_id=input.id,
+            )
+        except ValidationError as exc:
+            return LabelGroupDeletePayload(deleted_group_id=None, errors=_errors(exc))
+
+        return LabelGroupDeletePayload(deleted_group_id=deleted_id, errors=[])
+
+    @strawberry.mutation
+    async def label_set_group(
+        self, info: Info, input: LabelSetGroupInput
+    ) -> LabelPayload:
+        """Move a label into a group, or out of the one it is in.
+
+        The payload carries the LABEL rather than the group, because the label
+        is what changed: a group's own row is untouched by this.
+        """
+        scope = await authorized_scope(info, input.workspace_slug)
+
+        try:
+            entity = await info.context.label_service.set_label_group(
+                scope=scope,
+                label_id=input.label_id,
+                group_id=input.group_id,
+            )
+        except ValidationError as exc:
+            return LabelPayload(label=None, errors=_errors(exc))
+
+        return LabelPayload(label=LabelType.from_entity(entity), errors=[])
 
     @strawberry.mutation
     async def issue_label_attach(

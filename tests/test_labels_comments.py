@@ -41,6 +41,7 @@ from app.graphql.schema import build_schema
 from app.graphql.viewer import UNAUTHENTICATED_MESSAGE
 from app.repositories.comments import CommentRepository
 from app.repositories.issue_labels import IssueLabelRepository
+from app.repositories.label_groups import LabelGroupRepository
 from app.repositories.labels import LabelRepository
 from app.services.comments import CommentService
 from app.services.labels import (
@@ -77,15 +78,17 @@ def label_service(pool) -> LabelService:
         pool=pool,
         repository=LabelRepository(),
         issue_label_repository=IssueLabelRepository(),
+        group_repository=LabelGroupRepository(),
     )
 
 
-def label_row(name="bug", color=DEFAULT_COLOR) -> dict:
+def label_row(name="bug", color=DEFAULT_COLOR, group_id=None) -> dict:
     """asyncpg.Record supports __getitem__, which a dict models well enough."""
     return {
         "id": LABEL_ID,
         "name": name,
         "color": color,
+        "group_id": group_id,
         "created_at": CREATED_AT,
         "updated_at": CREATED_AT,
     }
@@ -740,6 +743,7 @@ async def test_a_page_of_issues_costs_one_label_query_and_not_one_each():
                 id=LABEL_ID,
                 name="bug",
                 color=DEFAULT_COLOR,
+                group_id=None,
                 created_at=CREATED_AT,
                 updated_at=CREATED_AT,
             )
@@ -843,6 +847,7 @@ def test_the_domain_entities_carry_no_workspace_id():
             id=LABEL_ID,
             name="bug",
             color=DEFAULT_COLOR,
+            group_id=None,
             created_at=CREATED_AT,
             updated_at=CREATED_AT,
         ),

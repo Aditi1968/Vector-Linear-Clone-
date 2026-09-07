@@ -84,6 +84,7 @@ EXPECTED_MIGRATIONS = [
     "018_slack_channels.sql",
     "019_saved_views.sql",
     "020_subscribers_templates.sql",
+    "021_triage_label_groups.sql",
     "022_initiatives.sql",
 ]
 
