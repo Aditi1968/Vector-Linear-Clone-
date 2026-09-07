@@ -3,15 +3,19 @@ import type { RouteObject } from 'react-router-dom'
 import { RequireAuth, authRoutes } from '../../features/auth'
 import { BoardScreen } from '../../features/board'
 import { CycleDetailPage, CycleListPage } from '../../features/cycles'
+import { FavoritesPage } from '../../features/favorites'
 import { InboxPage } from '../../features/inbox'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
 import { MembersPage } from '../../features/members'
 import { MyIssuesPage } from '../../features/myIssues'
 import { onboardingRoutes } from '../../features/onboarding'
 import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
+import { SavedViewsPage } from '../../features/savedViews'
 import { SearchPage } from '../../features/search'
 import { SettingsPage } from '../../features/settings'
 import { TeamIssuesPage, TeamPage } from '../../features/teams'
+import { TemplatesPage } from '../../features/templates'
+import { TriagePage } from '../../features/triage'
 import { AppLayout } from '../layout'
 import { NotFound } from './NotFound'
 import { ROUTE_SEGMENTS, WORKSPACE_SLUG_PARAM } from './paths'
@@ -21,27 +25,17 @@ import { RouteError } from './RouteError'
 /**
  * The routes whose screens are still to come.
  *
- * A table rather than twelve near-identical entries, because every one of
+ * A table rather than eight near-identical entries, because every one of
  * them differs in exactly three strings and nothing else. The description is
  * what the page says it will be -- a sentence about the screen, never a
  * promise about when.
+ *
+ * Four of the original twelve have landed and left this table: triage, saved
+ * views, favorites and templates are real screens now, mounted individually
+ * below. Removing an entry from here and adding a route object there is the
+ * whole of what replacing a placeholder involves.
  */
 const SECOND_WAVE = [
-  {
-    segment: ROUTE_SEGMENTS.triage,
-    title: 'Triage',
-    description: 'Work that has arrived but has not been accepted into a team yet.',
-  },
-  {
-    segment: ROUTE_SEGMENTS.savedViews,
-    title: 'Saved views',
-    description: 'Filter sets someone named and kept, shared across the workspace.',
-  },
-  {
-    segment: ROUTE_SEGMENTS.favorites,
-    title: 'Favorites',
-    description: 'The issues, projects and views you starred.',
-  },
   {
     segment: ROUTE_SEGMENTS.initiatives,
     title: 'Initiatives',
@@ -56,11 +50,6 @@ const SECOND_WAVE = [
     segment: ROUTE_SEGMENTS.documents,
     title: 'Documents',
     description: 'Long-form writing that belongs to the workspace rather than to an issue.',
-  },
-  {
-    segment: ROUTE_SEGMENTS.templates,
-    title: 'Templates',
-    description: 'Pre-filled issues, so recurring work is filed the same way each time.',
   },
   {
     segment: ROUTE_SEGMENTS.releases,
@@ -115,7 +104,7 @@ const SECOND_WAVE = [
  *
  * ## Screens that are not built yet
  *
- * The twelve second-wave routes at the foot of the table. Each mounts
+ * The eight second-wave routes at the foot of the table. Each mounts
  * `./Placeholder.tsx`, which is the right thing for a route whose screen is
  * somebody else's to write: the route is real, the URL is the one `paths`
  * builds, and the page says outright that it does not exist yet rather than
@@ -217,6 +206,25 @@ export const routes: RouteObject[] = [
       {
         path: ROUTE_SEGMENTS.cycleDetail,
         element: <CycleDetailPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.triage,
+        element: <TriagePage />,
+      },
+      {
+        // The list and the selected view's results are one screen: there is
+        // no `savedViewDetail` segment, so selecting a view changes what the
+        // panel shows rather than navigating.
+        path: ROUTE_SEGMENTS.savedViews,
+        element: <SavedViewsPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.favorites,
+        element: <FavoritesPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.templates,
+        element: <TemplatesPage />,
       },
       ...SECOND_WAVE.map(({ segment, title, description }) => ({
         path: segment,

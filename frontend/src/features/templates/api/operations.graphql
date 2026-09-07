@@ -1,0 +1,119 @@
+# Every GraphQL document the templates feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it.
+
+# One template, whole.
+#
+# Every field of the stored row is selected, and that is load-bearing rather
+# than thorough: `IssueTemplateUpdateInput.template` is an
+# `IssueTemplateFieldsInput!`, which is a WHOLE-ROW REPLACE, not a patch.
+# Every field it does not carry takes its schema default -- `null` for the
+# scalars, `[]` for `labelIds` -- so an update built from a form that renders
+# six of the eleven fields would silently clear the other five.
+#
+# ../components/TemplateForm.tsx therefore seeds its draft from this
+# fragment and sends the untouched fields back unchanged. That is why
+# `assigneeId`, `projectId`, `cycleId` and `labelIds` are selected even
+# though this pass renders no picker for them: they are not displayed, they
+# are preserved. Dropping one from this selection is a data-loss bug, not a
+# smaller query.
+#
+# `issueTemplates` takes no page-size argument, so the whole list is charged
+# once: 11 of 1000.
+fragment IssueTemplateFields on IssueTemplate {
+  id
+  teamId
+  name
+  title
+  description
+  priority
+  estimate
+  assigneeId
+  projectId
+  cycleId
+  labelIds
+}
+
+# Every template in the workspace.
+#
+# `teamId` is an optional narrowing and is not sent: a template with no team
+# is a workspace-wide template, and filtering by team would hide exactly
+# those. The screen groups by team on the client instead, from the `teamId`
+# already on each row.
+query IssueTemplateList($workspaceSlug: String!) {
+  issueTemplates(workspaceSlug: $workspaceSlug) {
+    ...IssueTemplateFields
+  }
+}
+
+# Create a template.
+#
+# Refetches the list: `issueTemplates` is a plain list field this payload
+# does not contain, so a created row cannot arrive by normalisation.
+mutation IssueTemplateCreate($input: IssueTemplateCreateInput!) {
+  issueTemplateCreate(input: $input) {
+    template {
+      ...IssueTemplateFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Update a template. Whole-row replace -- see the fragment above.
+#
+# No refetch: the payload returns the same fragment over the same
+# `IssueTemplate:<id>` entity, so the list row corrects itself.
+mutation IssueTemplateUpdate($input: IssueTemplateUpdateInput!) {
+  issueTemplateUpdate(input: $input) {
+    template {
+      ...IssueTemplateFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Delete a template. The payload's id field is `id`, not `deletedTemplateId`
+# -- unlike `SavedViewDeletePayload.deletedSavedViewId` and
+# `FavoriteDeletePayload.deletedFavoriteId`. Written as the schema declares
+# it rather than normalised to match its neighbours.
+mutation IssueTemplateDelete($input: IssueTemplateDeleteInput!) {
+  issueTemplateDelete(input: $input) {
+    id
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# File a real issue from a template.
+#
+# `teamId` is required by `IssueCreateFromTemplateInput` even when the
+# template names one, because a template with `teamId: null` is workspace-
+# wide and an issue must land in exactly one team. The screen uses the
+# template's team where it has one and asks otherwise; it never guesses.
+#
+# `title` is an optional override of the template's own.
+mutation IssueCreateFromTemplate($input: IssueCreateFromTemplateInput!) {
+  issueCreateFromTemplate(input: $input) {
+    issue {
+      id
+      identifier
+      title
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

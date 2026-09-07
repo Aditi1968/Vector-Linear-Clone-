@@ -1,0 +1,196 @@
+# Every GraphQL document the triage feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it. Edit here, never
+# `src/generated/`.
+#
+# The page-size rule that governs `TriageQueue` below is documented at length
+# in `src/features/issues/api/operations.graphql`: `first` must be a literal,
+# because a variable has no value at validation time and
+# `app/graphql/limits.py` charges it at `ASSUMED_PAGE_SIZE = 100`. Writing
+# `first: $first` here would price this document at 100 rows no matter that
+# we send 25.
+#
+# Operation names are unique across every `.graphql` file under `src/`, since
+# codegen emits one module.
+
+# One row of the queue.
+#
+# `TriageIssue.issue` is `IssueSummary!`, NOT `Issue` -- so what a triage row
+# can show is fixed by the schema and not by taste. `IssueSummary` carries
+# `id, identifier, title, description, priority, completedAt, createdAt,
+# updatedAt` and nothing else: there is no `assigneeId`, no
+# `workflowStateId`, no `labels`, no `dueDate`.
+#
+# That is why ../components/TriageRow.tsx draws a priority glyph, a key, a
+# title and an age, and why it draws no status glyph and no avatar. The
+# alternative -- resolving each row's full `Issue` by id -- is an N+1 across
+# the queue, and the complexity rule prices fan-out deliberately; defeating
+# that guard to fill in two columns would be the wrong trade. The row's
+# action menu can still *set* an assignee and a priority, because a write
+# does not need to read the current value first.
+#
+# `description` is selected and `completedAt` is not: the first is what the
+# duplicate picker shows to tell two similar issues apart, and the second is
+# meaningless in a queue whose whole population is un-accepted work.
+fragment TriageRowFields on TriageIssue {
+  issue {
+    id
+    identifier
+    title
+    description
+    priority
+  }
+  # When the issue entered the queue. The queue is ordered by it, oldest
+  # first, so this doubles as the row's position.
+  enteredAt
+}
+
+# One team's triage queue, plus how long it is.
+#
+# `teamId` is required by the schema -- a triage queue belongs to a team, so
+# there is no workspace-wide queue to ask for, which is why the screen leads
+# with a team picker exactly as the cycles screen does.
+#
+# `triageCount` rides in the same document rather than in a second query: it
+# is a single integer scoped to the same two arguments, so asking separately
+# would be a second round trip for one number that must agree with the list
+# beside it.
+#
+# `TriageIssueConnection` has `nodes` and `pageInfo` and NO `totalCount` --
+# `triageCount` is how the total is known, and the two are deliberately not
+# the same number: the count is the whole queue, the list is what has been
+# paged in.
+#
+# Cost: 25 x (nodes 5 + pageInfo 2) = 175, plus 1 for the count, of 1000.
+query TriageQueue($workspaceSlug: String!, $teamId: UUID!, $after: String) {
+  triageIssues(
+    workspaceSlug: $workspaceSlug
+    teamId: $teamId
+    first: 25
+    after: $after
+  ) {
+    nodes {
+      ...TriageRowFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+  triageCount(workspaceSlug: $workspaceSlug, teamId: $teamId)
+}
+
+# The five triage verbs.
+#
+# Every one returns `TriagePayload { issue, errors }`, and every one of them
+# changes which rows are in the queue -- accepting, declining and marking a
+# duplicate all remove a row, and changing team moves it to another team's
+# queue entirely. Normalising the returned `Issue` cannot fix that, because
+# membership of a server-filtered connection is not a property of any entity
+# in it, so ../api/mutations.ts refetches `TriageQueue` after each.
+#
+# `issue { id }` is selected rather than nothing: it is the cheapest proof
+# that the write landed on the row we named, and `readPayload` treats a
+# payload with neither an issue nor an error as a failed save.
+
+# Put an issue INTO the queue. Not reachable from this screen -- everything
+# already here is in triage -- and kept because the queue's own emptiness is
+# the one place the product can explain what triage is for. See ../api/index.ts.
+mutation TriageEnter($input: TriageEnterInput!) {
+  triageEnter(input: $input) {
+    issue {
+      id
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Accept an issue into a workflow state. The state is required by the schema
+# and is not defaulted here: "accepted" is not a state, it is whichever state
+# of that team's board the person chose.
+mutation TriageAccept($input: TriageAcceptInput!) {
+  triageAccept(input: $input) {
+    issue {
+      id
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation TriageDecline($input: TriageDeclineInput!) {
+  triageDecline(input: $input) {
+    issue {
+      id
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation TriageMarkDuplicate($input: TriageMarkDuplicateInput!) {
+  triageMarkDuplicate(input: $input) {
+    issue {
+      id
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation TriageChangeTeam($input: TriageChangeTeamInput!) {
+  triageChangeTeam(input: $input) {
+    issue {
+      id
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Setting a priority or an assignee from the queue.
+#
+# `issueUpdate` and not a triage-specific mutation, deliberately: the backend
+# exposes no `triageAssign` or `triagePrioritise` because prioritising an
+# issue is the same act wherever it is done.
+#
+# A second document over the same field rather than the issues feature's
+# `IssueUpdate`, because that one selects `IssueDetailFields` for its
+# optimistic response and `useIssueMutations().updateIssue` takes a whole
+# `IssueDetailFields` as its first argument -- which a triage row does not
+# have and cannot cheaply get, since `TriageIssue.issue` is an
+# `IssueSummary`. This selects the two fields the queue can change.
+#
+# Note the two are different cache types: `IssueSummary:<id>` is not
+# `Issue:<id>`, so normalising this result does NOT update the row above it.
+# ../api/mutations.ts refetches `TriageQueue`, same as the five verbs.
+mutation TriageIssueUpdate($id: UUID!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) {
+    issue {
+      id
+      priority
+      assigneeId
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

@@ -1,0 +1,112 @@
+# Every GraphQL document the favorites feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it.
+
+# The viewer's own shortcut list for this workspace.
+#
+# ## What a favorite does not carry
+#
+# `Favorite` is `{ id, teamId, projectId, savedViewId, position, createdAt }`
+# and exactly one of the three target columns is set. It carries no name, no
+# title and no resolved target object -- the schema exposes no
+# `Favorite.team`, `Favorite.project` or `Favorite.savedView`.
+#
+# So a row's label has to be resolved from the id. This feature does it by
+# joining against lists it already needs for the "add" menu -- teams and
+# projects from `useWorkspaceContext()` (one document shared with every other
+# screen) and views from `FavoriteSavedViews` below. Three workspace-level
+# lists for the whole screen, not one request per row: the ids are looked up
+# in maps built once. A favorite whose target has since been deleted resolves
+# to nothing, and ../components/FavoriteRow.tsx says so rather than
+# rendering a blank.
+#
+# `favorites` takes no page-size argument, so the complexity rule charges it
+# once: 5 of 1000. It is not paginated because a sidebar shortcut list is not
+# a thing anyone has thousands of.
+query FavoriteList($workspaceSlug: String!) {
+  favorites(workspaceSlug: $workspaceSlug) {
+    id
+    teamId
+    projectId
+    savedViewId
+    # Neither unique nor contiguous -- ties break by id, so two favorites
+    # sharing a number still order stably. ../lib/favorites.ts relies on
+    # that rather than assuming 0..n-1.
+    position
+  }
+}
+
+# The names behind `Favorite.savedViewId`, and the candidates for the menu.
+#
+# Its own document rather than the saved-views feature's `SavedViewList`,
+# and only two fields: this screen needs a name for an id and a list to
+# choose from, never a filter or a layout. Selecting the whole row would make
+# this 25 x 19 instead of 50 x 2.
+#
+# Cost: 50 x 2 = 100 of 1000.
+query FavoriteSavedViews($workspaceSlug: String!) {
+  savedViews(workspaceSlug: $workspaceSlug, first: 50) {
+    nodes {
+      id
+      name
+    }
+  }
+}
+
+# Add a favorite.
+#
+# `FavoriteAddInput` takes all three target columns and requires exactly one
+# to be set -- sending none or more than one is a field error rather than a
+# guess. ../api/mutations.ts takes a tagged target and expands it, so a call
+# site cannot pass two.
+#
+# Refetches the list: `favorites` is a plain list field that this payload
+# does not contain, so nothing normalisation does can add a row to it.
+mutation FavoriteAdd($input: FavoriteAddInput!) {
+  favoriteAdd(input: $input) {
+    favorite {
+      id
+      teamId
+      projectId
+      savedViewId
+      position
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation FavoriteRemove($input: FavoriteRemoveInput!) {
+  favoriteRemove(input: $input) {
+    deletedFavoriteId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Move one favorite to a position.
+#
+# Returns the moved favorite only. Reordering renumbers its neighbours
+# server-side, and their new positions are not in this payload, so the list
+# is refetched rather than patched -- writing the neighbours' positions here
+# from what the client guessed is how two clients end up disagreeing about an
+# order that the server alone decides.
+mutation FavoriteReorder($input: FavoriteReorderInput!) {
+  favoriteReorder(input: $input) {
+    favorite {
+      id
+      position
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
