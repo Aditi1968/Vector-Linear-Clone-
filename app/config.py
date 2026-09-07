@@ -25,6 +25,37 @@ class Settings(BaseSettings):
     database_url: SecretStr
     environment: Environment
 
+    # Whether THIS process also runs the embedding worker.
+    #
+    # Semantic search needs `issue_embeddings` filled in, and nothing fills it
+    # in on its own: migration 025 builds the whole read path and PostgreSQL has
+    # no model, so the vectors arrive from a background pass. This repository
+    # has no cron, no Celery and no queue broker, and adding one to run a
+    # coroutine every thirty seconds would be a deployment dependency bought for
+    # a `while True`. So the pass is a task on the application's own lifespan --
+    # see `app.main.lifespan` -- and this flag is what starts it.
+    #
+    # Off by default, and that is the safe value rather than the timid one. A
+    # deployment that sets nothing gets exactly the behaviour it had before this
+    # existed: `embeddingsRefresh` still works, `embeddingIndexingState` still
+    # reports the truth, and no process quietly starts doing model work nobody
+    # asked for. Turning it ON is the deliberate act, and it is one variable.
+    #
+    # HOW TO RUN IT, plainly. Set `EMBEDDING_WORKER_ENABLED=true` on ONE
+    # deployment of this application and start it exactly as any other:
+    # `uvicorn app.main:create_app --factory`. That process then serves requests
+    # AND drains the queue. To keep model work off the request path, run a
+    # second deployment of the same image with the flag on and no traffic routed
+    # to it -- there is no separate entrypoint to maintain, and no `scripts/`
+    # module either, because the Dockerfile's build context is `app` and
+    # `requirements.txt` and nothing else.
+    #
+    # Setting it on SEVERAL processes is safe and is the point of the queue:
+    # `FOR UPDATE SKIP LOCKED` makes two workers' claims disjoint, so they share
+    # the backlog rather than duplicating it. See
+    # migrations/028_embedding_jobs.sql.
+    embedding_worker_enabled: bool = False
+
     # --- GitHub App -----------------------------------------------------
     #
     # Every field below is optional, and that is the whole design. Vector is

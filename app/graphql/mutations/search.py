@@ -21,10 +21,21 @@ class SearchMutation:
     reasons `SearchService.refresh_embeddings` gives -- model latency does not
     belong on the path of filing an issue, and an issue edited three times in
     its first minute would be embedded four times to keep the last. So the
-    embeddings arrive from a background pass, and this project has no scheduler
-    and no worker process to hang one on. A field is the smallest honest way to
-    make that pass reachable at all; a cron or a queue consumer calls it in the
-    same way a person can today.
+    embeddings arrive from a background pass.
+
+    THERE IS NOW A WORKER THAT RUNS THAT PASS BY ITSELF -- `EmbeddingWorker`,
+    started from the application's lifespan when `EMBEDDING_WORKER_ENABLED` is
+    set, draining the queue migration 028 added. This field is kept anyway and
+    is not made redundant by it: it is the way to force a sweep NOW for one
+    workspace -- after a bulk import, or on a deployment that has deliberately
+    left the worker off -- and it is the only path that exists at all when no
+    process has the flag. The two cannot fight, because both write through
+    `EmbeddingRepository.upsert` and both decide what is stale from the same
+    anti-join; the worst case of running both is one wasted vector.
+
+    What has changed is what a client should show when this returns zero.
+    `embeddingIndexingState` is the field that says whether zero meant "nothing
+    to do" or "no model here".
 
     It is idempotent and self-limiting: it embeds only issues whose stored
     vector does not match their current text, so calling it twice in a row does

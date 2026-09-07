@@ -29,6 +29,7 @@ from app.repositories.bulk import BulkRepository
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
 from app.repositories.documents import DocumentRepository
+from app.repositories.embedding_jobs import EmbeddingJobRepository
 from app.repositories.embeddings import EmbeddingRepository
 from app.repositories.github import GithubRepository
 from app.repositories.initiatives import InitiativeRepository
@@ -473,6 +474,13 @@ async def get_context() -> VectorContext:
             issue_repository=IssueRepository(),
             project_repository=ProjectRepository(),
             embedding_repository=EmbeddingRepository(),
+            # The fourth, and it reads a table no search statement touches:
+            # `embeddingIndexingState` answers "is the index still building"
+            # from `embedding_jobs`, which is the background worker's own
+            # bookkeeping. Wired here rather than left to the worker, because
+            # the question is asked by a client on the request path and the
+            # worker is a process-wide object with no scope.
+            job_repository=EmbeddingJobRepository(),
             # What makes search hybrid rather than lexical, decided HERE and
             # not per request inside the service. `load_embedder` never fails
             # -- it falls back to a deterministic local embedder when no model

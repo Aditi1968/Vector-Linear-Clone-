@@ -4,10 +4,15 @@ import strawberry
 from graphql import GraphQLError
 from strawberry.types import Info
 
+from app.domain.embedding_jobs import IndexingState
 from app.domain.errors import ValidationError, WorkspaceAccessDeniedError
 from app.graphql.queries.memberships import WORKSPACE_NOT_FOUND_MESSAGE
 from app.graphql.scope import authorized_scope
-from app.graphql.types.search import DuplicateSuggestionType, SearchResultsType
+from app.graphql.types.search import (
+    DuplicateSuggestionType,
+    EmbeddingIndexingStateType,
+    SearchResultsType,
+)
 from app.graphql.viewer import viewer_user_id
 
 
@@ -169,3 +174,48 @@ class SearchQuery:
             DuplicateSuggestionType.from_domain(suggestion, scope)
             for suggestion in suggestions
         ]
+
+    @strawberry.field
+    async def embedding_indexing_state(
+        self,
+        info: Info,
+        workspace_slug: str,
+    ) -> EmbeddingIndexingStateType:
+        """How much of this workspace's semantic index exists.
+
+        THE FIELD THAT MAKES `issueDuplicateSuggestions` READABLE. That field
+        answers with an empty list both when nothing is similar and when nothing
+        has been indexed, and those are not the same sentence -- on a fresh
+        install it is always the second, so an interface built on it alone has
+        been telling people "no possible duplicates" about a workspace whose
+        index does not exist yet. Select this beside it and the interface can
+        say "index building -- N pending" instead.
+
+        Authorized through the same `authorized_scope` every workspace-scoped
+        field uses, and it has to be: the counts are a fact about this
+        workspace's issues, so a caller who could read them for a slug they do
+        not belong to would learn how many issues that workspace holds. The
+        scope becomes a `workspace_id` equality inside the statement rather than
+        a filter over an aggregate -- see `EmbeddingJobRepository.indexing_state`
+        on why that distinction matters for a COUNT in particular.
+
+        No arguments beyond the workspace. There is nothing to page and nothing
+        to bound: the answer is four scalars whose cost is one indexed count
+        over the caller's own tenant.
+
+        `enabled` is the one place this feature tells a client about the
+        SERVER's configuration, and a client must read it before rendering the
+        counts -- see `SearchService.indexing_state` for why that disclosure is
+        deliberate here and refused everywhere else in the feature.
+        """
+        scope = await authorized_scope(info, workspace_slug)
+
+        # Annotated rather than returned inline, for the reason
+        # `app.graphql.scope.authorized_scope` gives about its own scope: the
+        # context attribute is untyped here, so passing it straight on would
+        # satisfy any signature at all.
+        state: IndexingState = await info.context.search_service.indexing_state(
+            scope=scope,
+        )
+
+        return EmbeddingIndexingStateType.from_domain(state)

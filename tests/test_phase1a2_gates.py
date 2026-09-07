@@ -89,6 +89,7 @@ EXPECTED_MIGRATIONS = [
     "023_documents.sql",
     "024_releases.sql",
     "025_semantic_search.sql",
+    "028_embedding_jobs.sql",
 ]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the
