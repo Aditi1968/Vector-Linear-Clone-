@@ -5,13 +5,19 @@ from a machine that has never heard of this schema. Both are redirects and raw
 bodies rather than documents and variables, which is exactly the case CLAUDE.md
 reserves REST for.
 
-Three protections live here and none of them is optional:
+Four protections live here and none of them is optional:
 
 * every install is minted with a single-use `state` bound to the caller's
   session, and the callback refuses anything else. Without it, a link in an
   email is enough to attach an attacker's GitHub installation to somebody
   else's workspace -- the victim is signed in, so the callback would authorize
   perfectly;
+* the installation id the callback is handed is treated as a CLAIM and never
+  as proof. The state says this browser started an install; it does not say
+  which installation that install produced, and GitHub's ids are a small
+  ascending counter, so naming another organisation's is a guess anyone can
+  make. Only /github/webhook can turn a claim into a connection, because only
+  its HMAC proves GitHub is the one speaking;
 * every delivery is verified against GitHub's HMAC over the RAW body before
   anything parses it, and a failure is refused with no detail at all;
 * every redirect target is checked against a configured allowlist. A callback
@@ -102,7 +108,24 @@ UNAUTHORIZED_DETAIL = "Unauthorized"
 # What the callback says when the deployment configured no redirect allowlist.
 # A page rather than a guess: there is nowhere this server has been told it may
 # send a browser, and inventing one is the open redirect this module refuses.
-CONNECTED_MESSAGE = "GitHub connected. You can close this window."
+#
+# It does not say "connected", because the callback does not connect anything.
+# It records a claim that GitHub has yet to confirm, and a page telling the
+# admin otherwise would be the same untruth `githubIntegration` used to tell.
+CLAIMED_MESSAGE = "GitHub install received. Waiting for GitHub to confirm it."
+
+# What a caller is told when the installation they named is spoken for.
+#
+# Deliberately vague about which workspace holds it and about whether the hold
+# is a live connection or an unconfirmed claim. Either answer would turn this
+# endpoint into an oracle for "is installation N in use on this deployment",
+# which is one query short of the enumeration the claim window exists to make
+# expensive. It does say the refusal may not be permanent, because an
+# unconfirmed claim expires and the honest owner needs to know to try again.
+CLAIMED_ELSEWHERE_DETAIL = (
+    "This GitHub installation is already spoken for. If you have just "
+    "installed the app, wait a few minutes and try again."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -400,13 +423,21 @@ async def callback(
     is a bearer credential this server has no use for and no safe place to
     keep, so the one thing to do with it is nothing.
 
-    The installation id is the client's, and this server cannot verify that the
-    caller owns the installation it names -- that needs a call to
-    `GET /app/installations/{id}` signed with the app's private key, which is
-    the upgrade this comment exists to name. Two things bound it today: the
-    state proves the redirect belongs to this browser's own install attempt,
-    and `github_installations_installation_id_key` means an installation
-    already claimed by another workspace is refused rather than shared.
+    The installation id is the client's, and this endpoint treats it as an
+    unproven claim rather than a fact, because it is one. The state proves the
+    redirect belongs to this browser's own install attempt; it says nothing
+    about which installation that attempt produced, and GitHub numbers
+    installations with a small ascending counter, so `?installation_id=N` for
+    somebody else's N costs an attacker a guess. What this call records is
+    therefore a claim with a deadline (`GithubService.connect`), and only a
+    signature-verified delivery on /github/webhook can turn it into a
+    connection.
+
+    That is the strongest binding available here. The stronger one is
+    `GET /app/installations/{id}` signed with the app's private key, which
+    would settle ownership in one round trip -- and needs RS256 JWT signing
+    and an HTTP client in the runtime, neither of which this application
+    carries. Until it does, the claim window is what stands in.
 
     Every exit goes through `_clear_and_return`, including the failures. That
     is the other half of single use: a state that survived a rejected callback
@@ -483,7 +514,7 @@ async def _complete_install(
     except GithubInstallationClaimedError:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This GitHub installation is already connected.",
+            detail=CLAIMED_ELSEWHERE_DETAIL,
         ) from None
     except WorkspaceAccessDeniedError:
         raise _not_found() from None
@@ -497,7 +528,7 @@ async def _complete_install(
     )
 
     if target is None:
-        return PlainTextResponse(CONNECTED_MESSAGE)
+        return PlainTextResponse(CLAIMED_MESSAGE)
 
     return RedirectResponse(target, status_code=status.HTTP_302_FOUND)
 
@@ -513,6 +544,14 @@ async def webhook(
     ordering is the whole point: `json.loads` followed by `json.dumps` is not
     the same bytes, so a signature checked against a re-serialised payload
     proves nothing about what arrived.
+
+    The verification below is also the only thing in this application that can
+    establish which workspace owns an installation. `GithubService.connect`
+    records a claim; this endpoint is where a claim is confirmed, and it can be
+    because the HMAC proves GitHub sent the payload naming that installation.
+    Loosening this check does not merely admit forged repository lists -- it
+    hands an attacker the ability to confirm their own claim on somebody
+    else's organisation.
 
     A rejected delivery is a 401 with a fixed string. It does not say whether
     the header was missing, malformed, or right for a different secret, and it

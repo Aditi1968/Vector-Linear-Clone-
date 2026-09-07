@@ -595,12 +595,13 @@ async def test_connecting_is_refused_on_an_unconfigured_deployment():
     assert repository.calls == []
 
 
-async def test_connecting_records_the_installation_against_the_caller():
+async def test_connecting_records_the_claim_against_the_caller():
+    """PENDING, not CONNECTED: see the claim section further down."""
     service, repository = build_service()
 
     integration = await service.connect(make_scope(), installation_id=INSTALLATION_ID)
 
-    assert integration.status == "connected"
+    assert integration.status == "pending"
     assert repository.called("insert_installation") == [
         ("insert_installation", WORKSPACE_ID, INSTALLATION_ID, VIEWER_USER_ID)
     ]
@@ -618,6 +619,7 @@ async def test_reconnecting_replaces_rather_than_merges():
     assert [call[0] for call in repository.calls] == [
         "delete_repositories",
         "delete_installation",
+        "delete_expired_claim",
         "insert_installation",
     ]
     assert repository.repositories == []
@@ -665,13 +667,19 @@ def installation_payload(action="created", repositories=None, login="acme"):
 
 
 async def test_a_delivery_for_an_unknown_installation_changes_nothing():
-    """Ordinary, not an error: installed on GitHub, never finished here."""
+    """Ordinary, not an error: installed on GitHub, never claimed here.
+
+    Two lookups and no write. The second is the confirmation attempt -- the
+    action is `created`, so there could have been a claim to promote -- and it
+    finds nothing either.
+    """
     service, repository = build_service(workspace_id=None)
 
     await service.apply_webhook(event="installation", payload=installation_payload())
 
     assert [call[0] for call in repository.calls] == [
-        "find_workspace_by_installation_id"
+        "find_confirmed_workspace_by_installation_id",
+        "confirm_installation",
     ]
 
 
@@ -912,18 +920,6 @@ async def test_an_action_that_is_not_a_confirmation_confirms_nothing(action):
     assert repository.called("set_account_login") == []
 
 
-async def test_a_delivery_for_an_installation_nobody_claimed_writes_nothing():
-    service, repository = build_service(workspace_id=None)
-
-    await service.apply_webhook(event="installation", payload=confirming_payload())
-
-    assert [call[0] for call in repository.calls] == [
-        "find_confirmed_workspace_by_installation_id",
-        "confirm_installation",
-    ]
-    assert repository.repositories == []
-
-
 async def test_an_expired_claim_is_not_confirmed_by_a_late_delivery():
     """The window is the whole defence.
 
@@ -948,9 +944,7 @@ async def test_an_expired_claim_is_not_confirmed_by_a_late_delivery():
     assert repository.repositories == []
 
 
-@pytest.mark.parametrize(
-    "action", ["created", "new_permissions_accepted", "unsuspend"]
-)
+@pytest.mark.parametrize("action", ["created", "new_permissions_accepted", "unsuspend"])
 async def test_a_signed_delivery_confirms_the_claim_it_names(action):
     """The honest path, for each action that accompanies a live installation.
 
