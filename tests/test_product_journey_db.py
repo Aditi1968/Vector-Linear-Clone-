@@ -681,9 +681,7 @@ async def test_a_whole_product_journey_over_http(application):
                 },
             ),
         ):
-            listed = await query(
-                ada, list_document, slug="aurora", filter=issue_filter
-            )
+            listed = await query(ada, list_document, slug="aurora", filter=issue_filter)
             found = listed["issues"]
 
             assert found["totalCount"] == 1, name
@@ -940,7 +938,9 @@ async def test_a_whole_product_journey_over_http(application):
             # The issue is a parent, not a child.
             "parent": None,
             "children": {"nodes": [{"identifier": "ENG-2"}]},
-            "relations": {"nodes": [{"type": "RELATED", "issue": {"identifier": "ENG-3"}}]},
+            "relations": {
+                "nodes": [{"type": "RELATED", "issue": {"identifier": "ENG-3"}}]
+            },
             "comments": {"nodes": [{"body": "Starting on this."}]},
         }
 
@@ -1042,7 +1042,9 @@ async def test_attaching_a_label_reports_what_it_did(operation, application):
             )
 
         document = ATTACH_LABEL if operation == "attach" else DETACH_LABEL
-        expected = [{"id": label["id"], "name": "urgent"}] if operation == "attach" else []
+        expected = (
+            [{"id": label["id"], "name": "urgent"}] if operation == "attach" else []
+        )
 
         payload = await mutate(
             client,
@@ -1076,7 +1078,10 @@ async def two_workspaces(application):
 
         seeded = {}
 
-        for client, slug, key in ((first, "aurora", "AUR"), (second, "borealis", "BOR")):
+        for client, slug, key in (
+            (first, "aurora", "AUR"),
+            (second, "borealis", "BOR"),
+        ):
             await mutate(
                 client,
                 WORKSPACE_CREATE,
@@ -1200,9 +1205,7 @@ async def test_a_second_workspace_reaches_none_of_the_first(operation, two_works
 
     document = CROSS_TENANT_OPERATIONS[operation]
 
-    refused = await post(
-        second, document, slug="aurora", id=seeded["aurora"]["issue"]
-    )
+    refused = await post(second, document, slug="aurora", id=seeded["aurora"]["issue"])
     absent = await post(
         second,
         document,
@@ -1463,7 +1466,6 @@ async def test_a_filtered_walk_in_a_non_default_order_returns_every_row_once(
     client, teams, wanted = paged_workspace
 
     walked = []
-    cursors = []
     after = None
 
     # Bounded: PAGED_ISSUES // PAGE_SIZE + 2 is one more request than the walk
@@ -1486,7 +1488,6 @@ async def test_a_filtered_walk_in_a_non_default_order_returns_every_row_once(
         assert page["totalCount"] == PAGED_ISSUES
 
         walked.extend(node["id"] for node in page["nodes"])
-        cursors.append(page["pageInfo"]["endCursor"])
 
         if not page["pageInfo"]["hasNextPage"]:
             break
@@ -1516,9 +1517,14 @@ async def test_a_filtered_walk_in_a_non_default_order_returns_every_row_once(
 
     assert walked == [node["id"] for node in whole["nodes"]]
 
-    # And it really was sorted by priority, not merely returned whole.
+    # And it really was sorted by priority -- by URGENCY, which is not the
+    # raw column. 0 is "nobody has triaged this" rather than the lowest
+    # priority there is, so ascending runs 1, 2, 3 and then the untriaged
+    # last. A test that asserted `sorted(...)` here would be asserting the
+    # column and would fail against the product's documented ordering.
     assert [node["priority"] for node in whole["nodes"]] == sorted(
-        node["priority"] for node in whole["nodes"]
+        (node["priority"] for node in whole["nodes"]),
+        key=lambda priority: (priority == 0, priority),
     )
 
 
@@ -1641,12 +1647,9 @@ async def test_the_migration_chain_applies_from_an_empty_database_in_order(
         ]
 
         # A second full pass writes nothing and raises nothing.
-        assert await apply_all_migrations(connection) == [
-            path.name for path in files
-        ]
-        assert (
-            await connection.fetchval("SELECT count(*) FROM schema_migrations")
-            == len(files)
-        )
+        assert await apply_all_migrations(connection) == [path.name for path in files]
+        assert await connection.fetchval(
+            "SELECT count(*) FROM schema_migrations"
+        ) == len(files)
     finally:
         await connection.close()
