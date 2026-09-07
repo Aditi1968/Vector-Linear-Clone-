@@ -3,6 +3,7 @@ import type { RouteObject } from 'react-router-dom'
 import { RequireAuth, authRoutes } from '../../features/auth'
 import { CycleDetailPage, CycleListPage } from '../../features/cycles'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
+import { MyIssuesPage } from '../../features/myIssues'
 import { onboardingRoutes } from '../../features/onboarding'
 import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
 import { AppLayout } from '../layout'
@@ -82,12 +83,7 @@ export const routes: RouteObject[] = [
       { path: ROUTE_SEGMENTS.issueDetail, element: <IssueDetailPage /> },
       {
         path: ROUTE_SEGMENTS.myIssues,
-        element: (
-          <Placeholder
-            title="My Issues"
-            description="The issues assigned to you, across every team in this workspace."
-          />
-        ),
+        element: <MyIssuesPage />,
       },
       {
         path: ROUTE_SEGMENTS.inbox,
