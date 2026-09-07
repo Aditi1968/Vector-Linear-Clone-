@@ -1,0 +1,110 @@
+# nginx serving the built bundle, and proxying the API onto the same origin.
+#
+# This is the only thing in the namespace published outside the cluster, and
+# that is the design rather than a convenience: the browser must reach the
+# page and /graphql on ONE origin, or the session cookie needs SameSite=None
+# and the backend needs CORS middleware it does not have. See
+# frontend/nginx.conf.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: vector
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: web
+spec:
+  # One replica. It serves static files and proxies; there is no state and
+  # no queue to divide, so scaling it is a traffic decision rather than a
+  # correctness one -- unlike the api Deployment, where the replica count is
+  # a claim about SKIP LOCKED.
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vector
+      app.kubernetes.io/component: web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vector
+        app.kubernetes.io/component: web
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        # 101, the uid the nginx-unprivileged base image runs as, which is
+        # also why the container listens on 8080: a process that is not root
+        # cannot bind a port below 1024.
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: web
+          image: vector-web:local
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          # No readOnlyRootFilesystem here, unlike the api container, and the
+          # reason is worth stating rather than leaving as an inconsistency:
+          # nginx writes its pid file and buffers request and proxy bodies to
+          # /tmp and /var/cache/nginx. Making the root filesystem read-only
+          # would need emptyDir mounts over both, which is three more moving
+          # parts to protect a container that holds no secret and runs one
+          # binary. The rest of the hardening -- non-root, no privilege
+          # escalation, every capability dropped -- applies.
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          # Both probes ask for the SPA's index rather than a purpose-built
+          # endpoint. If that file comes back, nginx started, parsed this
+          # config and found the bundle -- which is everything this container
+          # does. Deliberately NOT proxied to the API: a web pod whose
+          # upstream is down is still correctly serving the page, and taking
+          # it out of the Service then would replace one error with a
+          # connection refused.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: vector
+  labels:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: web
+spec:
+  # NodePort, so that a local cluster is reachable with no Ingress
+  # controller installed: `minikube service web -n vector --url`, or
+  # `kubectl port-forward -n vector svc/web 5173:80`.
+  #
+  # A real deployment fronts this with an Ingress or a LoadBalancer that
+  # terminates TLS -- which the `production` ENVIRONMENT in the ConfigMap
+  # already assumes, since it marks the session cookie Secure.
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: vector
+    app.kubernetes.io/component: web
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

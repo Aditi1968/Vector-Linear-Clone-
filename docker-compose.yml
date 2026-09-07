@@ -1,0 +1,222 @@
+# The whole of Vector, on one machine, from a clean checkout:
+#
+#     docker compose up --build
+#     open http://localhost:5173
+#
+# PostgreSQL 18 with pgvector -> every migration applied through the
+# repository's own runner -> FastAPI -> nginx serving the built bundle with
+# the API proxied onto the same origin.
+#
+# `run-vector-local.ps1` remains the way to get a DEVELOPMENT loop: hot
+# reload, a seeded demo workspace, a browser. This file is the other half --
+# the deployment shape, built from the same Dockerfiles that CI gates and
+# that k8s/ deploys, so "it works on my machine" and "it works in the
+# cluster" are the same claim.
+#
+# Nothing here is a credential. The database password is the literal
+# `vector`, published only on 127.0.0.1, in a container created and destroyed
+# by this file -- the same throwaway value tests/conftest.py uses, and one of
+# the three placeholders .gitleaks.toml allowlists by value. There is no
+# `env_file:` and no `.env` is read: a stack that silently picked up the
+# repository's real DATABASE_URL would migrate Neon.
+
+name: vector
+
+services:
+  db:
+    # The same tag tests/conftest.py pins and CI warms, and the pin is two
+    # pins in one. uuidv7() in migrations/001_issues.sql is native to
+    # PostgreSQL 18 and rejected by 16 and 17; the `vector` extension that
+    # migrations/025_semantic_search.sql creates is not in stock postgres:18.
+    # This image is the official postgres:18 with pgvector compiled in, so it
+    # satisfies both, and using a different one here would mean the local
+    # stack ran on a server the test suite never sees.
+    image: pgvector/pgvector:pg18
+
+    environment:
+      POSTGRES_USER: vector
+      POSTGRES_PASSWORD: vector
+      POSTGRES_DB: vector
+
+    # `depends_on: service_healthy` below is only as good as this check.
+    # PostgreSQL's entrypoint starts the server once on a localhost-only
+    # socket to run initdb scripts and then restarts it, so a container that
+    # is "running" is routinely not yet accepting TCP connections -- which is
+    # exactly the window the migration job would otherwise start in.
+    # `-h 127.0.0.1` asks over TCP for that reason, rather than over the unix
+    # socket that answers during the initdb phase too.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U vector -d vector"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+
+    # 5433, and bound to loopback. 5433 because 5432 is where a locally
+    # installed PostgreSQL or another project's container usually is, and a
+    # port collision here is the failure that looks like "the migrations ran
+    # against the wrong database". Loopback because this database needs to be
+    # reachable from psql on this machine and from nowhere else.
+    ports:
+      - "127.0.0.1:5433:5432"
+
+    # /var/lib/postgresql, NOT /var/lib/postgresql/data. From 18 the official
+    # images put PGDATA in a major-version-specific subdirectory
+    # (/var/lib/postgresql/18/docker) so that pg_upgrade --link can work
+    # across a single mount point. A volume at the old .../data path is
+    # refused outright at startup -- the container exits 1 with "there
+    # appears to be PostgreSQL data in /var/lib/postgresql/data (unused
+    # mount/volume)" -- so this is the pre-18 spelling, not a preference.
+    volumes:
+      - db-data:/var/lib/postgresql
+
+  migrate:
+    # The API image, run with a different command, rather than an image of
+    # its own -- and the bind mounts below are the reason it can be.
+    #
+    # The runtime image deliberately ships `app` and nothing else: the root
+    # .dockerignore is an allowlist of exactly `app` and `requirements.txt`,
+    # and tests/test_phase1a2_gates.py fails if anything is added to it. So
+    # `migrations/` and `scripts/` cannot be baked in, and they are mounted
+    # read-only instead. scripts/apply_migration.py resolves MIGRATIONS_DIR
+    # as `parents[1] / "migrations"`, which lands on /srv/vector/migrations
+    # given where scripts/ is mounted.
+    image: vector-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+    environment:
+      DATABASE_URL: postgresql://vector:vector@db:5432/vector
+      ENVIRONMENT: development
+
+    volumes:
+      - ./migrations:/srv/vector/migrations:ro
+      - ./scripts:/srv/vector/scripts:ro
+
+    # Applied one file at a time through the repository's own runner, in
+    # filename order, so the ledger, the advisory lock and the per-file
+    # checksum all apply exactly as they would anywhere else. No version is
+    # named here: the set is whatever is in migrations/.
+    #
+    # Re-running is safe and is the normal case -- `docker compose up` on an
+    # existing volume runs this again, and an already-applied version returns
+    # "nothing to do" rather than re-executing. The trailing `--status` is
+    # the assertion: it exits non-zero on a checksum mismatch, so a migration
+    # edited after it was applied stops the stack here instead of letting the
+    # API start against a schema nobody can describe.
+    entrypoint: ["/bin/sh", "-euc"]
+    command:
+      - |
+        for file in migrations/*.sql; do
+          python -m scripts.apply_migration "$$file"
+        done
+        python -m scripts.apply_migration --status
+
+    restart: "no"
+
+  api:
+    image: vector-api:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+    environment:
+      DATABASE_URL: postgresql://vector:vector@db:5432/vector
+
+      # `development`, so this stack serves GraphiQL at /graphql and answers
+      # introspection. That is the point of a local stack and is exactly what
+      # k8s/configmap.yaml does NOT set -- app/config.py has no default for
+      # this variable precisely so the choice is made once per deployment.
+      ENVIRONMENT: development
+
+      # The embedding worker, on here and off by default in app/config.py.
+      # Local is where semantic search should just work without a second
+      # process to remember; a real deployment turns it on deliberately.
+      EMBEDDING_WORKER_ENABLED: "true"
+
+      # Where the Slack delivery loop's deep links point. It runs on no
+      # request, so it has no Host header to infer an origin from, and an
+      # unset value means messages go out without a link rather than with a
+      # guessed one.
+      PUBLIC_BASE_URL: http://localhost:5173
+
+    # SCALING. `docker compose up --scale api=3` is safe, and safe by
+    # construction rather than by luck. Both background tasks on the
+    # application's lifespan claim their work with FOR UPDATE SKIP LOCKED --
+    # the embedding worker over embedding_jobs (migration 028) and the Slack
+    # delivery loop over domain_events (migration 027) -- so two replicas'
+    # claims are disjoint: they share the backlog instead of duplicating it.
+    # Remove the host port mapping below before scaling, though; three
+    # containers cannot each own 127.0.0.1:8000.
+
+    # The host side is overridable, the container side is not. 8000 is the
+    # port run-vector-local.ps1 also serves the backend on, so anyone who has
+    # both going at once gets "bind: address already in use" -- a failure
+    # whose fix should be `VECTOR_API_PORT=8001 docker compose up` rather
+    # than editing this file. The container port stays fixed because
+    # frontend/nginx.conf proxies to `api:8000` by name.
+    ports:
+      - "127.0.0.1:${VECTOR_API_PORT:-8000}:8000"
+
+    # /readyz, not /healthz. Liveness only says the process is up; this asks
+    # whether it can reach PostgreSQL, which is what the `web` service's
+    # `depends_on` actually needs to be true.
+    #
+    # Spelled with python because the image has no curl and no wget, and
+    # adding either would put a network client in a production image to
+    # satisfy a health check. urllib raises on a non-2xx status, so the
+    # non-zero exit is the HTTPError propagating.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/readyz")
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+  web:
+    image: vector-web:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+
+    # service_healthy rather than service_started. nginx resolves the `api`
+    # hostname once at startup and exits if it cannot; waiting for readiness
+    # rather than for the container to exist keeps the first `up` from
+    # producing a web container in a restart loop.
+    depends_on:
+      api:
+        condition: service_healthy
+
+    # 5173 on the host, matching the port run-vector-local.ps1 serves the dev
+    # server on, so the same bookmark works either way. 8080 in the container
+    # because nginx-unprivileged cannot bind a privileged port.
+    ports:
+      - "127.0.0.1:${VECTOR_WEB_PORT:-5173}:8080"
+
+    # busybox wget, which the alpine base already has. Asks for the SPA's
+    # index rather than a dedicated endpoint: if that file is served, nginx
+    # started, read this config and found the bundle.
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--output-document=/dev/null", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  # Named, so `docker compose down` keeps the database and `docker compose
+  # down -v` is the deliberate way to throw it away. An anonymous volume
+  # would strand a new one on every recreate.
+  db-data:

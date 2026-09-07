@@ -1,0 +1,70 @@
+# Non-secret configuration only.
+#
+# The split between this file and the Secret is not stylistic. A ConfigMap is
+# readable by anything with `get configmap` in the namespace and is printed
+# in full by `kubectl describe`; DATABASE_URL carries a password and
+# therefore lives in a Secret that no file in this repository contains. See
+# 30-api.yaml, which references that Secret by name and key and never
+# supplies its value.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: vector-config
+  namespace: vector
+  labels:
+    app.kubernetes.io/name: vector
+data:
+  # `production`, deliberately, and it is the one setting here worth
+  # arguing about.
+  #
+  # app/config.py gives this variable no default so that a deployment which
+  # forgets it cannot start, rather than starting in development mode with
+  # GraphiQL served and introspection answered. A manifest that left it out
+  # would put the pod into CrashLoopBackOff, which is the correct failure and
+  # not a useful one to ship. So it is set, and set to the value a cluster
+  # deployment means: no GraphiQL at /graphql, no schema introspection, and
+  # `Secure` on the session cookie.
+  #
+  # Note the last of those. Reaching this stack over plain http -- through
+  # `minikube service`, or a port-forward -- means the browser will not store
+  # the session cookie, so sign-in appears to succeed and the next request is
+  # anonymous. That is the setting working, not a bug: put a TLS-terminating
+  # Ingress in front of it, or flip this to `development` for a throwaway
+  # cluster you are only poking at.
+  ENVIRONMENT: production
+
+  # The embedding worker, ON here, and on EVERY api replica -- which is safe
+  # rather than merely tolerated.
+  #
+  # migrations/028_embedding_jobs.sql has the worker claim rows with
+  # FOR UPDATE SKIP LOCKED, so two replicas' claims are disjoint by
+  # construction: they divide the backlog instead of each indexing all of
+  # it. Scaling the Deployment scales the indexing throughput.
+  #
+  # It is cheap to leave on because requirements.txt pins no
+  # sentence-transformers, so `load_embedder()` falls back to the in-tree
+  # hashing embedder -- no model download, no GPU, no memory spike. The day a
+  # real model is installed the embedder names itself differently and
+  # re-queues every vector by itself. If that model work should be kept off
+  # the request path, set this to "false" here and run a second Deployment of
+  # the same image with the flag on and no Service pointing at it.
+  #
+  # The OTHER background task has no flag and is not configurable: the Slack
+  # delivery loop runs on every replica always, because `domain_events` is
+  # written by every write path whether or not Slack is connected and those
+  # rows have to be closed either way. It claims with SKIP LOCKED too, so it
+  # is safe at any replica count for the same reason.
+  EMBEDDING_WORKER_ENABLED: "true"
+
+  # The origin the Slack delivery loop builds deep links against.
+  #
+  # It is the one URL this application cannot infer, because it runs on no
+  # request and so has no Host header to read -- and inferring one from a
+  # proxy header would mean links whose host is whatever that proxy claimed.
+  # Unset means messages go out with no link at all, which is the safer
+  # failure: a notification pointing at the wrong host sends somebody to a
+  # login page on a domain that is not theirs.
+  #
+  # The value below is what `minikube service web --url` hands out on a
+  # single-node cluster. A real deployment replaces it with its own origin.
+  PUBLIC_BASE_URL: http://vector.local

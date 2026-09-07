@@ -300,6 +300,136 @@ jobs:
           print(f"{total} db-marked tests ran")
           PY
 
+  migrations:
+    name: Migrations apply to an empty database
+    runs-on: ubuntu-24.04
+
+    # A different question from the `integration` job above, and the
+    # difference is the reason this exists as its own job.
+    #
+    # The db-marked suite builds a schema by calling `apply_all_migrations`
+    # from a test fixture: it proves the migrations produce a database the
+    # application can work against. It does NOT prove that the runner an
+    # operator actually types -- `python -m scripts.apply_migration <file>`,
+    # one file at a time, in filename order -- gets to the same place. That
+    # path owns the ledger, the advisory lock and the per-file checksum, and
+    # it is the path every deployment uses and no test touches.
+    #
+    # It also pins the thing CLAUDE.md states as a rule and nothing enforced:
+    # an already-applied migration is immutable. `--status` at the end exits
+    # non-zero when a file no longer hashes to what the ledger recorded, so
+    # editing an applied migration fails here rather than in production, on
+    # the run after somebody reformats a .sql file.
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install locked development dependencies
+        run: python -m pip install --require-hashes -r requirements-dev.txt
+
+      - name: Start PostgreSQL 18 with pgvector
+        # The same image the fixture starts and the local stack runs, for the
+        # same two reasons: uuidv7() in 001 needs major version 18, and the
+        # `vector` extension 025 creates is not in stock postgres:18.
+        #
+        # Started here rather than through `services:` because the readiness
+        # wait has to be over TCP. The entrypoint runs the server on a unix
+        # socket first to execute initdb scripts, and a container reported
+        # healthy during that phase is one a TCP client cannot use yet --
+        # which is exactly when the first migration would try to connect.
+        #
+        # The wait loop cannot fail the step on its own (a `for` that runs
+        # out is not an error), so the same pg_isready runs once more
+        # afterwards, unguarded: that call is the gate, and it fails the job
+        # if the sixty seconds were not enough.
+        run: |
+          docker run --detach --rm --name vector-migrations \
+            --env POSTGRES_USER=vector \
+            --env POSTGRES_PASSWORD=vector \
+            --env POSTGRES_DB=vector \
+            --publish 127.0.0.1:5432:5432 \
+            pgvector/pgvector:pg18
+
+          for _ in $(seq 60); do
+            if docker exec vector-migrations \
+                 pg_isready -h 127.0.0.1 -U vector -d vector >/dev/null 2>&1; then
+              break
+            fi
+
+            sleep 1
+          done
+
+          docker exec vector-migrations pg_isready -h 127.0.0.1 -U vector -d vector
+
+      - name: Apply every migration through the repository's own runner
+        # No version is named: the set is whatever is in migrations/, in
+        # filename order, so a migration added without a CI change is still
+        # applied here. `bash -eo pipefail` (the workflow default) makes the
+        # first failing file stop the loop and the job.
+        #
+        # The DSN is built inline rather than declared in an `env:` block.
+        # The password is the literal `vector`, in a container this step
+        # created and the runner destroys, published on loopback -- the same
+        # throwaway value tests/conftest.py uses. No repository secret is
+        # read by any job in this workflow, and no managed database is
+        # reachable from it.
+        run: |
+          export DATABASE_URL="postgresql://vector:vector@127.0.0.1:5432/vector"
+
+          for file in migrations/*.sql; do
+            python -m scripts.apply_migration "$file"
+          done
+
+      - name: The ledger must show every migration applied and unmodified
+        # Two assertions in one command, and neither is redundant.
+        #
+        # `--status` exits non-zero by itself when an applied migration no
+        # longer matches its recorded checksum -- that is the immutability
+        # rule, enforced.
+        #
+        # `Pending: none` is the other half: a run in which the loop above
+        # applied nothing at all would leave every version pending and
+        # `--status` would still exit 0, because an unapplied migration is
+        # not a tampered one. grep -x anchors the whole line, so a report
+        # that says "Pending:" followed by a list cannot match.
+        run: |
+          export DATABASE_URL="postgresql://vector:vector@127.0.0.1:5432/vector"
+
+          python -m scripts.apply_migration --status | tee "${RUNNER_TEMP}/status.txt"
+
+          if ! grep -qx 'Pending: none' "${RUNNER_TEMP}/status.txt"; then
+            echo "::error::The migration runner left versions pending. Every file in migrations/ must apply cleanly to an empty PostgreSQL 18 database."
+            exit 1
+          fi
+
+      - name: Re-applying every migration is a no-op
+        # Idempotence, asserted rather than assumed, because two things this
+        # repository ships depend on it: `docker compose up` runs the migrate
+        # service on every start, against a volume that usually already has
+        # the schema, and a Kubernetes rollout does the same. If a second
+        # apply ever executed a file twice, both would fail on their second
+        # run -- in a developer's terminal and in a cluster respectively --
+        # rather than here.
+        run: |
+          export DATABASE_URL="postgresql://vector:vector@127.0.0.1:5432/vector"
+
+          for file in migrations/*.sql; do
+            python -m scripts.apply_migration "$file"
+          done | tee "${RUNNER_TEMP}/reapply.txt"
+
+          if grep -q '^Applied migration' "${RUNNER_TEMP}/reapply.txt"; then
+            echo "::error::A second pass re-executed a migration. The runner must report every already-applied version as nothing to do."
+            exit 1
+          fi
+
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-24.04
@@ -443,7 +573,38 @@ jobs:
         #
         # --pull refuses a base image the runner may already have cached, so
         # the build is against the base the Dockerfile actually names.
-        run: docker build --pull --file Dockerfile --tag vector:ci .
+        run: docker build --pull --file Dockerfile --tag vector-api:local .
+
+      - name: Build the web image
+        # Context is `frontend/`, not the repository root, which is what
+        # makes this build read frontend/.dockerignore and see neither .env
+        # nor app/ nor migrations/.
+        #
+        # It is a real gate rather than a duplicate of the `frontend` job:
+        # that one runs the checks a developer runs, this one proves the
+        # bundle still builds under `npm ci` on a clean Linux image with no
+        # host node_modules to fall back on -- the failure mode where an
+        # optional platform-specific dependency was only ever resolved on
+        # somebody's laptop.
+        run: docker build --pull --file frontend/Dockerfile --tag vector-web:local frontend
+
+      - name: The local stack still describes those two images
+        # `docker compose config` resolves the file: it parses the YAML,
+        # interpolates the variables, and rejects an unknown key, a bad
+        # `depends_on` condition or a service referring to a build context
+        # that is not there.
+        #
+        # Cheap, and it closes the gap this job would otherwise leave. Both
+        # images above are built here from Dockerfiles that docker-compose.yml
+        # names; without this, renaming a service or mistyping a context
+        # would break every developer's `docker compose up` while CI stayed
+        # green, because nothing else in this workflow reads that file.
+        #
+        # Not `docker compose up`: bringing the stack up in CI would be a
+        # slower, less specific version of the `integration` and `migrations`
+        # jobs, which already prove the database, the migrations and the
+        # application against real containers.
+        run: docker compose config --quiet
 
   graphql-contract:
     name: GraphQL schema contract
