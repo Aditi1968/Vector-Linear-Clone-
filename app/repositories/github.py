@@ -1,11 +1,16 @@
 from collections.abc import Sequence
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import UUID
 
 import asyncpg
 
 from app.domain.errors import GithubInstallationClaimedError
-from app.domain.github import GithubInstallationEntity, GithubRepositoryEntity
+from app.domain.github import (
+    GithubCommitEntity,
+    GithubInstallationEntity,
+    GithubPullRequestEntity,
+    GithubRepositoryEntity,
+)
 from app.domain.tenancy import WorkspaceScope
 
 
@@ -412,6 +417,571 @@ class GithubRepository:
             """,
             scope.workspace_id,
             None if repository_ids is None else list(repository_ids),
+        )
+
+    # --- deliveries ----------------------------------------------------
+
+    async def record_delivery(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        delivery_id: str,
+        event: str,
+    ) -> bool:
+        """Claim this delivery id. False means it has already been applied.
+
+        The fourth unscoped statement here, and the one that could not be
+        scoped even in principle: it runs BEFORE the routing lookup that would
+        say which workspace the delivery belongs to, which is the point --
+        doing that lookup for a redelivery already applied is exactly the work
+        `github_deliveries` exists to avoid. A delivery id is GitHub's own
+        value and unique across all of GitHub, so a global key is the honest
+        shape; see the table's note in 017.
+
+        What stands in for a scope is the signature: the transport has already
+        verified GitHub's HMAC over the raw body, so this id is one GitHub
+        stamped rather than one a client chose.
+
+        `ON CONFLICT DO NOTHING` rather than catching UniqueViolationError.
+        The caller runs this as the first statement of the delivery's
+        transaction, and a raised constraint violation would abort that
+        transaction -- so the duplicate could not then be answered with the
+        2xx that stops GitHub retrying it forever.
+
+        Recorded inside the caller's transaction rather than before it, which
+        is what makes a failed application retryable: if the writes that
+        follow raise, this row rolls back with them and GitHub's redelivery is
+        a first attempt again. The alternative -- committing the id up front --
+        turns any transient failure into a delivery that is permanently lost.
+        """
+        row = await connection.fetchrow(
+            """
+            INSERT INTO github_deliveries (delivery_id, event)
+            VALUES ($1, $2)
+            ON CONFLICT (delivery_id) DO NOTHING
+            RETURNING delivery_id
+            """,
+            delivery_id,
+            event,
+        )
+
+        return row is not None
+
+    # --- development activity ------------------------------------------
+
+    async def repository_exists(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        repository_id: int,
+    ) -> bool:
+        """Whether this workspace's installation covers this repository.
+
+        Asked before any pull request or commit is written, and not for
+        tidiness: `github_pull_requests_repository_fk` would refuse the row
+        anyway, but a ForeignKeyViolationError aborts the delivery's
+        transaction and reaches the transport as a 500 -- which GitHub answers
+        by redelivering, forever, a payload that will never succeed. A miss
+        here is a silent drop instead.
+
+        The workspace leads the predicate, so this cannot answer for another
+        tenant's coverage of the same repository -- and two tenants covering
+        one repository is legitimate, which is why
+        `github_repositories_repository_id_idx` is not unique.
+        """
+        found = await connection.fetchval(
+            """
+            SELECT 1
+            FROM github_repositories
+            WHERE workspace_id = $1 AND repository_id = $2
+            """,
+            scope.workspace_id,
+            repository_id,
+        )
+
+        return found is not None
+
+    async def resolve_issue_ids(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        identifiers: Sequence[tuple[str, int]],
+    ) -> dict[tuple[str, int], UUID]:
+        """Which of these `ENG-142` pairs name a live issue in THIS workspace.
+
+        The statement migrations/017_github_development.sql calls "the
+        service's job", and the sentence that matters is the one it does not
+        contain: there is no parameter for a workspace other than the scope's.
+        `$1` is bound into both joins, so an identifier naming another
+        tenant's team resolves to zero rows here rather than to that tenant's
+        issue -- the resolver does not merely refuse to store the link, it
+        never finds the id to store. The composite foreign keys in 017 are the
+        floor under that, not the mechanism.
+
+        Both joins are equality on unique indexes -- teams_workspace_key_unique
+        for the key, issues_team_number_key for the number -- so a title
+        offering twenty identifiers costs twenty index probes in one round
+        trip rather than twenty statements.
+
+        `archived_at IS NULL` for the reason every issue read carries it: an
+        archived issue is not in the product, and a pull-request title is not
+        the way back in.
+
+        Keyed by the identifier rather than a flat list of ids, because the
+        caller has to partition them again: a title and a branch name name
+        different sets, and they are stored and retracted separately. One
+        statement for the union is what makes that partition free -- three
+        separate resolutions would be three round trips inside the delivery's
+        transaction for a question one answers.
+
+        An identifier that names nothing is simply absent from the result. It
+        is the ordinary case: a pull-request title saying "ENG-142" on a
+        repository whose workspace has no ENG team is a mention of somebody
+        else's tracker, not an error.
+
+        Ids only, per identifier. The caller writes link rows and never
+        renders an issue from here, so returning entities would be a wider
+        SELECT for columns nothing reads.
+        """
+        if not identifiers:
+            return {}
+
+        rows = await connection.fetch(
+            """
+            SELECT wanted.team_key, wanted.number, issues.id
+            FROM unnest($2::TEXT[], $3::BIGINT[]) AS wanted(team_key, number)
+            JOIN teams
+              ON teams.workspace_id = $1
+             AND teams.key = wanted.team_key
+            JOIN issues
+              ON issues.workspace_id = $1
+             AND issues.team_id = teams.id
+             AND issues.number = wanted.number
+            WHERE issues.archived_at IS NULL
+            """,
+            scope.workspace_id,
+            [team_key for team_key, _ in identifiers],
+            [number for _, number in identifiers],
+        )
+
+        return {(row["team_key"], row["number"]): row["id"] for row in rows}
+
+    async def upsert_pull_request(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        repository_id: int,
+        number: int,
+        title: str,
+        state: str,
+        draft: bool,
+        merged_at: datetime | None,
+        head_ref: str | None,
+        url: str | None,
+        github_updated_at: datetime | None,
+    ) -> bool:
+        """Write this pull request. False means the payload was already stale.
+
+        The `WHERE` on the conflict branch is the out-of-order defence, and it
+        is in SQL rather than in a read-then-write for the reason 005 gives
+        about issue numbers: two deliveries for one pull request can be in
+        flight at once, and a SELECT-then-UPDATE decides staleness against a
+        row another transaction is free to change before the UPDATE lands.
+
+        `github_updated_at` and not arrival order, because arrival order is
+        not a fact about the pull request: GitHub retries, queues and
+        redelivers, so the payload that arrives second is routinely the older
+        one. A row with no stored timestamp is always overwritten (there is
+        nothing to be older than), and a payload with no timestamp never
+        overwrites one that has (it cannot prove it is newer).
+
+        `>=` rather than `>`: a redelivery of the same payload writes the same
+        values, which is idempotent, and two events GitHub stamped identically
+        -- which redeliveries of one edit routinely are -- must not deadlock
+        into neither applying.
+
+        Returns whether the row now reflects this payload. False is the
+        caller's signal to leave the issue links alone: re-deriving them from
+        a stale title would retract links the current title still supports.
+        """
+        row = await connection.fetchrow(
+            """
+            INSERT INTO github_pull_requests (
+                workspace_id,
+                repository_id,
+                number,
+                title,
+                state,
+                draft,
+                merged_at,
+                head_ref,
+                url,
+                github_updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            ON CONFLICT (workspace_id, repository_id, number) DO UPDATE
+            SET title = EXCLUDED.title,
+                state = EXCLUDED.state,
+                draft = EXCLUDED.draft,
+                merged_at = EXCLUDED.merged_at,
+                head_ref = EXCLUDED.head_ref,
+                url = EXCLUDED.url,
+                github_updated_at = EXCLUDED.github_updated_at,
+                updated_at = now()
+            WHERE github_pull_requests.github_updated_at IS NULL
+               OR (
+                    EXCLUDED.github_updated_at IS NOT NULL
+                    AND EXCLUDED.github_updated_at
+                        >= github_pull_requests.github_updated_at
+                  )
+            RETURNING number
+            """,
+            scope.workspace_id,
+            repository_id,
+            number,
+            title,
+            state,
+            draft,
+            merged_at,
+            head_ref,
+            url,
+            github_updated_at,
+        )
+
+        return row is not None
+
+    async def set_pull_request_links(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        repository_id: int,
+        number: int,
+        source: str,
+        issue_ids: Sequence[UUID],
+    ) -> None:
+        """Make this ONE source's links exactly `issue_ids`.
+
+        Two statements, both filtered by `source`, and that filter is the
+        whole reason `source` is inside the primary key in 017: editing a
+        title has to retract what the title said and leave what the branch
+        name still says. A delete without it would take the branch's link with
+        the title's.
+
+        `NOT (issue_id = ANY(...))` rather than deleting the source's rows
+        outright, so a link that survives the edit keeps its `created_at` --
+        "linked since" is a fact about the link, not about the last delivery
+        that mentioned it. An empty array deletes every row for the source,
+        which is what an edit that removed the last identifier means.
+
+        The insert's `ON CONFLICT DO NOTHING` covers the redelivery: the same
+        payload twice writes the same set, and the second one is a no-op
+        rather than a primary key violation that would abort the delivery.
+
+        Every id in `issue_ids` came from `resolve_issue_ids` under this same
+        scope. Nothing here re-checks that, because the composite foreign keys
+        in 017 do: an id from another workspace has no column to go in.
+        """
+        wanted = list(issue_ids)
+
+        await connection.execute(
+            """
+            DELETE FROM github_pull_request_issues
+            WHERE workspace_id = $1
+              AND repository_id = $2
+              AND number = $3
+              AND source = $4
+              AND NOT (issue_id = ANY($5::UUID[]))
+            """,
+            scope.workspace_id,
+            repository_id,
+            number,
+            source,
+            wanted,
+        )
+
+        if not wanted:
+            return
+
+        await connection.execute(
+            """
+            INSERT INTO github_pull_request_issues (
+                workspace_id, repository_id, number, issue_id, source
+            )
+            SELECT $1, $2, $3, incoming.issue_id, $4
+            FROM unnest($5::UUID[]) AS incoming(issue_id)
+            ON CONFLICT DO NOTHING
+            """,
+            scope.workspace_id,
+            repository_id,
+            number,
+            source,
+            wanted,
+        )
+
+    async def add_commit(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        repository_id: int,
+        sha: str,
+        message: str,
+        url: str | None,
+        committed_at: datetime | None,
+    ) -> None:
+        """Record a commit this push reported. Idempotent.
+
+        `DO NOTHING` rather than the pull request's `DO UPDATE`, because a
+        commit is immutable: the same SHA is the same content by construction,
+        so a second delivery has nothing new to say and there is no
+        out-of-order question to answer. A force-push that removes the commit
+        from the branch does not un-author it, and the row stays.
+        """
+        await connection.execute(
+            """
+            INSERT INTO github_commits (
+                workspace_id, repository_id, sha, message, url, committed_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT DO NOTHING
+            """,
+            scope.workspace_id,
+            repository_id,
+            sha,
+            message,
+            url,
+            committed_at,
+        )
+
+    async def add_commit_links(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        repository_id: int,
+        sha: str,
+        issue_ids: Sequence[UUID],
+    ) -> None:
+        """Link a commit to issues its message named. Additive, never retracting.
+
+        The commit-side counterpart of `set_pull_request_links`, and
+        deliberately not its equal: a commit message cannot be edited, so
+        there is no source to re-derive and no link an edit could withdraw.
+        That is also why `github_commit_issues` carries no `source` column.
+        """
+        wanted = list(issue_ids)
+
+        if not wanted:
+            return
+
+        await connection.execute(
+            """
+            INSERT INTO github_commit_issues (
+                workspace_id, repository_id, sha, issue_id
+            )
+            SELECT $1, $2, $3, incoming.issue_id
+            FROM unnest($4::UUID[]) AS incoming(issue_id)
+            ON CONFLICT DO NOTHING
+            """,
+            scope.workspace_id,
+            repository_id,
+            sha,
+            wanted,
+        )
+
+    async def delete_development(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        repository_ids: Sequence[int] | None = None,
+    ) -> None:
+        """Remove the development activity of some or all of this workspace's
+        repositories, children first.
+
+        Four statements in exactly this order, because every foreign key in
+        017 is RESTRICT: the two join tables point at the two activity tables,
+        which point at `github_repositories`. Deleting the parent first is a
+        RestrictViolationError, and RESTRICT is what 017 chose precisely so
+        that a one-line delete cannot discard this history while reporting
+        `DELETE 1`. The caller runs all four inside one transaction, so there
+        is no instant at which a link row survives the pull request it names.
+
+        `repository_ids=None` means all of them -- what disconnecting and
+        replacing the whole set need -- and a list means exactly those, which
+        is what `installation_repositories.removed` needs. One method for both
+        because the alternative is two whose SQL differs by a predicate, and
+        two places for the tenant filter to be forgotten in;
+        `delete_repositories` above is shaped the same way for the same reason.
+        """
+        selected = None if repository_ids is None else list(repository_ids)
+
+        for statement in (
+            """
+            DELETE FROM github_pull_request_issues
+            WHERE workspace_id = $1
+              AND ($2::BIGINT[] IS NULL OR repository_id = ANY($2::BIGINT[]))
+            """,
+            """
+            DELETE FROM github_commit_issues
+            WHERE workspace_id = $1
+              AND ($2::BIGINT[] IS NULL OR repository_id = ANY($2::BIGINT[]))
+            """,
+            """
+            DELETE FROM github_pull_requests
+            WHERE workspace_id = $1
+              AND ($2::BIGINT[] IS NULL OR repository_id = ANY($2::BIGINT[]))
+            """,
+            """
+            DELETE FROM github_commits
+            WHERE workspace_id = $1
+              AND ($2::BIGINT[] IS NULL OR repository_id = ANY($2::BIGINT[]))
+            """,
+        ):
+            await connection.execute(statement, scope.workspace_id, selected)
+
+    async def list_pull_requests_for_issue(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+        limit: int,
+    ) -> list[GithubPullRequestEntity]:
+        """The pull requests linked to one issue, newest activity first.
+
+        Driven from the join table, which is the direction
+        `github_pull_request_issues_workspace_issue_idx` exists for -- both
+        join tables' primary keys answer the opposite question, and 017
+        creates that index because this panel would otherwise scan every link
+        row in the workspace on every issue open.
+
+        `array_agg(source)` rather than a second query or one row per source:
+        a pull request linked by both its title and its branch is one pull
+        request with two reasons, and returning it twice would make the panel
+        render it twice.
+
+        `NULLS LAST` on the sort, because a row whose `github_updated_at` is
+        NULL is one GitHub told us nothing about the age of -- putting it
+        first would rank an unknown above every known. `number DESC` makes the
+        order total, which matters here: redeliveries of one edit share an
+        `updated_at`, and without a tie-break the panel reshuffles between
+        reads.
+        """
+        rows = await connection.fetch(
+            """
+            SELECT
+                pulls.repository_id,
+                repositories.full_name,
+                pulls.number,
+                pulls.title,
+                pulls.state,
+                pulls.draft,
+                pulls.merged_at,
+                pulls.head_ref,
+                pulls.url,
+                pulls.github_updated_at,
+                array_agg(links.source ORDER BY links.source) AS sources
+            FROM github_pull_request_issues AS links
+            JOIN github_pull_requests AS pulls
+              ON pulls.workspace_id = links.workspace_id
+             AND pulls.repository_id = links.repository_id
+             AND pulls.number = links.number
+            JOIN github_repositories AS repositories
+              ON repositories.workspace_id = pulls.workspace_id
+             AND repositories.repository_id = pulls.repository_id
+            WHERE links.workspace_id = $1
+              AND links.issue_id = $2
+            GROUP BY
+                pulls.workspace_id,
+                pulls.repository_id,
+                pulls.number,
+                repositories.full_name
+            ORDER BY pulls.github_updated_at DESC NULLS LAST, pulls.number DESC
+            LIMIT $3
+            """,
+            scope.workspace_id,
+            issue_id,
+            limit,
+        )
+
+        return [self._to_pull_request(row) for row in rows]
+
+    async def list_commits_for_issue(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+        limit: int,
+    ) -> list[GithubCommitEntity]:
+        """The commits linked to one issue, newest first.
+
+        `NULLS LAST` and a total order for the reasons the pull-request read
+        gives; the tie-break is the SHA, which is unique within a repository
+        by construction.
+        """
+        rows = await connection.fetch(
+            """
+            SELECT
+                commits.repository_id,
+                repositories.full_name,
+                commits.sha,
+                commits.message,
+                commits.url,
+                commits.committed_at
+            FROM github_commit_issues AS links
+            JOIN github_commits AS commits
+              ON commits.workspace_id = links.workspace_id
+             AND commits.repository_id = links.repository_id
+             AND commits.sha = links.sha
+            JOIN github_repositories AS repositories
+              ON repositories.workspace_id = commits.workspace_id
+             AND repositories.repository_id = commits.repository_id
+            WHERE links.workspace_id = $1
+              AND links.issue_id = $2
+            ORDER BY
+                commits.committed_at DESC NULLS LAST,
+                commits.repository_id,
+                commits.sha
+            LIMIT $3
+            """,
+            scope.workspace_id,
+            issue_id,
+            limit,
+        )
+
+        return [self._to_commit(row) for row in rows]
+
+    @staticmethod
+    def _to_pull_request(row: asyncpg.Record) -> GithubPullRequestEntity:
+        return GithubPullRequestEntity(
+            repository_id=row["repository_id"],
+            repository_full_name=row["full_name"],
+            number=row["number"],
+            title=row["title"],
+            state=row["state"],
+            draft=row["draft"],
+            merged_at=row["merged_at"],
+            head_ref=row["head_ref"],
+            url=row["url"],
+            github_updated_at=row["github_updated_at"],
+            link_sources=tuple(row["sources"]),
+        )
+
+    @staticmethod
+    def _to_commit(row: asyncpg.Record) -> GithubCommitEntity:
+        return GithubCommitEntity(
+            repository_id=row["repository_id"],
+            repository_full_name=row["full_name"],
+            sha=row["sha"],
+            message=row["message"],
+            url=row["url"],
+            committed_at=row["committed_at"],
         )
 
     @staticmethod

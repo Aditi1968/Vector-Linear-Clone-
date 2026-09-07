@@ -10,11 +10,14 @@ from app.domain.auth import UserEntity
 from app.domain.issues import IssueEntity
 from app.domain.labels import LabelEntity
 from app.graphql.loaders.cycles import CycleLoader
+from app.graphql.loaders.initiatives import build_initiative_updates_loader
 from app.graphql.loaders.issues import IssueKey, build_issue_loader
 from app.graphql.loaders.labels import IssueLabelKey, issue_label_loader
 from app.graphql.loaders.projects import (
+    build_project_dependencies_loader,
     build_project_loader,
     build_project_milestones_loader,
+    build_project_updates_loader,
 )
 from app.http_cookies import read_session_token
 from app.repositories.activity import ActivityRepository
@@ -22,6 +25,7 @@ from app.repositories.bulk import BulkRepository
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
 from app.repositories.github import GithubRepository
+from app.repositories.initiatives import InitiativeRepository
 from app.repositories.invitations import InvitationRepository
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
@@ -31,9 +35,12 @@ from app.repositories.memberships import MembershipRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.relations import RelationRepository
+from app.repositories.saved_views import FavoriteRepository, SavedViewRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.slack import SlackRepository
+from app.repositories.subscribers import SubscriberRepository
 from app.repositories.teams import TeamRepository
+from app.repositories.templates import TemplateRepository
 from app.repositories.triage import TriageRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
@@ -43,15 +50,18 @@ from app.services.bulk import BulkService
 from app.services.comments import CommentService
 from app.services.cycles import CycleService
 from app.services.github import GithubAppConfig, GithubService
+from app.services.initiatives import InitiativeService
 from app.services.issues import IssueService
 from app.services.labels import LabelService
 from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
 from app.services.projects import ProjectService
 from app.services.relations import RelationService
+from app.services.saved_views import FavoriteService, SavedViewService
 from app.services.search import SearchService
-from app.services.slack import DatabaseTokenStore, SlackService
+from app.services.slack import DatabaseTokenStore, SlackService, SlackWebClient
 from app.services.teams import TeamService
+from app.services.templates import TemplateService
 from app.services.triage import TriageService
 
 
@@ -68,11 +78,15 @@ class VectorContext(BaseContext):
         comment_service: CommentService,
         cycle_service: CycleService,
         project_service: ProjectService,
+        initiative_service: InitiativeService,
         relation_service: RelationService,
+        saved_view_service: SavedViewService,
+        favorite_service: FavoriteService,
         search_service: SearchService,
         github_service: GithubService,
         slack_service: SlackService,
         activity_service: ActivityService,
+        template_service: TemplateService,
         triage_service: TriageService,
         bulk_service: BulkService,
         environment: Environment,
@@ -86,7 +100,17 @@ class VectorContext(BaseContext):
         self.comment_service = comment_service
         self.cycle_service = cycle_service
         self.project_service = project_service
+        self.initiative_service = initiative_service
         self.search_service = search_service
+
+        # Saved views and favorites. Two services over two tables rather
+        # than one over both: a favourite points at a team, a project or a
+        # saved view, and only the third has anything to do with saved
+        # views. What couples them is one statement -- deleting a view
+        # clears the favourites pointing at it -- which is a service
+        # reaching across to a second repository inside one transaction.
+        self.saved_view_service = saved_view_service
+        self.favorite_service = favorite_service
 
         # Holds the deployment's GitHub App credentials, and is the reason
         # nothing else in this context does. The service answers `configured`
@@ -102,14 +126,25 @@ class VectorContext(BaseContext):
         # over the same pool.
         self.slack_service = slack_service
 
-        # The READ half of activity and notifications only. Nothing writes
-        # through this object: an activity row and an inbox item are written
-        # by the service that causes them, on that service's own connection
-        # and inside its transaction, through the module-level functions in
-        # app/services/activity.py. A writable service here would be a way to
-        # record history for a change that had not happened yet -- or that
-        # was about to be rolled back.
+        # Activity, notifications and subscriptions. Every WRITE reachable
+        # through this object is one a person performs on their own row --
+        # marking an item read, watching or unwatching an issue -- and each
+        # holds a transaction of its own. Nothing here records that something
+        # happened TO an issue: an activity row, an inbox item and an
+        # auto-subscribe are written by the service that causes them, on that
+        # service's own connection and inside its transaction, through the
+        # module-level functions in app/services/activity.py. A service here
+        # that could do that would be a way to record history for a change
+        # that had not happened yet -- or that was about to be rolled back.
         self.activity_service = activity_service
+
+        # Reads templates and files issues from them, which is why it holds
+        # the issue and label services rather than their repositories: every
+        # rule an apply has to respect -- which state a new issue starts in,
+        # which number it gets, how many labels one may wear -- already lives
+        # in a service, and reaching past them would grow a second
+        # `issueCreate` nobody would think to keep in step.
+        self.template_service = template_service
 
         # The triage queue and the multi-issue writes, each behind its own
         # service. Both are required rather than defaulted, for the reason
@@ -136,6 +171,13 @@ class VectorContext(BaseContext):
         self.project_loader = build_project_loader(project_service)
         self.project_milestones_loader = build_project_milestones_loader(
             project_service
+        )
+        self.project_updates_loader = build_project_updates_loader(project_service)
+        self.project_dependencies_loader = build_project_dependencies_loader(
+            project_service
+        )
+        self.initiative_updates_loader = build_initiative_updates_loader(
+            initiative_service
         )
 
         # Teams as entities, for the resolvers that ask about them rather
@@ -281,16 +323,37 @@ async def get_context() -> VectorContext:
     # any caching either one grows later would then be per copy.
     team_service = TeamService(pool=pool, repository=TeamRepository())
 
+    # Named rather than built inline, because `TemplateService` needs both:
+    # applying a template files an issue and puts labels on it, through the
+    # services that own those rules. One instance each per request, for the
+    # reason `team_service` above is one -- two would be two objects answering
+    # the same question over the same pool, and any caching either grows later
+    # would then be per copy.
+    issue_service = IssueService(
+        pool=pool,
+        repository=IssueRepository(),
+        # Creating an issue allocates a number off the team's counter and
+        # resolves the state it starts in, both inside the issue service's own
+        # transaction. Same instance as below: one request gets one team
+        # service.
+        teams=team_service,
+    )
+
+    label_service = LabelService(
+        pool=pool,
+        repository=LabelRepository(),
+        # One service owns all three tables, because applying a label is one
+        # operation over two of them -- the join row is meaningless without
+        # the label, and the per-issue cap is a rule about the pair -- and
+        # because a label's group decides whether the join row is allowed at
+        # all. Deleting a group also ungroups its labels in one transaction,
+        # which a separate service could not hold.
+        issue_label_repository=IssueLabelRepository(),
+        group_repository=LabelGroupRepository(),
+    )
+
     return VectorContext(
-        issue_service=IssueService(
-            pool=pool,
-            repository=IssueRepository(),
-            # Creating an issue allocates a number off the team's counter and
-            # resolves the state it starts in, both inside the issue
-            # service's own transaction. Same instance as below: one request
-            # gets one team service.
-            teams=team_service,
-        ),
+        issue_service=issue_service,
         membership_service=MembershipService(
             pool=pool,
             repository=MembershipRepository(),
@@ -311,6 +374,15 @@ async def get_context() -> VectorContext:
             # that owns that table, so the service reaches across to it rather
             # than the project repository growing statements about issues.
             issue_repository=IssueRepository(),
+            # And the initiatives it belongs to, for the same reason:
+            # `initiative_projects_project_fk` is RESTRICT, so those rows go
+            # first, and the SQL against that table belongs to the repository
+            # that owns it.
+            initiative_repository=InitiativeRepository(),
+        ),
+        initiative_service=InitiativeService(
+            pool=pool,
+            repository=InitiativeRepository(),
         ),
         auth_service=AuthService(
             pool=pool,
@@ -318,24 +390,30 @@ async def get_context() -> VectorContext:
             sessions=SessionRepository(),
             hasher=Argon2PasswordHasher(),
         ),
-        label_service=LabelService(
-            pool=pool,
-            repository=LabelRepository(),
-            # One service owns all three tables, because applying a label is
-            # one operation over two of them -- the join row is meaningless
-            # without the label, and the per-issue cap is a rule about the pair
-            # -- and because a label's group decides whether the join row is
-            # allowed at all. Deleting a group also ungroups its labels in one
-            # transaction, which a separate service could not hold.
-            issue_label_repository=IssueLabelRepository(),
-            group_repository=LabelGroupRepository(),
-        ),
+        label_service=label_service,
         comment_service=CommentService(pool=pool, repository=CommentRepository()),
         cycle_service=CycleService(pool=pool, repository=CycleRepository()),
         team_service=team_service,
         relation_service=RelationService(
             pool=pool,
             repository=RelationRepository(),
+        ),
+        saved_view_service=SavedViewService(
+            pool=pool,
+            repository=SavedViewRepository(),
+            # Deleting a view drops the favourites pointing at it, in the
+            # same transaction. SQL against `favorites` belongs to the
+            # repository that owns that table, so the service reaches across
+            # to it rather than the saved-view repository growing statements
+            # about favourites.
+            favorites=FavoriteRepository(),
+        ),
+        favorite_service=FavoriteService(
+            pool=pool,
+            # A fresh instance rather than the one above. A repository here
+            # holds no state and no connection -- it is a namespace for
+            # statements -- so there is nothing for one request to get two of.
+            repository=FavoriteRepository(),
         ),
         search_service=SearchService(
             pool=pool,
@@ -364,6 +442,12 @@ async def get_context() -> VectorContext:
             # request cannot answer one field as configured and another as
             # not. `settings` is already resolved above for `environment`.
             configured=settings.slack_configured,
+            # The two Web API calls the channel and notification resolvers
+            # make. Stateless and credential-free: the bot token is passed per
+            # call, so this object holds nothing worth printing. Built here
+            # and not in app/rest/slack.py, because no REST route talks to the
+            # Web API -- the OAuth callback only exchanges a code.
+            web=SlackWebClient(),
         ),
         # One service over both tables, because a history row and an inbox
         # item are two records of one moment: the event that happened, and
@@ -375,6 +459,22 @@ async def get_context() -> VectorContext:
             pool=pool,
             repository=ActivityRepository(),
             notifications=NotificationRepository(),
+            # The third table of the same question. A subscription is the
+            # standing answer to "whose problem is this", which the
+            # notification half asks on every write, so the two are read
+            # together by every screen that shows an issue.
+            subscribers=SubscriberRepository(),
+        ),
+        template_service=TemplateService(
+            pool=pool,
+            repository=TemplateRepository(),
+            # Services, not repositories: applying a template must go through
+            # the same rules `issueCreate` and `issueLabelAttach` enforce, and
+            # through the same composite foreign keys, so a stored id is
+            # re-checked against the applying caller's workspace rather than
+            # trusted because it was checked once when it was saved.
+            issues=issue_service,
+            labels=label_service,
         ),
         triage_service=TriageService(
             pool=pool,

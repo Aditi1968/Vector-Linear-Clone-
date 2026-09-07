@@ -4,7 +4,12 @@ from uuid import UUID
 
 import asyncpg
 
-from app.domain.projects import ProjectEntity, ProjectMilestoneEntity
+from app.domain.projects import (
+    ProjectDependencies,
+    ProjectEntity,
+    ProjectMilestoneEntity,
+    ProjectUpdateEntity,
+)
 from app.domain.tenancy import WorkspaceScope
 
 
@@ -29,6 +34,35 @@ from app.domain.tenancy import WorkspaceScope
 # fact about the current ordering and not a rule, so a method moved below it
 # needs this alias too.
 Milestones = list[ProjectMilestoneEntity]
+Updates = list[ProjectUpdateEntity]
+
+
+# The advisory-lock class for project dependency writes. See
+# `ProjectRepository.lock_dependencies` for what it serialises and why.
+#
+# Two arguments, not one. PostgreSQL's one-argument pg_advisory_xact_lock and
+# its two-argument form occupy DIFFERENT lock spaces, so this cannot collide
+# with `scripts.apply_migration.ADVISORY_LOCK_KEY`. A different number from
+# `app.repositories.relations.PARENTING_LOCK_CLASS` and from
+# `app.repositories.initiatives.INITIATIVE_PARENTING_LOCK_CLASS`, because the
+# three guard three different graphs and have no reason to serialise against
+# one another.
+DEPENDENCY_LOCK_CLASS = 0x56504445
+
+# The columns every project-update read returns.
+#
+# A constant rather than seven copies, for the reason
+# `app.repositories.relations._ISSUE_COLUMNS` is one: the entity is built from
+# these rows, and a column missing is a KeyError at runtime on whichever read
+# happens not to be exercised.
+_PROJECT_UPDATE_COLUMNS = """
+    id,
+    project_id,
+    health,
+    body,
+    author_id,
+    created_at
+"""
 
 
 class ProjectRepository:
@@ -83,6 +117,7 @@ class ProjectRepository:
                 name,
                 description,
                 state,
+                health,
                 target_date,
                 lead_id,
                 created_at,
@@ -132,6 +167,7 @@ class ProjectRepository:
                 name,
                 description,
                 state,
+                health,
                 target_date,
                 lead_id,
                 created_at,
@@ -182,6 +218,7 @@ class ProjectRepository:
                 name,
                 description,
                 state,
+                health,
                 target_date,
                 lead_id,
                 created_at,
@@ -248,6 +285,7 @@ class ProjectRepository:
                     name,
                     description,
                     state,
+                    health,
                     target_date,
                     lead_id,
                     created_at,
@@ -277,6 +315,7 @@ class ProjectRepository:
                     name,
                     description,
                     state,
+                    health,
                     target_date,
                     lead_id,
                     created_at,
@@ -351,6 +390,7 @@ class ProjectRepository:
                 name,
                 description,
                 state,
+                health,
                 target_date,
                 lead_id,
                 created_at,
@@ -433,6 +473,7 @@ class ProjectRepository:
                 name,
                 description,
                 state,
+                health,
                 target_date,
                 lead_id,
                 created_at,
@@ -862,7 +903,409 @@ class ProjectRepository:
             project_id,
         )
 
+    # --------------------------------------------------------------- updates
+
+    async def create_update(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+        health: str,
+        body: str,
+        author_id: UUID,
+    ) -> ProjectUpdateEntity:
+        """Append one update to a project's history.
+
+        Neither the project nor the author is read first.
+        `project_updates_project_fk` and `project_updates_author_fk` are both
+        composite over the same `workspace_id`, so a project from another
+        tenant and an author who is not a member of this one are both refused
+        by the statement that would have written the row -- with no window
+        between a check and a write for a membership to be revoked in.
+        """
+        row = await connection.fetchrow(
+            f"""
+            INSERT INTO project_updates (
+                workspace_id, project_id, health, body, author_id
+            )
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING {_PROJECT_UPDATE_COLUMNS}
+            """,
+            scope.workspace_id,
+            project_id,
+            health,
+            body,
+            author_id,
+        )
+
+        return self._to_update(row)
+
+    async def set_health(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+        health: str,
+    ) -> None:
+        """Stamp the current health onto the project row.
+
+        Called by the service in the same transaction as the update row that
+        reported it, and never on its own -- see the long note on
+        `projects.health` in migrations/022_initiatives.sql for why both the
+        column and the log exist, and what keeps them in step.
+
+        Reports nothing. A row that does not match is not a case a caller can
+        act on: the insert of the update row has already run in this
+        transaction and its foreign key would have refused a project that is
+        not in this workspace.
+        """
+        await connection.execute(
+            """
+            UPDATE projects
+            SET health = $3, updated_at = now()
+            WHERE workspace_id = $1 AND id = $2
+            """,
+            scope.workspace_id,
+            project_id,
+            health,
+        )
+
+    async def list_updates(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+        limit: int,
+    ) -> Updates:
+        """One project's update history, newest first.
+
+        `(created_at DESC, id DESC)` and not `created_at` alone. Two updates
+        posted in one transaction share a timestamp, and without the tie-break
+        "which is the latest" would depend on the scan order -- which is the
+        subtle way the health this history summarises comes out wrong.
+        """
+        rows = await connection.fetch(
+            f"""
+            SELECT {_PROJECT_UPDATE_COLUMNS}
+            FROM project_updates
+            WHERE workspace_id = $1 AND project_id = $2
+            ORDER BY created_at DESC, id DESC
+            LIMIT $3
+            """,
+            scope.workspace_id,
+            project_id,
+            limit,
+        )
+
+        return [self._to_update(row) for row in rows]
+
+    async def list_updates_for_projects(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_ids: Sequence[UUID],
+        limit_per_project: int,
+    ) -> Updates:
+        """Every listed project's updates, in one statement.
+
+        The limit is PER PROJECT, which is why it is a window function and not
+        a `LIMIT`, for the reason `list_milestones_for_projects` gives in full.
+        """
+        rows = await connection.fetch(
+            f"""
+            SELECT {_PROJECT_UPDATE_COLUMNS}
+            FROM (
+                SELECT
+                    {_PROJECT_UPDATE_COLUMNS},
+                    row_number() OVER (
+                        PARTITION BY project_id
+                        ORDER BY created_at DESC, id DESC
+                    ) AS rank
+                FROM project_updates
+                WHERE workspace_id = $1 AND project_id = ANY($2::UUID[])
+            ) ranked
+            WHERE rank <= $3
+            ORDER BY project_id, created_at DESC, id DESC
+            """,
+            scope.workspace_id,
+            list(project_ids),
+            limit_per_project,
+        )
+
+        return [self._to_update(row) for row in rows]
+
+    async def clear_updates(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+    ) -> None:
+        """Drop one project's whole history, on the way to deleting it."""
+        await connection.execute(
+            """
+            DELETE FROM project_updates
+            WHERE workspace_id = $1 AND project_id = $2
+            """,
+            scope.workspace_id,
+            project_id,
+        )
+
+    # ---------------------------------------------------------- dependencies
+
+    async def lock_dependencies(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+    ) -> None:
+        """Serialise dependency writes within one workspace.
+
+        The whole of the dependency cycle guard's soundness, and the argument
+        is `RelationRepository.lock_parenting`'s: `depends_on` reads a graph
+        and `add_dependency` changes one, and between the two another
+        transaction adding a different edge could invalidate what the first
+        read -- the two edges together forming a cycle neither could see.
+
+        Per workspace, not global, so tenants do not queue behind each other;
+        `_xact_`, so the caller's commit or rollback releases it. A different
+        lock class from initiative parenting, because the two guard different
+        graphs and have no reason to queue behind each other.
+
+        It binds only callers that take it. Any future writer of
+        `project_dependencies` -- an import, an operator's INSERT -- can still
+        write a cycle, and nothing here will notice.
+        """
+        await connection.execute(
+            "SELECT pg_advisory_xact_lock($1, hashtext($2))",
+            DEPENDENCY_LOCK_CLASS,
+            str(scope.workspace_id),
+        )
+
+    async def depends_on(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        from_project_id: UUID,
+        to_project_id: UUID,
+    ) -> bool:
+        """Whether `from_project_id` already reaches `to_project_id`.
+
+        Asked before writing "A blocks B": the new edge closes a loop exactly
+        when B already blocks, directly or through any chain, A. So the walk
+        starts at B and follows the stored direction forward.
+
+        Deliberately NOT depth-bounded, unlike the initiative hierarchy walk. A
+        dependency chain has no product limit, so truncating this search would
+        silently admit precisely the long cycles it exists to refuse -- an
+        approval that is wrong, which is the one direction a bound must never
+        fail in. Termination comes from `CYCLE ... SET ... USING ...` instead,
+        which stops at the first repeated project, so a graph some other writer
+        has already broken produces an answer rather than looping forever. The
+        cost is bounded by the reachable sub-graph, and therefore by the number
+        of projects in one workspace.
+
+        The workspace predicate is on the recursive term as well as the anchor,
+        so the walk cannot leave the tenant it started in.
+        """
+        reachable: bool = await connection.fetchval(
+            """
+            WITH RECURSIVE reachable (project_id) AS (
+                SELECT blocked_project_id
+                FROM project_dependencies
+                WHERE workspace_id = $1 AND blocking_project_id = $2
+
+                UNION ALL
+
+                SELECT edge.blocked_project_id
+                FROM project_dependencies edge
+                JOIN reachable ON edge.blocking_project_id = reachable.project_id
+                WHERE edge.workspace_id = $1
+            ) CYCLE project_id SET is_cycle USING path
+            SELECT EXISTS (
+                SELECT 1 FROM reachable WHERE reachable.project_id = $3
+            )
+            """,
+            scope.workspace_id,
+            from_project_id,
+            to_project_id,
+        )
+
+        return reachable
+
+    async def add_dependency(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        blocking_project_id: UUID,
+        blocked_project_id: UUID,
+    ) -> None:
+        """Record that one project blocks another.
+
+        One row for the edge, stored in one direction only; `blocked_by` is
+        this same row read from the other end and is produced by
+        `list_dependencies`, never stored.
+
+        Neither project is read first. Both foreign keys read the row's single
+        `workspace_id`, so a project from another workspace raises
+        ForeignKeyViolationError on whichever of
+        `project_dependencies_blocking_fk` / `project_dependencies_blocked_fk`
+        named it, a duplicate raises UniqueViolationError on
+        `project_dependencies_pkey`, and a self-dependency that got past the
+        service raises CheckViolationError on
+        `project_dependencies_not_self`.
+        """
+        await connection.execute(
+            """
+            INSERT INTO project_dependencies (
+                workspace_id, blocking_project_id, blocked_project_id
+            )
+            VALUES ($1, $2, $3)
+            """,
+            scope.workspace_id,
+            blocking_project_id,
+            blocked_project_id,
+        )
+
+    async def remove_dependency(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        blocking_project_id: UUID,
+        blocked_project_id: UUID,
+    ) -> bool:
+        """Drop one dependency, reporting whether there was one to drop.
+
+        A project from another workspace matches nothing here, so the answer is
+        the same `False` an edge that never existed produces.
+        """
+        # Annotated rather than compared inline: asyncpg ships no types, so
+        # `execute` is Any and `Any == str` would silently satisfy `bool`.
+        status: str = await connection.execute(
+            """
+            DELETE FROM project_dependencies
+            WHERE workspace_id = $1
+                AND blocking_project_id = $2
+                AND blocked_project_id = $3
+            """,
+            scope.workspace_id,
+            blocking_project_id,
+            blocked_project_id,
+        )
+
+        return status == "DELETE 1"
+
+    async def list_dependencies_for_projects(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_ids: Sequence[UUID],
+    ) -> dict[UUID, ProjectDependencies]:
+        """Both directions, for several projects, in one statement.
+
+        One statement rather than two, and one aggregate per direction rather
+        than a row per edge: reading a project's dependencies means finding
+        rows where it is the blocking end OR the blocked end, and an OR across
+        two columns cannot be served by one index. The two halves are two
+        separate equality lookups -- one on project_dependencies_pkey's leading
+        columns, one on project_dependencies_workspace_blocked_idx -- and each
+        one aggregates to an array so the result is one row per project rather
+        than one per edge.
+
+        Not paginated, and that is a product statement: a project has a handful
+        of dependencies and a client renders them whole. The bound is the
+        caller's `project_ids` list, which is already a page.
+
+        Returns a dict rather than a list, because the caller is a batch loader
+        that has to pair answers to keys and a list would make it re-group.
+        A project with no dependencies at either end is simply absent -- the
+        same answer a project in another workspace gives.
+        """
+        rows = await connection.fetch(
+            """
+            SELECT
+                subject.project_id,
+                (
+                    SELECT COALESCE(
+                        array_agg(
+                            outgoing.blocked_project_id
+                            ORDER BY outgoing.blocked_project_id
+                        ),
+                        ARRAY[]::UUID[]
+                    )
+                    FROM project_dependencies outgoing
+                    WHERE outgoing.workspace_id = $1
+                        AND outgoing.blocking_project_id = subject.project_id
+                ) AS blocks,
+                (
+                    SELECT COALESCE(
+                        array_agg(
+                            incoming.blocking_project_id
+                            ORDER BY incoming.blocking_project_id
+                        ),
+                        ARRAY[]::UUID[]
+                    )
+                    FROM project_dependencies incoming
+                    WHERE incoming.workspace_id = $1
+                        AND incoming.blocked_project_id = subject.project_id
+                ) AS blocked_by
+            FROM unnest($2::UUID[]) AS subject (project_id)
+            """,
+            scope.workspace_id,
+            list(project_ids),
+        )
+
+        return {
+            row["project_id"]: ProjectDependencies(
+                blocks=tuple(row["blocks"]),
+                blocked_by=tuple(row["blocked_by"]),
+            )
+            for row in rows
+        }
+
+    async def clear_dependencies(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+    ) -> None:
+        """Drop every dependency at either end of one project.
+
+        Both directions in one statement, on the way to deleting the project.
+        Doing it in two would leave a window in which the project was half
+        detached, and the second statement is the one that would fail.
+        """
+        await connection.execute(
+            """
+            DELETE FROM project_dependencies
+            WHERE workspace_id = $1
+                AND (blocking_project_id = $2 OR blocked_project_id = $2)
+            """,
+            scope.workspace_id,
+            project_id,
+        )
+
     # ---------------------------------------------------------------- mapping
+
+    @staticmethod
+    def _to_update(row: asyncpg.Record) -> ProjectUpdateEntity:
+        return ProjectUpdateEntity(
+            id=row["id"],
+            project_id=row["project_id"],
+            health=row["health"],
+            body=row["body"],
+            author_id=row["author_id"],
+            created_at=row["created_at"],
+        )
 
     @staticmethod
     def _to_project(row: asyncpg.Record) -> ProjectEntity:
@@ -874,6 +1317,7 @@ class ProjectRepository:
             name=row["name"],
             description=row["description"],
             state=row["state"],
+            health=row["health"],
             target_date=row["target_date"],
             lead_id=row["lead_id"],
             team_ids=tuple(row["team_ids"]),

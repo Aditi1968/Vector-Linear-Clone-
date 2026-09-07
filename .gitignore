@@ -3,6 +3,13 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
+# Local tooling state: machine-specific settings, and the nested git
+# worktrees agent runs are checked out into. Both are working copies of
+# other things rather than sources of this one, so neither belongs in the
+# tree -- and a worktree left untracked here is a full second copy of
+# `app/`, which is why tests/test_phase1a2_gates.py skips this path too.
+.claude/
+
 .env
 .env.local
 CLAUDE.md

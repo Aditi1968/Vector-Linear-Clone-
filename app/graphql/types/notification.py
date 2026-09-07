@@ -25,16 +25,21 @@ DEFAULT_NOTIFICATION_FIRST = 50
 
 @strawberry.enum(name="NotificationKind")
 class NotificationKindEnum(enum.Enum):
-    """The three events that reach an inbox.
+    """The four events that reach an inbox.
 
     Declared here rather than by decorating the domain enum, for the reason
     `IssueActivityKind` gives. There is no MENTIONED: mentions do not exist in
     this product, and publishing the name would promise a feature.
+
+    STATUS_CHANGED arrived with subscribers in migration 020: it is the event a
+    watcher is watching for, and until there were watchers its only recipients
+    would have been people who can already see the status on an issue they own.
     """
 
     ASSIGNED = "assigned"
     COMMENTED = "commented"
     BLOCKED = "blocked"
+    STATUS_CHANGED = "status_changed"
 
 
 @strawberry.type(name="Notification")

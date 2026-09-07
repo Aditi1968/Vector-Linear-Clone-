@@ -66,6 +66,7 @@ def make_project(index: int, **overrides) -> ProjectEntity:
         "name": f"Project {index}",
         "description": None,
         "state": "planned",
+        "health": None,
         "target_date": None,
         "lead_id": None,
         "team_ids": (),

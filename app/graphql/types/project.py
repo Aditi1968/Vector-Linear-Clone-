@@ -7,12 +7,15 @@ from strawberry.types import Info
 
 from app.domain.projects import (
     PROJECT_STATES,
+    ProjectDependencies,
     ProjectEntity,
     ProjectMilestoneEntity,
     ProjectPage,
+    ProjectUpdateEntity,
 )
 from app.domain.tenancy import WorkspaceScope
 from app.graphql.types.errors import ValidationErrorType
+from app.graphql.types.health import HealthType
 from app.graphql.types.pagination import PageInfo
 
 
@@ -84,12 +87,75 @@ class ProjectMilestoneType:
         )
 
 
+@strawberry.type(name="ProjectUpdate")
+class ProjectUpdateType:
+    """One posted update on a project, as a client reads it.
+
+    `authorId` and not `author: User`, for the reason `Project.leadId` gives
+    below.
+    """
+
+    id: UUID
+    project_id: UUID
+    health: HealthType
+    body: str
+    author_id: UUID
+    created_at: datetime
+
+    @classmethod
+    def from_entity(cls, entity: ProjectUpdateEntity) -> "ProjectUpdateType":
+        return cls(
+            id=entity.id,
+            project_id=entity.project_id,
+            health=HealthType(entity.health),
+            body=entity.body,
+            author_id=entity.author_id,
+            created_at=entity.created_at,
+        )
+
+
+@strawberry.type(name="ProjectDependencies")
+class ProjectDependenciesType:
+    """One project's dependencies, named from that project's point of view.
+
+    Two id lists rather than a list of edges carrying a direction, because the
+    direction is not something a client should have to interpret: the table
+    stores one row per edge and never its inverse, so `blockedBy` comes into
+    existence here rather than in the database.
+
+    Ids rather than `[Project!]!`, for the reason `Project.teamIds` gives -- and
+    with the extra force that resolving them would make a page of projects a
+    page of project reads that app/graphql/limits.py prices as one.
+    """
+
+    blocks: list[UUID]
+    blocked_by: list[UUID]
+
+    @classmethod
+    def from_domain(cls, domain: ProjectDependencies) -> "ProjectDependenciesType":
+        return cls(
+            blocks=list(domain.blocks),
+            blocked_by=list(domain.blocked_by),
+        )
+
+
 @strawberry.type(name="Project")
 class ProjectType:
     id: UUID
     name: str
     description: str | None
     state: ProjectStateType
+
+    # Null until somebody posts an update, and nullable in the SDL rather than
+    # defaulted: "nobody has reported" and "reported as fine" are different
+    # facts, and a board that could not tell them apart would show a wall of
+    # green for a workspace nobody is updating.
+    #
+    # A separate axis from `state`, not a finer grain of it: `state` is where
+    # the project is in its lifecycle, `health` is whether it is going well. A
+    # started project may be off track and a paused one may be fine.
+    health: HealthType | None
+
     target_date: date | None
 
     # The workspace member accountable for this project, as an id.
@@ -147,6 +213,38 @@ class ProjectType:
 
         return [ProjectMilestoneType.from_entity(entity) for entity in entities]
 
+    @strawberry.field
+    async def updates(self, info: Info) -> list[ProjectUpdateType]:
+        """This project's update history, newest first.
+
+        Batched, for the reason `milestones` is: a page of projects with their
+        updates would otherwise issue one query per project.
+        """
+        entities = await info.context.project_updates_loader.load(
+            (self.scope.workspace_id, self.id)
+        )
+
+        return [ProjectUpdateType.from_entity(entity) for entity in entities]
+
+    @strawberry.field
+    async def dependencies(self, info: Info) -> ProjectDependenciesType:
+        """What this project blocks, and what blocks it.
+
+        Batched, and one field rather than two so that both directions cost one
+        batch: they come out of one statement in the repository, and two fields
+        would either issue it twice or need a loader each.
+
+        Total: a project with no dependencies -- and a key naming a project in
+        another workspace -- resolves to two empty lists rather than null, so a
+        client walking a stale list of ids gets empty answers, not a failed
+        query.
+        """
+        domain = await info.context.project_dependencies_loader.load(
+            (self.scope.workspace_id, self.id)
+        )
+
+        return ProjectDependenciesType.from_domain(domain)
+
     @classmethod
     def from_entity(cls, entity: ProjectEntity, scope: WorkspaceScope) -> "ProjectType":
         return cls(
@@ -161,6 +259,9 @@ class ProjectType:
             # since the only way to store one is a migration that widened
             # `projects_state_check` without widening this.
             state=ProjectStateType(entity.state),
+            # Null stays null: it is the real state "nobody has reported yet",
+            # not a value to substitute for.
+            health=None if entity.health is None else HealthType(entity.health),
             target_date=entity.target_date,
             lead_id=entity.lead_id,
             team_ids=list(entity.team_ids),
@@ -220,4 +321,21 @@ class ProjectMilestonePayload:
 @strawberry.type
 class ProjectMilestoneDeletePayload:
     deleted_milestone_id: UUID | None
+    errors: list[ValidationErrorType]
+
+
+@strawberry.type
+class ProjectUpdatePayload:
+    update: ProjectUpdateType | None
+    errors: list[ValidationErrorType]
+
+
+@strawberry.type
+class ProjectDependencyPayload:
+    # The dependencies as they now stand, from the BLOCKING project's side --
+    # which is the subject of both mutations. Returning the whole set rather
+    # than the one edge is what lets a client re-render without a second query,
+    # and it is the only shape that says something useful for a removal, where
+    # there is no edge left to return.
+    dependencies: ProjectDependenciesType | None
     errors: list[ValidationErrorType]

@@ -3,7 +3,12 @@ from uuid import UUID
 
 from strawberry.dataloader import DataLoader
 
-from app.domain.projects import ProjectEntity, ProjectMilestoneEntity
+from app.domain.projects import (
+    ProjectDependencies,
+    ProjectEntity,
+    ProjectMilestoneEntity,
+    ProjectUpdateEntity,
+)
 from app.domain.tenancy import WorkspaceScope
 from app.services.projects import ProjectService
 
@@ -100,5 +105,86 @@ def build_project_milestones_loader(
         # would insert an empty list for every miss and quietly grow a cache
         # of keys nobody asked about again.
         return [found.get(key, []) for key in keys]
+
+    return DataLoader(load_fn=load)
+
+
+def build_project_updates_loader(
+    service: ProjectService,
+) -> DataLoader[ProjectKey, list[ProjectUpdateEntity]]:
+    """Batch `Project.updates` across one request.
+
+    A project with no updates -- and a key naming a project in another
+    workspace -- both resolve to an empty list, which is the same answer
+    ProjectService.list_updates gives and for the same reason.
+    """
+
+    async def load(keys: list[ProjectKey]) -> list[list[ProjectUpdateEntity]]:
+        by_workspace: dict[UUID, list[UUID]] = defaultdict(list)
+
+        for workspace_id, project_id in keys:
+            by_workspace[workspace_id].append(project_id)
+
+        found: dict[ProjectKey, list[ProjectUpdateEntity]] = defaultdict(list)
+
+        for workspace_id, project_ids in by_workspace.items():
+            entities = await service.list_updates_for_projects(
+                scope=WorkspaceScope(workspace_id=workspace_id),
+                project_ids=project_ids,
+            )
+
+            # The repository returns them ordered by (project_id,
+            # created_at DESC, id DESC), so appending in arrival order
+            # preserves each project's newest-first order without a second
+            # sort.
+            for entity in entities:
+                found[(workspace_id, entity.project_id)].append(entity)
+
+        return [found.get(key, []) for key in keys]
+
+    return DataLoader(load_fn=load)
+
+
+# What a project with no dependencies at either end resolves to.
+#
+# A module-level constant rather than a fresh pair of empty tuples per miss:
+# `ProjectDependencies` is frozen and carries tuples, so one instance is safe
+# to share and there is nothing a caller could mutate through it. It is also
+# what makes the field total -- a key naming another workspace's project gets
+# this, the same answer a real project with no dependencies gets.
+_NO_DEPENDENCIES = ProjectDependencies(blocks=(), blocked_by=())
+
+
+def build_project_dependencies_loader(
+    service: ProjectService,
+) -> DataLoader[ProjectKey, ProjectDependencies]:
+    """Batch `Project.dependencies` across one request.
+
+    Both directions come back together, because the repository reads them in
+    one statement: two loaders would issue it twice for a field a client almost
+    always selects whole.
+    """
+
+    async def load(keys: list[ProjectKey]) -> list[ProjectDependencies]:
+        by_workspace: dict[UUID, list[UUID]] = defaultdict(list)
+
+        for workspace_id, project_id in keys:
+            by_workspace[workspace_id].append(project_id)
+
+        found: dict[ProjectKey, ProjectDependencies] = {}
+
+        for workspace_id, project_ids in by_workspace.items():
+            dependencies = await service.list_dependencies_for_projects(
+                scope=WorkspaceScope(workspace_id=workspace_id),
+                project_ids=project_ids,
+            )
+
+            for project_id, entry in dependencies.items():
+                found[(workspace_id, project_id)] = entry
+
+        # One result per key, in the order the keys arrived. DataLoader pairs
+        # them positionally, so a filtered or re-ordered list here would hand
+        # each caller somebody else's dependencies.
+        return [found.get(key, _NO_DEPENDENCIES) for key in keys]
 
     return DataLoader(load_fn=load)

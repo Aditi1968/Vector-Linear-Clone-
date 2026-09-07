@@ -349,6 +349,19 @@ class IssueService:
                     )
 
                     if assignee_id is not None:
+                        # Being handed an issue is a statement that its
+                        # future concerns you, so the assignee starts out
+                        # watching it -- and keeps watching after the issue
+                        # is reassigned to somebody else, which is the whole
+                        # difference between a subscription and the
+                        # assignee-derived recipient list migration 012 had.
+                        await activity.auto_subscribe(
+                            connection,
+                            scope=scope,
+                            issue_id=entity.id,
+                            user_id=assignee_id,
+                        )
+
                         # Filing work on somebody else's plate is the first
                         # thing they need to hear about. The statement drops
                         # the row when the assignee IS the creator, so
@@ -813,7 +826,7 @@ class IssueService:
                     )
                 )
 
-        issues.extend(_filter_issues(issue_filter))
+        issues.extend(filter_issues(issue_filter))
 
         if issues:
             raise ValidationError(issues)
@@ -822,7 +835,7 @@ class IssueService:
 
     @staticmethod
     def _validate_filter(issue_filter: IssueFilter) -> None:
-        issues = _filter_issues(issue_filter)
+        issues = filter_issues(issue_filter)
 
         if issues:
             raise ValidationError(issues)
@@ -951,13 +964,19 @@ def _validation_error_for(constraint_name: str) -> ValidationError | None:
     )
 
 
-def _filter_issues(issue_filter: IssueFilter) -> list[ValidationIssue]:
+def filter_issues(issue_filter: IssueFilter) -> list[ValidationIssue]:
     """The one thing about a filter the arguments alone decide.
 
     Module-level rather than a method, and not only by convention with the
     validators below it: inside `IssueService` the annotation
     `list[ValidationIssue]` resolves to that class's own `list` method rather
     than to the builtin, which mypy reports and a reader has to squint at.
+
+    Public rather than underscored, unlike its neighbours, because
+    `SavedViewService` calls it: a filter about to be STORED has to be one
+    that could be executed, or the view would be accepted and then refused by
+    the very list it exists to produce. One definition of "is this filter
+    answerable", reached from both sides.
 
     Every other field of a filter is an id or an enum, and an id outside the
     workspace -- or one naming nothing at all -- is an empty page rather than

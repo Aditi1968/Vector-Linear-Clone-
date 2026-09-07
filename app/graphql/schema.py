@@ -13,25 +13,33 @@ from app.graphql.mutations.bulk import BulkMutation
 from app.graphql.mutations.comments import CommentMutation
 from app.graphql.mutations.cycles import CycleMutation
 from app.graphql.mutations.github import GithubMutation
+from app.graphql.mutations.initiatives import InitiativeMutation
 from app.graphql.mutations.issues import Mutation as IssueMutation
 from app.graphql.mutations.labels import LabelMutation
 from app.graphql.mutations.memberships import MembershipMutation
 from app.graphql.mutations.notifications import NotificationMutation
 from app.graphql.mutations.projects import ProjectMutation
 from app.graphql.mutations.relations import RelationMutation
+from app.graphql.mutations.saved_views import FavoriteMutation, SavedViewMutation
 from app.graphql.mutations.slack import SlackMutation
+from app.graphql.mutations.subscribers import SubscriberMutation
+from app.graphql.mutations.templates import TemplateMutation
 from app.graphql.mutations.triage import TriageMutation
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.cycles import CycleQuery
 from app.graphql.queries.github import GithubQuery
+from app.graphql.queries.initiatives import InitiativeQuery
 from app.graphql.queries.issues import Query as IssueQuery
 from app.graphql.queries.labels import LabelQuery
 from app.graphql.queries.memberships import MembershipQuery
 from app.graphql.queries.notifications import NotificationQuery
 from app.graphql.queries.projects import ProjectQuery
+from app.graphql.queries.saved_views import SavedViewQuery
 from app.graphql.queries.search import SearchQuery
 from app.graphql.queries.slack import SlackQuery
+from app.graphql.queries.subscribers import SubscriberQuery
 from app.graphql.queries.teams import TeamQuery
+from app.graphql.queries.templates import TemplateQuery
 from app.graphql.queries.triage import TriageQuery
 
 
@@ -68,10 +76,14 @@ QUERY_TYPES = (
     LabelQuery,
     CycleQuery,
     ProjectQuery,
+    InitiativeQuery,
     SearchQuery,
     GithubQuery,
     SlackQuery,
     NotificationQuery,
+    SavedViewQuery,
+    SubscriberQuery,
+    TemplateQuery,
     TriageQuery,
 )
 
@@ -84,10 +96,15 @@ MUTATION_TYPES = (
     CommentMutation,
     CycleMutation,
     ProjectMutation,
+    InitiativeMutation,
     RelationMutation,
     GithubMutation,
     SlackMutation,
     NotificationMutation,
+    SavedViewMutation,
+    FavoriteMutation,
+    SubscriberMutation,
+    TemplateMutation,
     TriageMutation,
     BulkMutation,
 )

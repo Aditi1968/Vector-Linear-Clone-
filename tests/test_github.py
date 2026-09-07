@@ -31,7 +31,9 @@ from app.domain.errors import (
 )
 from app.domain.github import (
     GITHUB_STATUSES,
+    GithubCommitEntity,
     GithubInstallationEntity,
+    GithubPullRequestEntity,
     GithubRepositoryEntity,
 )
 from app.domain.tenancy import AuthorizedWorkspaceScope
@@ -169,6 +171,33 @@ class FakeGithubRepository:
         self.expired = expired
         self.calls: list[tuple] = []
 
+        # --- development activity, from migration 017 ---------------------
+        #
+        # Every one of these is keyed by workspace, including `issues`, and
+        # that is the property the adversarial tests in
+        # tests/test_github_development.py are actually about: the real
+        # statements bind `scope.workspace_id` into the predicate, so a fake
+        # that held one flat dict would resolve a foreign workspace's
+        # identifier and hide the bug it exists to catch.
+        self.deliveries: set[str] = set()
+
+        # (workspace_id, team_key, number) -> issue id. Seeded by a test that
+        # wants an identifier to resolve; empty means every identifier is a
+        # mention of somebody else's tracker.
+        self.issues: dict[tuple, UUID] = {}
+
+        # (workspace_id, repository_id, number) -> the stored columns.
+        self.pull_requests: dict[tuple, dict] = {}
+
+        # (workspace_id, repository_id, number, issue_id, source), which is
+        # github_pull_request_issues_pkey exactly -- `source` included, so a
+        # title link and a branch link to one issue are two entries.
+        self.pull_links: set[tuple] = set()
+
+        # (workspace_id, repository_id, sha) -> the stored columns.
+        self.commits: dict[tuple, dict] = {}
+        self.commit_links: set[tuple] = set()
+
     def _holds(self, installation_id) -> bool:
         return self.workspace_id is not None and installation_id == self.installation_id
 
@@ -282,6 +311,236 @@ class FakeGithubRepository:
             self.repositories = [
                 one for one in self.repositories if one.repository_id not in removed
             ]
+
+    # --- development activity ---------------------------------------------
+
+    async def record_delivery(self, connection, *, delivery_id, event):
+        self.calls.append(("record_delivery", delivery_id, event))
+
+        if delivery_id in self.deliveries:
+            return False
+
+        self.deliveries.add(delivery_id)
+
+        return True
+
+    async def repository_exists(self, connection, *, scope, repository_id):
+        self.calls.append(("repository_exists", scope.workspace_id, repository_id))
+
+        return any(
+            one.repository_id == repository_id
+            for one in self.repositories
+            # The real predicate leads with the workspace. This fake holds one
+            # workspace's repositories, so the check is that the scope asking
+            # is the one that owns them.
+            if scope.workspace_id == self.workspace_id
+        )
+
+    async def resolve_issue_ids(self, connection, *, scope, identifiers):
+        self.calls.append(("resolve_issue_ids", scope.workspace_id, tuple(identifiers)))
+
+        return {
+            (team_key, number): self.issues[(scope.workspace_id, team_key, number)]
+            for team_key, number in identifiers
+            if (scope.workspace_id, team_key, number) in self.issues
+        }
+
+    async def upsert_pull_request(
+        self,
+        connection,
+        *,
+        scope,
+        repository_id,
+        number,
+        title,
+        state,
+        draft,
+        merged_at,
+        head_ref,
+        url,
+        github_updated_at,
+    ):
+        self.calls.append(
+            ("upsert_pull_request", scope.workspace_id, repository_id, number)
+        )
+
+        key = (scope.workspace_id, repository_id, number)
+        stored = self.pull_requests.get(key)
+
+        # The out-of-order rule, spelled exactly as the ON CONFLICT WHERE
+        # clause is: a stored row with no timestamp is always overwritten, and
+        # a payload with no timestamp never overwrites one that has.
+        if stored is not None and stored["github_updated_at"] is not None:
+            if github_updated_at is None:
+                return False
+
+            if github_updated_at < stored["github_updated_at"]:
+                return False
+
+        self.pull_requests[key] = {
+            "title": title,
+            "state": state,
+            "draft": draft,
+            "merged_at": merged_at,
+            "head_ref": head_ref,
+            "url": url,
+            "github_updated_at": github_updated_at,
+        }
+
+        return True
+
+    async def set_pull_request_links(
+        self, connection, *, scope, repository_id, number, source, issue_ids
+    ):
+        self.calls.append(
+            (
+                "set_pull_request_links",
+                scope.workspace_id,
+                repository_id,
+                number,
+                source,
+                tuple(issue_ids),
+            )
+        )
+
+        wanted = set(issue_ids)
+
+        self.pull_links = {
+            link
+            for link in self.pull_links
+            if link[:3] != (scope.workspace_id, repository_id, number)
+            or link[4] != source
+            or link[3] in wanted
+        }
+        self.pull_links |= {
+            (scope.workspace_id, repository_id, number, issue_id, source)
+            for issue_id in wanted
+        }
+
+    async def add_commit(
+        self, connection, *, scope, repository_id, sha, message, url, committed_at
+    ):
+        self.calls.append(("add_commit", scope.workspace_id, repository_id, sha))
+
+        # ON CONFLICT DO NOTHING: a commit is immutable, so the second
+        # delivery of one has nothing to say.
+        self.commits.setdefault(
+            (scope.workspace_id, repository_id, sha),
+            {"message": message, "url": url, "committed_at": committed_at},
+        )
+
+    async def add_commit_links(
+        self, connection, *, scope, repository_id, sha, issue_ids
+    ):
+        self.calls.append(
+            (
+                "add_commit_links",
+                scope.workspace_id,
+                repository_id,
+                sha,
+                tuple(issue_ids),
+            )
+        )
+
+        self.commit_links |= {
+            (scope.workspace_id, repository_id, sha, issue_id) for issue_id in issue_ids
+        }
+
+    async def delete_development(self, connection, *, scope, repository_ids=None):
+        self.calls.append(
+            (
+                "delete_development",
+                scope.workspace_id,
+                None if repository_ids is None else tuple(repository_ids),
+            )
+        )
+
+        selected = None if repository_ids is None else set(repository_ids)
+
+        def dropped(workspace_id, repository_id):
+            return workspace_id == scope.workspace_id and (
+                selected is None or repository_id in selected
+            )
+
+        self.pull_links = {
+            link for link in self.pull_links if not dropped(link[0], link[1])
+        }
+        self.commit_links = {
+            link for link in self.commit_links if not dropped(link[0], link[1])
+        }
+        self.pull_requests = {
+            key: row for key, row in self.pull_requests.items() if not dropped(*key[:2])
+        }
+        self.commits = {
+            key: row for key, row in self.commits.items() if not dropped(*key[:2])
+        }
+
+    async def list_pull_requests_for_issue(self, connection, *, scope, issue_id, limit):
+        self.calls.append(
+            ("list_pull_requests_for_issue", scope.workspace_id, issue_id)
+        )
+
+        by_pull: dict[tuple, list[str]] = {}
+
+        for workspace_id, repository_id, number, linked, source in sorted(
+            self.pull_links
+        ):
+            if workspace_id != scope.workspace_id or linked != issue_id:
+                continue
+
+            by_pull.setdefault((repository_id, number), []).append(source)
+
+        found = []
+
+        for (repository_id, number), sources in by_pull.items():
+            stored = self.pull_requests[(scope.workspace_id, repository_id, number)]
+            found.append(
+                GithubPullRequestEntity(
+                    repository_id=repository_id,
+                    repository_full_name=self._full_name(repository_id),
+                    number=number,
+                    title=stored["title"],
+                    state=stored["state"],
+                    draft=stored["draft"],
+                    merged_at=stored["merged_at"],
+                    head_ref=stored["head_ref"],
+                    url=stored["url"],
+                    github_updated_at=stored["github_updated_at"],
+                    link_sources=tuple(sorted(sources)),
+                )
+            )
+
+        return found[:limit]
+
+    async def list_commits_for_issue(self, connection, *, scope, issue_id, limit):
+        self.calls.append(("list_commits_for_issue", scope.workspace_id, issue_id))
+
+        found = []
+
+        for workspace_id, repository_id, sha, linked in sorted(self.commit_links):
+            if workspace_id != scope.workspace_id or linked != issue_id:
+                continue
+
+            stored = self.commits[(scope.workspace_id, repository_id, sha)]
+            found.append(
+                GithubCommitEntity(
+                    repository_id=repository_id,
+                    repository_full_name=self._full_name(repository_id),
+                    sha=sha,
+                    message=stored["message"],
+                    url=stored["url"],
+                    committed_at=stored["committed_at"],
+                )
+            )
+
+        return found[:limit]
+
+    def _full_name(self, repository_id):
+        for one in self.repositories:
+            if one.repository_id == repository_id:
+                return one.full_name
+
+        return f"acme/{repository_id}"
 
     def called(self, name):
         return [call for call in self.calls if call[0] == name]
@@ -633,6 +892,12 @@ async def test_reconnecting_replaces_rather_than_merges():
     await service.connect(make_scope(), installation_id=99)
 
     assert [call[0] for call in repository.calls] == [
+        # Development activity first, then the repositories it hangs off, then
+        # the installation. Every foreign key in 013 and 017 is RESTRICT, so
+        # any other order is a RestrictViolationError against a real schema --
+        # and merging rather than replacing would leave the previous account's
+        # pull request titles readable in the new one's Development panels.
+        "delete_development",
         "delete_repositories",
         "delete_installation",
         "delete_expired_claim",
@@ -651,9 +916,12 @@ async def test_disconnecting_removes_the_installation_and_its_repositories():
 
     assert integration.status == "disconnected"
     assert integration.installation is None
-    # Repositories first: `github_repositories_installation_fk` is RESTRICT,
-    # so the other order is a foreign key violation against a real database.
+    # Children first, three generations of them: the link rows and the
+    # activity they point at, then the repositories, then the installation.
+    # Every foreign key in 013 and 017 is RESTRICT, so any other order is a
+    # RestrictViolationError against a real database.
     assert [call[0] for call in repository.calls] == [
+        "delete_development",
         "delete_repositories",
         "delete_installation",
     ]
@@ -821,11 +1089,20 @@ async def test_a_payload_naming_no_installation_reaches_no_lookup(payload):
     assert repository.calls == []
 
 
-async def test_an_event_with_no_rule_is_accepted_and_ignored():
+@pytest.mark.parametrize("event", ["ping", "check_run", "workflow_job", ""])
+async def test_an_event_with_no_rule_is_accepted_and_ignored(event):
+    """Not one statement, not even the delivery record.
+
+    An event this server has no rule for is refused before a connection is
+    acquired, which is what keeps a GitHub App's default subscription list
+    from costing a round trip per delivery. `push` and `pull_request` used to
+    be in this parametrisation and have moved to
+    tests/test_github_development.py, which is where they are now handled.
+    """
     service, repository = build_service(workspace_id=WORKSPACE_ID)
 
     await service.apply_webhook(
-        event="push",
+        event=event,
         payload={"installation": {"id": INSTALLATION_ID}},
     )
 
@@ -1014,6 +1291,7 @@ async def test_a_claim_clears_an_expired_one_before_taking_the_id():
     integration = await service.connect(make_scope(), installation_id=INSTALLATION_ID)
 
     assert [call[0] for call in repository.calls] == [
+        "delete_development",
         "delete_repositories",
         "delete_installation",
         "delete_expired_claim",

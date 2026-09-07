@@ -45,13 +45,43 @@ from app.domain.pagination import (
     decode_keyset_cursor,
     encode_keyset_cursor,
 )
+from app.domain.subscribers import SubscriberEntity
 from app.domain.tenancy import AuthorizedWorkspaceScope, WorkspaceScope
 from app.repositories.activity import ActivityRepository
 from app.repositories.notifications import NotificationRepository
+from app.repositories.subscribers import SubscriberRepository
 
 
 FIRST_MIN = 1
 FIRST_MAX = 100
+
+# The most watchers `list_subscribers` will return for one issue.
+#
+# A ceiling on a response rather than a page size, and there is deliberately no
+# cursor behind it. An issue cannot have more watchers than the workspace has
+# members, so this is a configuration-sized set rather than a product list that
+# grows without bound -- the argument migration 020 makes for the table having
+# no keyset index of its own.
+#
+# ponytail: a workspace with more than 500 members watching ONE issue would see
+# a truncated list with nothing saying so. That workspace does not exist yet.
+# When it does, this becomes a keyset page over (created_at, user_id), which
+# `issue_subscribers_pkey` cannot serve -- so it arrives with an index, not
+# just a cursor.
+SUBSCRIBERS_MAX = 500
+
+# The one foreign key on `issue_subscribers` a client can violate, matched by
+# name so that any OTHER constraint failure stays an error instead of being
+# reported to a client as something it can correct. See
+# `ActivityService.subscribe` for why its sibling on `workspace_members` is
+# deliberately absent from this.
+_UNKNOWN_ISSUE_CONSTRAINT = "issue_subscribers_issue_fk"
+
+ISSUE_NOT_FOUND = ValidationIssue(
+    field="issueId",
+    code="NOT_FOUND",
+    message="Issue not found",
+)
 
 # Stateless, so one of each is all this process needs. They hold no
 # connection, no pool and no scope -- every one of those arrives per call --
@@ -59,6 +89,7 @@ FIRST_MAX = 100
 # than shared state.
 _activity = ActivityRepository()
 _notifications = NotificationRepository()
+_subscribers = SubscriberRepository()
 
 
 async def record(
@@ -113,6 +144,21 @@ async def record_changes(
     when the assignee MOVED -- `changes` has already dropped a re-assignment
     to the same person -- and only when there is somebody to tell, which
     unassigning is not.
+
+    The new assignee is also SUBSCRIBED, in the same transaction, and that
+    ordering is the point: the subscription is written before the notification
+    fans out, so the person who has just been handed the work is already a
+    watcher of it and stays one after the next person is assigned. Being given
+    an issue is the clearest possible statement that its future concerns you.
+
+    A status move notifies too, and it is the one event that exists FOR the
+    watchers -- an assignee can see the status on the issue they own, and a
+    watcher asked to follow it precisely so they would not have to open it.
+    `include_creator` is left false: an author who cares gets there by
+    watching, and every issue's author hearing about every move is how an inbox
+    becomes noise. The two notifications are independent, so a write that moves
+    both the assignee and the state produces two items -- which is two things
+    that happened, and collapsing them would mean choosing which one to hide.
     """
     moved = changes(before, after)
 
@@ -128,12 +174,28 @@ async def record_changes(
         )
 
     if after.assignee_id is not None and before.assignee_id != after.assignee_id:
+        await auto_subscribe(
+            connection,
+            scope=scope,
+            issue_id=issue_id,
+            user_id=after.assignee_id,
+        )
+
         await notify(
             connection,
             scope=scope,
             issue_id=issue_id,
             actor_id=actor_id,
             kind=NotificationKind.ASSIGNED,
+        )
+
+    if before.workflow_state_id != after.workflow_state_id:
+        await notify(
+            connection,
+            scope=scope,
+            issue_id=issue_id,
+            actor_id=actor_id,
+            kind=NotificationKind.STATUS_CHANGED,
         )
 
 
@@ -173,8 +235,65 @@ async def notify(
     )
 
 
+async def auto_subscribe(
+    connection: asyncpg.Connection,
+    *,
+    scope: WorkspaceScope,
+    issue_id: UUID,
+    user_id: UUID,
+) -> None:
+    """Make somebody a watcher because of what they just did.
+
+    Participation is the signal, and there are exactly two kinds of it today:
+    commenting on an issue, and being handed it. Both are a person putting
+    themselves into the issue's future, and neither is a moment at which anyone
+    wants to be asked "would you also like to follow this?".
+
+    Deliberately silent about whether it did anything. The caller is mid-write
+    and has nothing to do with the answer -- somebody who already watches the
+    issue is in exactly the state this call is asking for -- and returning one
+    would invite a resolver to report it, which is how an internal record
+    becomes part of a mutation's contract.
+
+    Distinct from `ActivityService.subscribe` and not a private helper for it.
+    This one takes the caller's connection, so the subscription commits with
+    the comment or the assignment that caused it: a comment that exists with
+    its author not following the thread, and a watcher of a change that was
+    rolled back, are both states this shape makes unreachable. The service
+    method is the deliberate, standalone act with a transaction of its own.
+
+    `SubscriberRepository.subscribe` absorbs the duplicate rather than raising,
+    which is what makes this callable from inside somebody else's transaction
+    at all: in PostgreSQL a constraint violation aborts the whole transaction,
+    so "catch it and carry on" is not available here.
+
+    A user who is not a member of the workspace violates
+    `issue_subscribers_user_fk` and that violation propagates untranslated. It
+    is not client input: both callers pass an id the database has already
+    matched against `workspace_members` -- a comment author through
+    `comments_author_fk`, an assignee through `issues_assignee_fk` -- so a
+    failure here means one of those constraints did not hold, which is a defect
+    and not something for a client to correct.
+    """
+    await _subscribers.subscribe(
+        connection,
+        scope=scope,
+        issue_id=issue_id,
+        user_id=user_id,
+    )
+
+
 class ActivityService:
-    """Reads of one issue's history and of one person's inbox.
+    """One issue's history, one person's inbox, and who is watching what.
+
+    Mostly reads. The four that write -- `mark_read`, `mark_all_read`,
+    `subscribe` and `unsubscribe` -- are all deliberate acts a person performs
+    on their OWN row, each with a transaction of its own, and none of them
+    records that something happened to an issue. That distinction is the one
+    `app/graphql/context.py` describes: history and inbox rows caused by a
+    change are written by the service that causes them, on that service's
+    connection, through the module-level functions above -- never through this
+    object, which would be a way to record an event that had not happened yet.
 
     Every notification method takes an `AuthorizedWorkspaceScope` rather than
     a `WorkspaceScope`, and that is the authorization, not a formality. Only
@@ -195,10 +314,18 @@ class ActivityService:
         pool: asyncpg.Pool,
         repository: ActivityRepository,
         notifications: NotificationRepository,
+        subscribers: SubscriberRepository,
     ):
         self._pool = pool
         self._repository = repository
         self._notifications = notifications
+
+        # Watching is the third table this service reads, and it belongs with
+        # the other two rather than in a service of its own: a subscription is
+        # a standing answer to the question the notification half asks on every
+        # write -- "whose problem is this" -- and the two are read together by
+        # every screen that shows an issue.
+        self._subscribers = subscribers
 
     async def list_for_issue(
         self,
@@ -341,6 +468,127 @@ class ActivityService:
                     scope=scope,
                     user_id=scope.user_id,
                 )
+
+    async def subscribe(
+        self,
+        *,
+        scope: AuthorizedWorkspaceScope,
+        issue_id: UUID,
+    ) -> bool:
+        """Watch one issue; True if this call is what started it.
+
+        There is no `user_id` parameter, and that absence is the design, for
+        the reason `list_notifications` gives: the watcher is `scope.user_id`,
+        which came out of `workspace_members`. A method that accepted one would
+        be a way to sign somebody else up for an issue's notifications, and no
+        amount of checking at the call site would make it safe -- there would
+        simply be one call site that forgot.
+
+        Idempotent. Watching an issue twice succeeds, answers False and leaves
+        the original "watching since" where it was, so a retry or two tabs
+        cannot move it.
+
+        Two situations produce one answer: the issue is in another workspace,
+        and the issue does not exist. Both are "Issue not found", because a
+        distinguishable answer would tell a caller holding a guessed id that
+        the issue is real and simply not theirs. Only that one constraint is
+        translated -- `issue_subscribers_user_fk` cannot fire, since an
+        `AuthorizedWorkspaceScope` is built from a membership row, so a
+        violation of it means that row went away mid-request and is a failure
+        to surface rather than advice for a client.
+        """
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                try:
+                    return await self._subscribers.subscribe(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                        user_id=scope.user_id,
+                    )
+                except asyncpg.ForeignKeyViolationError as exc:
+                    if exc.constraint_name != _UNKNOWN_ISSUE_CONSTRAINT:
+                        raise
+
+                    raise ValidationError([ISSUE_NOT_FOUND]) from None
+
+    async def unsubscribe(
+        self,
+        *,
+        scope: AuthorizedWorkspaceScope,
+        issue_id: UUID,
+    ) -> bool:
+        """Stop watching one issue; True if a row went.
+
+        Unwatching an issue nobody was watching is a successful no-op rather
+        than an error, and so is unwatching one in another workspace: the
+        caller asked for a state, the state holds, and reporting a failure
+        would make a retry after a dropped response look like a different
+        outcome from the first attempt. It also keeps existence unobservable,
+        which the subscribe path cannot -- that one has to say when it did
+        nothing.
+
+        A DELETE and not a tombstone. Commenting on the issue again will
+        re-subscribe the same person, which is the product rule migration 020
+        argues for: commenting is asking to be part of the conversation.
+        """
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                return await self._subscribers.unsubscribe(
+                    connection,
+                    scope=scope,
+                    issue_id=issue_id,
+                    user_id=scope.user_id,
+                )
+
+    async def list_subscribers(
+        self,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+    ) -> list[SubscriberEntity]:
+        """Everyone watching one issue, oldest subscription first.
+
+        A plain `WorkspaceScope`, unlike the inbox methods above, because a
+        watcher list is not addressed to anyone: it is as visible as the issue,
+        and the issue was resolved under that scope. It is the same judgement
+        `list_for_issue` makes about a history.
+
+        A single SELECT needs no explicit write transaction, so this acquires a
+        connection without opening one.
+
+        An issue in another workspace answers an empty list, exactly as an
+        issue nobody watches does.
+        """
+        async with self._pool.acquire() as connection:
+            return await self._subscribers.list_for_issue(
+                connection,
+                scope=scope,
+                issue_id=issue_id,
+                limit=SUBSCRIBERS_MAX,
+            )
+
+    async def is_subscribed(
+        self,
+        *,
+        scope: AuthorizedWorkspaceScope,
+        issue_id: UUID,
+    ) -> bool:
+        """Whether the caller is watching one issue.
+
+        Answers about `scope.user_id` and nothing else, for the reason
+        `subscribe` gives about having no `user_id` parameter -- with a second
+        one here: a method that answered about an arbitrary user would report
+        whether a named person is watching a named issue, which is a fact about
+        them rather than about the issue.
+        """
+        async with self._pool.acquire() as connection:
+            return await self._subscribers.is_subscribed(
+                connection,
+                scope=scope,
+                issue_id=issue_id,
+                user_id=scope.user_id,
+            )
 
     @staticmethod
     def _page[T](rows: list[T], first: int) -> tuple[list[T], bool]:

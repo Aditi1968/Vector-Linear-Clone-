@@ -112,11 +112,12 @@ class CommentService:
 
         async with self._pool.acquire() as connection:
             # The service owns the transaction boundary, and it now carries
-            # three writes: the comment, the history row saying somebody
-            # commented, and an inbox item for everyone but the author. A
-            # comment that exists with nobody notified, or a notification
-            # pointing at a comment that was rolled back, are both states
-            # this block makes unreachable.
+            # four writes: the comment, the history row saying somebody
+            # commented, the author's subscription to the thread, and an
+            # inbox item for everyone but the author. A comment that exists
+            # with nobody notified, a notification pointing at a comment that
+            # was rolled back, and an author following a comment they never
+            # made are all states this block makes unreachable.
             async with connection.transaction():
                 try:
                     entity = await self._repository.create(
@@ -140,10 +141,30 @@ class CommentService:
                         to_value=str(entity.id),
                     )
 
-                    # The assignee AND the issue's author: the two people a
-                    # comment on this issue is addressed to even when it
-                    # names nobody. The author is included here and nowhere
-                    # else, which is what `include_creator` marks.
+                    # Writing on an issue is asking to be part of its
+                    # conversation, so the author becomes a watcher of it.
+                    # Before the fan-out below, deliberately: the statement
+                    # there reads `issue_subscribers`, and the actor is
+                    # excluded from its own notification anyway -- so the
+                    # ordering costs nothing now and means a second commenter
+                    # is already a subscriber by the time anyone else's
+                    # comment notifies them.
+                    #
+                    # This is what makes unwatching a decision rather than a
+                    # permanent state: someone who unsubscribed and then
+                    # comments again is following the thread again, which is
+                    # what commenting means.
+                    await activity.auto_subscribe(
+                        connection,
+                        scope=scope,
+                        issue_id=issue_id,
+                        user_id=author_id,
+                    )
+
+                    # The assignee, the issue's author AND everyone watching:
+                    # the people a comment on this issue is addressed to even
+                    # when it names nobody. The author is included here and
+                    # nowhere else, which is what `include_creator` marks.
                     await activity.notify(
                         connection,
                         scope=scope,

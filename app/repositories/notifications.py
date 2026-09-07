@@ -88,34 +88,44 @@ class NotificationRepository:
     ) -> None:
         """File one notification per interested party, minus the actor.
 
-        Recipients are derived from the issue's own row by the server rather
-        than read into Python and written back. Three things follow, and all
-        three are the reason for the shape:
+        Recipients are derived from the issue's own row and from
+        `issue_subscribers` by the server, rather than read into Python and
+        written back. Three things follow, and all three are the reason for the
+        shape:
 
         * it is one statement, so there is no window in which the assignee
-          changes between the read and the write;
+          changes -- or somebody unwatches -- between the read and the write;
         * a service cannot pass a recipient it invented, because there is no
           parameter for one;
         * the actor exclusion (`IS DISTINCT FROM $2`) is evaluated against the
-          same row, so "do not notify me about my own action" cannot be
+          same rows, so "do not notify me about my own action" cannot be
           skipped by a caller that forgot -- and cannot be violated at all,
           since `notifications_actor_is_not_recipient` refuses the row.
 
-        `include_creator` is the two-parameter CASE shape the rest of this
-        repository layer uses for optional behaviour: false collapses the
-        creator to NULL, which the JOIN then drops. It is a flag rather than
-        two methods because the two statements would differ by one VALUES
-        row and would have to be kept identical in every other respect.
+        The subscriber arm is what migration 020 adds, and it is a third UNION
+        arm rather than a second method. Every event that reaches an inbox
+        reaches a watcher's inbox: that is what watching means, so a caller
+        that could choose to skip subscribers would be a caller who could
+        silently un-implement the feature. There is no flag for it.
+
+        `include_creator` stays a flag, because the creator genuinely differs
+        by kind -- an author cares about a comment on their issue and not about
+        every status move -- and the two statements would otherwise differ by
+        one row and have to be kept identical in every other respect.
 
         The JOIN onto `workspace_members` is not decoration. `issues.creator_id
         references users (id)` -- migration 006 argues for that at length --
         so an issue's author may no longer be a member of its workspace, and a
         notification for a non-member is both a leak and a violation of
         `notifications_user_fk`. Joining rather than checking means the
-        non-member is dropped by the same statement that finds them.
+        non-member is dropped by the same statement that finds them. A
+        subscriber cannot be a non-member -- `issue_subscribers_user_fk` is
+        composite through the workspace -- and passes through the same join
+        anyway, so nothing here depends on that constraint holding to be
+        correct.
 
-        DISTINCT because the assignee and the creator are frequently the same
-        person, and one event is one item in one inbox.
+        DISTINCT because the assignee, the creator and a subscriber are
+        frequently the same person, and one event is one item in one inbox.
 
         The casts in the select list are load-bearing, not decoration. In an
         `INSERT ... SELECT`, PostgreSQL resolves an untyped parameter in the
@@ -127,6 +137,24 @@ class NotificationRepository:
         """
         await connection.execute(
             """
+            WITH candidate AS (
+                SELECT recipient
+                FROM issues
+                CROSS JOIN LATERAL (
+                    VALUES
+                        (issues.assignee_id),
+                        (CASE WHEN $5 THEN issues.creator_id END)
+                ) AS from_issue (recipient)
+                WHERE issues.workspace_id = $1
+                    AND issues.id = $3
+
+                UNION ALL
+
+                SELECT subscriber.user_id
+                FROM issue_subscribers AS subscriber
+                WHERE subscriber.workspace_id = $1
+                    AND subscriber.issue_id = $3
+            )
             INSERT INTO notifications (
                 workspace_id,
                 user_id,
@@ -136,18 +164,11 @@ class NotificationRepository:
             )
             SELECT DISTINCT
                 $1::UUID, member.user_id, $2::UUID, $3::UUID, $4::TEXT
-            FROM issues
-            CROSS JOIN LATERAL (
-                VALUES
-                    (issues.assignee_id),
-                    (CASE WHEN $5 THEN issues.creator_id END)
-            ) AS candidate (recipient)
+            FROM candidate
             JOIN workspace_members AS member
                 ON member.workspace_id = $1
                 AND member.user_id = candidate.recipient
-            WHERE issues.workspace_id = $1
-                AND issues.id = $3
-                AND candidate.recipient IS DISTINCT FROM $2
+            WHERE candidate.recipient IS DISTINCT FROM $2
             """,
             scope.workspace_id,
             actor_id,

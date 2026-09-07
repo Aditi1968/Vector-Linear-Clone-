@@ -83,6 +83,83 @@ scalar Date
 """Date with time (isoformat)"""
 scalar DateTime
 
+"""
+One shortcut in one person's sidebar. Exactly one of `teamId`, `projectId` and `savedViewId` is set.
+"""
+type Favorite {
+  id: UUID!
+  teamId: UUID
+  projectId: UUID
+  savedViewId: UUID
+
+  """
+  Where this sits in the person's own list. Neither unique nor contiguous: ties are broken by id, so two favorites sharing a number are ordered stably rather than ambiguously.
+  """
+  position: Int!
+  createdAt: DateTime!
+}
+
+"""
+Exactly one of `teamId`, `projectId` and `savedViewId` must be supplied. Sending none or more than one is a field error rather than a guess at which was meant.
+"""
+input FavoriteAddInput {
+  workspaceSlug: String!
+  teamId: UUID = null
+  projectId: UUID = null
+  savedViewId: UUID = null
+}
+
+type FavoriteDeletePayload {
+  deletedFavoriteId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type FavoritePayload {
+  favorite: Favorite
+  errors: [ValidationErrorType!]!
+}
+
+input FavoriteRemoveInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+input FavoriteReorderInput {
+  workspaceSlug: String!
+  id: UUID!
+  position: Int!
+}
+
+type GithubCommit {
+  repositoryId: ID!
+  repository: String!
+
+  """The full 40-character SHA, which is the commit's identity."""
+  sha: String!
+
+  """
+  The first seven characters, which is what a list shows. A rendering and never an identity: the abbreviation is ambiguous by construction.
+  """
+  shortSha: String!
+
+  """The whole commit message."""
+  message: String!
+
+  """The message's first line, which is what a list shows."""
+  summary: String!
+  url: String
+  committedAt: DateTime
+}
+
+type GithubDevelopment {
+  """
+  A deterministic branch name for this issue -- eng-142-fix-slack-oauth-callback. Safe to paste into `git checkout -b` for any title: unicode is folded, punctuation collapses, and a title that folds to nothing leaves the identifier alone. Creating it needs no GitHub permission and this field creates nothing; the identifier leads so that a pull request opened from the branch links back without anyone typing the identifier twice.
+  """
+  branchName: String!
+  pullRequests(first: Int! = 10): [GithubPullRequest!]!
+  commits(first: Int! = 10): [GithubCommit!]!
+}
+
 input GithubDisconnectInput {
   workspaceSlug: String!
 }
@@ -102,9 +179,159 @@ enum GithubIntegrationStatus {
   CONNECTED
 }
 
+enum GithubLinkSource {
+  TITLE
+  BODY
+  BRANCH
+}
+
+type GithubPullRequest {
+  repositoryId: ID!
+
+  """The repository this pull request is on, as owner/name."""
+  repository: String!
+  number: Int!
+  title: String!
+  state: GithubPullRequestState!
+
+  """
+  The branch the pull request is from, or null where the payload omitted it -- a deleted or cross-fork head.
+  """
+  branch: String
+
+  """
+  The link GitHub reported, stored rather than rebuilt from the owner, name and number: GitHub owns its URL layout, and a rebuilt link is a guess that breaks silently.
+  """
+  url: String
+  mergedAt: DateTime
+
+  """
+  GitHub's own updated_at, not Vector's. Null where the payload carried none.
+  """
+  updatedAt: DateTime
+
+  """
+  Which of the pull request's title, body and branch name this issue's identifier appears in. More than one is ordinary, and each is retracted independently: editing the title removes the title's link and leaves the branch's.
+  """
+  linkedBy: [GithubLinkSource!]!
+}
+
+enum GithubPullRequestState {
+  DRAFT
+  OPEN
+  MERGED
+  CLOSED
+}
+
 type GithubRepository {
   repositoryId: ID!
   fullName: String!
+}
+
+enum Health {
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+}
+
+type Initiative {
+  id: UUID!
+  name: String!
+  description: String
+  status: InitiativeStatus!
+  health: Health
+  targetDate: Date
+  ownerId: UUID
+  parentInitiativeId: UUID
+  projectIds: [UUID!]!
+  childInitiativeIds: [UUID!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  updates: [InitiativeUpdate!]!
+}
+
+input InitiativeClearParentInput {
+  workspaceSlug: String!
+  initiativeId: UUID!
+}
+
+type InitiativeConnection {
+  nodes: [Initiative!]!
+  pageInfo: PageInfo!
+}
+
+input InitiativeCreateInput {
+  workspaceSlug: String!
+  name: String!
+  description: String = null
+  status: InitiativeStatus! = PLANNED
+  targetDate: Date = null
+  ownerId: UUID = null
+}
+
+input InitiativeDeleteInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type InitiativeDeletePayload {
+  deletedInitiativeId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type InitiativePayload {
+  initiative: Initiative
+  errors: [ValidationErrorType!]!
+}
+
+input InitiativeProjectInput {
+  workspaceSlug: String!
+  initiativeId: UUID!
+  projectId: UUID!
+}
+
+input InitiativeSetParentInput {
+  workspaceSlug: String!
+  initiativeId: UUID!
+  parentInitiativeId: UUID!
+}
+
+enum InitiativeStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELED
+}
+
+type InitiativeUpdate {
+  id: UUID!
+  initiativeId: UUID!
+  health: Health!
+  body: String!
+  authorId: UUID!
+  createdAt: DateTime!
+}
+
+input InitiativeUpdateInput {
+  workspaceSlug: String!
+  id: UUID!
+  name: String
+  description: String
+  status: InitiativeStatus
+  targetDate: Date
+  ownerId: UUID
+}
+
+type InitiativeUpdatePayload {
+  update: InitiativeUpdate
+  errors: [ValidationErrorType!]!
+}
+
+input InitiativeUpdatePostInput {
+  workspaceSlug: String!
+  initiativeId: UUID!
+  health: Health!
+  body: String!
 }
 
 input InvitationAcceptInput {
@@ -187,6 +414,7 @@ type Issue {
   children(first: Int! = 10, after: String = null): IssueSummaryConnection!
   relations(first: Int! = 10, after: String = null): IssueRelationConnection!
   activity(first: Int! = 10, after: String = null): IssueActivityConnection!
+  development: GithubDevelopment!
   labels: [Label!]!
   comments(first: Int! = 20, after: String = null): CommentConnection!
 }
@@ -268,6 +496,18 @@ type IssueConnection {
   How many live issues match, ignoring paging -- the number a column header states, as opposed to how many have been loaded.
   """
   totalCount: Int!
+}
+
+input IssueCreateFromTemplateInput {
+  workspaceSlug: String!
+  templateId: UUID!
+  teamId: UUID!
+  title: String = null
+}
+
+type IssueCreateFromTemplatePayload {
+  issue: Issue
+  errors: [ValidationErrorType!]!
 }
 
 input IssueCreateInput {
@@ -402,6 +642,25 @@ type IssueSetProjectPayload {
   errors: [ValidationErrorType!]!
 }
 
+type IssueSubscriber {
+  userId: UUID!
+
+  """
+  When this person started watching, which does not move if they are auto-subscribed again.
+  """
+  createdAt: DateTime!
+}
+
+input IssueSubscriptionInput {
+  workspaceSlug: String!
+  issueId: UUID!
+}
+
+type IssueSubscriptionPayload {
+  subscribed: Boolean!
+  errors: [ValidationErrorType!]!
+}
+
 type IssueSummary {
   id: UUID!
 
@@ -420,6 +679,61 @@ type IssueSummary {
 type IssueSummaryConnection {
   nodes: [IssueSummary!]!
   pageInfo: PageInfo!
+}
+
+type IssueTemplate {
+  id: UUID!
+  teamId: UUID
+  name: String!
+  title: String
+  description: String
+  priority: Int
+  estimate: Int
+  assigneeId: UUID
+  projectId: UUID
+  cycleId: UUID
+  labelIds: [UUID!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+}
+
+input IssueTemplateCreateInput {
+  workspaceSlug: String!
+  template: IssueTemplateFieldsInput!
+}
+
+input IssueTemplateDeleteInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type IssueTemplateDeletePayload {
+  id: UUID
+  errors: [ValidationErrorType!]!
+}
+
+input IssueTemplateFieldsInput {
+  name: String!
+  teamId: UUID = null
+  title: String = null
+  description: String = null
+  priority: Int = null
+  estimate: Int = null
+  assigneeId: UUID = null
+  projectId: UUID = null
+  cycleId: UUID = null
+  labelIds: [UUID!]! = []
+}
+
+type IssueTemplateSavePayload {
+  template: IssueTemplate
+  errors: [ValidationErrorType!]!
+}
+
+input IssueTemplateUpdateInput {
+  workspaceSlug: String!
+  id: UUID!
+  template: IssueTemplateFieldsInput!
 }
 
 input IssueUpdateInput {
@@ -618,15 +932,42 @@ type Mutation {
   projectMilestoneCreate(input: ProjectMilestoneCreateInput!): ProjectMilestonePayload!
   projectMilestoneUpdate(input: ProjectMilestoneUpdateInput!): ProjectMilestonePayload!
   projectMilestoneDelete(input: ProjectMilestoneDeleteInput!): ProjectMilestoneDeletePayload!
+  projectUpdatePost(input: ProjectUpdatePostInput!): ProjectUpdatePayload!
+  projectDependencyAdd(input: ProjectDependencyInput!): ProjectDependencyPayload!
+  projectDependencyRemove(input: ProjectDependencyInput!): ProjectDependencyPayload!
   issueSetProject(input: IssueSetProjectInput!): IssueSetProjectPayload!
+  initiativeCreate(input: InitiativeCreateInput!): InitiativePayload!
+  initiativeUpdate(input: InitiativeUpdateInput!): InitiativePayload!
+  initiativeDelete(input: InitiativeDeleteInput!): InitiativeDeletePayload!
+  initiativeProjectAdd(input: InitiativeProjectInput!): InitiativePayload!
+  initiativeProjectRemove(input: InitiativeProjectInput!): InitiativePayload!
+  initiativeSetParent(input: InitiativeSetParentInput!): InitiativePayload!
+  initiativeClearParent(input: InitiativeClearParentInput!): InitiativePayload!
+  initiativeUpdatePost(input: InitiativeUpdatePostInput!): InitiativeUpdatePayload!
   issueSetParent(input: IssueSetParentInput!): IssueParentPayload!
   issueClearParent(input: IssueClearParentInput!): IssueParentPayload!
   issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
   issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
   githubDisconnect(input: GithubDisconnectInput!): GithubIntegration!
   slackDisconnect(input: SlackDisconnectInput!): SlackDisconnectPayload!
+  slackChannelsSync(input: SlackChannelsSyncInput!): SlackChannelsSyncPayload!
+  slackDefaultChannelSet(input: SlackDefaultChannelSetInput!): SlackNotificationSettingsPayload!
+  slackNotificationPreferenceSet(input: SlackNotificationPreferenceSetInput!): SlackNotificationSettingsPayload!
+  slackTestNotification(input: SlackTestNotificationInput!): SlackTestNotificationPayload!
   notificationMarkRead(input: NotificationMarkReadInput!): NotificationMarkReadPayload!
   notificationMarkAllRead(input: NotificationMarkAllReadInput!): NotificationMarkAllReadPayload!
+  savedViewCreate(input: SavedViewCreateInput!): SavedViewPayload!
+  savedViewUpdate(input: SavedViewUpdateInput!): SavedViewPayload!
+  savedViewDelete(input: SavedViewDeleteInput!): SavedViewDeletePayload!
+  favoriteAdd(input: FavoriteAddInput!): FavoritePayload!
+  favoriteRemove(input: FavoriteRemoveInput!): FavoriteDeletePayload!
+  favoriteReorder(input: FavoriteReorderInput!): FavoritePayload!
+  issueSubscribe(input: IssueSubscriptionInput!): IssueSubscriptionPayload!
+  issueUnsubscribe(input: IssueSubscriptionInput!): IssueSubscriptionPayload!
+  issueTemplateCreate(input: IssueTemplateCreateInput!): IssueTemplateSavePayload!
+  issueTemplateUpdate(input: IssueTemplateUpdateInput!): IssueTemplateSavePayload!
+  issueTemplateDelete(input: IssueTemplateDeleteInput!): IssueTemplateDeletePayload!
+  issueCreateFromTemplate(input: IssueCreateFromTemplateInput!): IssueCreateFromTemplatePayload!
   triageEnter(input: TriageEnterInput!): TriagePayload!
   triageAccept(input: TriageAcceptInput!): TriagePayload!
   triageDecline(input: TriageDeclineInput!): TriagePayload!
@@ -659,6 +1000,7 @@ enum NotificationKind {
   ASSIGNED
   COMMENTED
   BLOCKED
+  STATUS_CHANGED
 }
 
 input NotificationMarkAllReadInput {
@@ -696,12 +1038,15 @@ type Project {
   name: String!
   description: String
   state: ProjectState!
+  health: Health
   targetDate: Date
   leadId: UUID
   teamIds: [UUID!]!
   createdAt: DateTime!
   updatedAt: DateTime!
   milestones: [ProjectMilestone!]!
+  updates: [ProjectUpdate!]!
+  dependencies: ProjectDependencies!
 }
 
 type ProjectConnection {
@@ -725,6 +1070,22 @@ input ProjectDeleteInput {
 
 type ProjectDeletePayload {
   deletedProjectId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type ProjectDependencies {
+  blocks: [UUID!]!
+  blockedBy: [UUID!]!
+}
+
+input ProjectDependencyInput {
+  workspaceSlug: String!
+  blockingProjectId: UUID!
+  blockedProjectId: UUID!
+}
+
+type ProjectDependencyPayload {
+  dependencies: ProjectDependencies
   errors: [ValidationErrorType!]!
 }
 
@@ -787,6 +1148,15 @@ input ProjectTeamInput {
   teamId: UUID!
 }
 
+type ProjectUpdate {
+  id: UUID!
+  projectId: UUID!
+  health: Health!
+  body: String!
+  authorId: UUID!
+  createdAt: DateTime!
+}
+
 input ProjectUpdateInput {
   workspaceSlug: String!
   id: UUID!
@@ -795,6 +1165,18 @@ input ProjectUpdateInput {
   state: ProjectState
   targetDate: Date
   leadId: UUID
+}
+
+type ProjectUpdatePayload {
+  update: ProjectUpdate
+  errors: [ValidationErrorType!]!
+}
+
+input ProjectUpdatePostInput {
+  workspaceSlug: String!
+  projectId: UUID!
+  health: Health!
+  body: String!
 }
 
 type Query {
@@ -824,11 +1206,26 @@ type Query {
   cycles(workspaceSlug: String!, teamId: UUID!): [Cycle!]!
   project(workspaceSlug: String!, id: UUID!): Project
   projects(workspaceSlug: String!, first: Int! = 50, after: String = null): ProjectConnection!
+  initiative(workspaceSlug: String!, id: UUID!): Initiative
+  initiatives(workspaceSlug: String!, first: Int! = 50, after: String = null): InitiativeConnection!
   search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
   githubIntegration(workspaceSlug: String!): GithubIntegration!
   slackIntegration(workspaceSlug: String!): SlackIntegration!
+  slackChannels(workspaceSlug: String!): [SlackChannel!]!
+  slackNotificationSettings(workspaceSlug: String!): SlackNotificationSettings!
   notifications(workspaceSlug: String!, unreadOnly: Boolean! = false, first: Int! = 50, after: String = null): NotificationConnection!
   notificationUnreadCount(workspaceSlug: String!): Int!
+  savedView(workspaceSlug: String!, id: UUID!): SavedView
+  savedViews(workspaceSlug: String!, teamId: UUID, first: Int! = 50, after: String = null): SavedViewConnection!
+
+  """
+  This viewer's favorites in this workspace, in their own order. Per-user and per-workspace: the same person in two workspaces has two independent lists.
+  """
+  favorites(workspaceSlug: String!): [Favorite!]!
+  issueSubscribers(workspaceSlug: String!, issueId: UUID!): [IssueSubscriber!]!
+  issueViewerIsSubscribed(workspaceSlug: String!, issueId: UUID!): Boolean!
+  issueTemplates(workspaceSlug: String!, teamId: UUID = null): [IssueTemplate!]!
+  issueTemplate(workspaceSlug: String!, id: UUID!): IssueTemplate
   triageIssues(workspaceSlug: String!, teamId: UUID!, first: Int! = 25, after: String = null): TriageIssueConnection!
   triageCount(workspaceSlug: String!, teamId: UUID!): Int!
 }
@@ -844,9 +1241,145 @@ type RegisterPayload {
   errors: [ValidationErrorType!]!
 }
 
+type SavedView {
+  id: UUID!
+  name: String!
+  teamId: UUID
+  filter: SavedViewFilter!
+  orderField: IssueOrderField!
+  orderDirection: OrderDirection!
+  layout: SavedViewLayout!
+  grouping: SavedViewGrouping
+  subgrouping: SavedViewGrouping
+  visibility: SavedViewVisibility!
+  createdBy: UUID!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+
+  """
+  The issues this view selects, in the order it stores. Loading a saved view is this field: the filter and the ordering come from the stored row, never from the document, so the page is the one that was saved.
+  """
+  issues(first: Int! = 50, after: String = null): IssueConnection!
+}
+
+type SavedViewConnection {
+  nodes: [SavedView!]!
+  pageInfo: PageInfo!
+}
+
+input SavedViewCreateInput {
+  workspaceSlug: String!
+  name: String!
+  teamId: UUID = null
+  filter: IssueFilterInput = null
+  orderBy: IssueOrderInput = null
+  layout: SavedViewLayout! = LIST
+  grouping: SavedViewGrouping = null
+  subgrouping: SavedViewGrouping = null
+  visibility: SavedViewVisibility! = PERSONAL
+}
+
+input SavedViewDeleteInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type SavedViewDeletePayload {
+  deletedSavedViewId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+"""
+The filter a saved view stores, in the same vocabulary `IssueFilterInput` takes. Every field is a narrowing and none of them can widen a list beyond the workspace the request was authorized for.
+"""
+type SavedViewFilter {
+  teamId: UUID
+  workflowStateId: UUID
+  stateCategory: WorkflowStateCategory
+  labelId: UUID
+  priority: Int
+  assignee: SavedViewIdFilter
+  project: SavedViewIdFilter
+  cycle: SavedViewIdFilter
+}
+
+"""
+What a saved view gathers its rows by. The server stores and validates this choice; the grouping itself is a rendering of a page the client already holds. There is deliberately no LABEL: an issue wears many labels, so grouping by one would put the same issue in several groups and every count drawn from them would overstate the list.
+"""
+enum SavedViewGrouping {
+  WORKFLOW_STATE
+  ASSIGNEE
+  PRIORITY
+  PROJECT
+  CYCLE
+  TEAM
+}
+
+"""
+A filter on a column that may hold nothing. The wrapper's presence is the filter and its `id` is what to match: `{id: null}` selects the rows holding nothing -- unassigned, in no project, in no cycle -- while the wrapper itself being null means the view does not filter on that column at all.
+"""
+type SavedViewIdFilter {
+  id: UUID
+}
+
+"""How a saved view arranges the issues it selects."""
+enum SavedViewLayout {
+  LIST
+  BOARD
+}
+
+type SavedViewPayload {
+  savedView: SavedView
+  errors: [ValidationErrorType!]!
+}
+
+input SavedViewUpdateInput {
+  workspaceSlug: String!
+  id: UUID!
+  name: String
+  teamId: UUID
+  filter: IssueFilterInput
+  orderBy: IssueOrderInput
+  layout: SavedViewLayout
+  grouping: SavedViewGrouping
+  subgrouping: SavedViewGrouping
+  visibility: SavedViewVisibility
+}
+
+"""
+Who can see a saved view. PERSONAL is its creator alone; SHARED is every member of the workspace. Sharing is an update of this field rather than an operation of its own.
+"""
+enum SavedViewVisibility {
+  PERSONAL
+  SHARED
+}
+
 type SearchResults {
   issues: [Issue!]!
   projects: [Project!]!
+}
+
+type SlackChannel {
+  id: String!
+  name: String!
+  isPrivate: Boolean!
+  isArchived: Boolean!
+  isMember: Boolean!
+  isAccessible: Boolean!
+}
+
+input SlackChannelsSyncInput {
+  workspaceSlug: String!
+}
+
+type SlackChannelsSyncPayload {
+  channels: [SlackChannel!]!
+  failure: SlackFailure
+}
+
+input SlackDefaultChannelSetInput {
+  workspaceSlug: String!
+  channelId: String!
 }
 
 input SlackDisconnectInput {
@@ -855,6 +1388,15 @@ input SlackDisconnectInput {
 
 type SlackDisconnectPayload {
   integration: SlackIntegration!
+}
+
+enum SlackFailure {
+  NOT_CONNECTED
+  MISSING_SCOPE
+  NO_DEFAULT_CHANNEL
+  CHANNEL_UNAVAILABLE
+  SLACK_REFUSED
+  SLACK_UNREACHABLE
 }
 
 type SlackIntegration {
@@ -867,6 +1409,46 @@ enum SlackIntegrationStatus {
   UNCONFIGURED
   DISCONNECTED
   CONNECTED
+}
+
+enum SlackNotificationEvent {
+  ISSUE_ASSIGNED
+  ISSUE_COMPLETED
+  ISSUE_PRIORITY_URGENT
+  PROJECT_HEALTH_CHANGED
+  PROJECT_UPDATE_PUBLISHED
+  PULL_REQUEST_MERGED
+}
+
+type SlackNotificationPreference {
+  event: SlackNotificationEvent!
+  enabled: Boolean!
+}
+
+input SlackNotificationPreferenceSetInput {
+  workspaceSlug: String!
+  event: SlackNotificationEvent!
+  enabled: Boolean!
+}
+
+type SlackNotificationSettings {
+  defaultChannelId: String
+  defaultChannelName: String
+  preferences: [SlackNotificationPreference!]!
+}
+
+type SlackNotificationSettingsPayload {
+  settings: SlackNotificationSettings
+  errors: [ValidationErrorType!]!
+}
+
+input SlackTestNotificationInput {
+  workspaceSlug: String!
+}
+
+type SlackTestNotificationPayload {
+  delivered: Boolean!
+  failure: SlackFailure
 }
 
 type Team {

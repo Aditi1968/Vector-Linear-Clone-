@@ -45,6 +45,7 @@ from app.repositories.label_groups import LabelGroupRepository
 from app.repositories.labels import LabelRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.relations import RelationRepository
+from app.repositories.subscribers import SubscriberRepository
 from app.repositories.teams import TeamRepository
 from app.services.activity import ActivityService
 from app.services.comments import CommentService
@@ -239,6 +240,7 @@ async def wired(postgres_dsn):
                     pool=pool,
                     repository=ActivityRepository(),
                     notifications=NotificationRepository(),
+                    subscribers=SubscriberRepository(),
                 ),
                 connection=connection,
             )
