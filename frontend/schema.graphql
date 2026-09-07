@@ -154,6 +154,112 @@ type GithubRepository {
   fullName: String!
 }
 
+enum Health {
+  ON_TRACK
+  AT_RISK
+  OFF_TRACK
+}
+
+type Initiative {
+  id: UUID!
+  name: String!
+  description: String
+  status: InitiativeStatus!
+  health: Health
+  targetDate: Date
+  ownerId: UUID
+  parentInitiativeId: UUID
+  projectIds: [UUID!]!
+  childInitiativeIds: [UUID!]!
+  createdAt: DateTime!
+  updatedAt: DateTime!
+  updates: [InitiativeUpdate!]!
+}
+
+input InitiativeClearParentInput {
+  workspaceSlug: String!
+  initiativeId: UUID!
+}
+
+type InitiativeConnection {
+  nodes: [Initiative!]!
+  pageInfo: PageInfo!
+}
+
+input InitiativeCreateInput {
+  workspaceSlug: String!
+  name: String!
+  description: String = null
+  status: InitiativeStatus! = PLANNED
+  targetDate: Date = null
+  ownerId: UUID = null
+}
+
+input InitiativeDeleteInput {
+  workspaceSlug: String!
+  id: UUID!
+}
+
+type InitiativeDeletePayload {
+  deletedInitiativeId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type InitiativePayload {
+  initiative: Initiative
+  errors: [ValidationErrorType!]!
+}
+
+input InitiativeProjectInput {
+  workspaceSlug: String!
+  initiativeId: UUID!
+  projectId: UUID!
+}
+
+input InitiativeSetParentInput {
+  workspaceSlug: String!
+  initiativeId: UUID!
+  parentInitiativeId: UUID!
+}
+
+enum InitiativeStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  CANCELED
+}
+
+type InitiativeUpdate {
+  id: UUID!
+  initiativeId: UUID!
+  health: Health!
+  body: String!
+  authorId: UUID!
+  createdAt: DateTime!
+}
+
+input InitiativeUpdateInput {
+  workspaceSlug: String!
+  id: UUID!
+  name: String
+  description: String
+  status: InitiativeStatus
+  targetDate: Date
+  ownerId: UUID
+}
+
+type InitiativeUpdatePayload {
+  update: InitiativeUpdate
+  errors: [ValidationErrorType!]!
+}
+
+input InitiativeUpdatePostInput {
+  workspaceSlug: String!
+  initiativeId: UUID!
+  health: Health!
+  body: String!
+}
+
 input InvitationAcceptInput {
   token: String!
 }
@@ -581,7 +687,18 @@ type Mutation {
   projectMilestoneCreate(input: ProjectMilestoneCreateInput!): ProjectMilestonePayload!
   projectMilestoneUpdate(input: ProjectMilestoneUpdateInput!): ProjectMilestonePayload!
   projectMilestoneDelete(input: ProjectMilestoneDeleteInput!): ProjectMilestoneDeletePayload!
+  projectUpdatePost(input: ProjectUpdatePostInput!): ProjectUpdatePayload!
+  projectDependencyAdd(input: ProjectDependencyInput!): ProjectDependencyPayload!
+  projectDependencyRemove(input: ProjectDependencyInput!): ProjectDependencyPayload!
   issueSetProject(input: IssueSetProjectInput!): IssueSetProjectPayload!
+  initiativeCreate(input: InitiativeCreateInput!): InitiativePayload!
+  initiativeUpdate(input: InitiativeUpdateInput!): InitiativePayload!
+  initiativeDelete(input: InitiativeDeleteInput!): InitiativeDeletePayload!
+  initiativeProjectAdd(input: InitiativeProjectInput!): InitiativePayload!
+  initiativeProjectRemove(input: InitiativeProjectInput!): InitiativePayload!
+  initiativeSetParent(input: InitiativeSetParentInput!): InitiativePayload!
+  initiativeClearParent(input: InitiativeClearParentInput!): InitiativePayload!
+  initiativeUpdatePost(input: InitiativeUpdatePostInput!): InitiativeUpdatePayload!
   issueSetParent(input: IssueSetParentInput!): IssueParentPayload!
   issueClearParent(input: IssueClearParentInput!): IssueParentPayload!
   issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
@@ -662,12 +779,15 @@ type Project {
   name: String!
   description: String
   state: ProjectState!
+  health: Health
   targetDate: Date
   leadId: UUID
   teamIds: [UUID!]!
   createdAt: DateTime!
   updatedAt: DateTime!
   milestones: [ProjectMilestone!]!
+  updates: [ProjectUpdate!]!
+  dependencies: ProjectDependencies!
 }
 
 type ProjectConnection {
@@ -691,6 +811,22 @@ input ProjectDeleteInput {
 
 type ProjectDeletePayload {
   deletedProjectId: UUID
+  errors: [ValidationErrorType!]!
+}
+
+type ProjectDependencies {
+  blocks: [UUID!]!
+  blockedBy: [UUID!]!
+}
+
+input ProjectDependencyInput {
+  workspaceSlug: String!
+  blockingProjectId: UUID!
+  blockedProjectId: UUID!
+}
+
+type ProjectDependencyPayload {
+  dependencies: ProjectDependencies
   errors: [ValidationErrorType!]!
 }
 
@@ -753,6 +889,15 @@ input ProjectTeamInput {
   teamId: UUID!
 }
 
+type ProjectUpdate {
+  id: UUID!
+  projectId: UUID!
+  health: Health!
+  body: String!
+  authorId: UUID!
+  createdAt: DateTime!
+}
+
 input ProjectUpdateInput {
   workspaceSlug: String!
   id: UUID!
@@ -761,6 +906,18 @@ input ProjectUpdateInput {
   state: ProjectState
   targetDate: Date
   leadId: UUID
+}
+
+type ProjectUpdatePayload {
+  update: ProjectUpdate
+  errors: [ValidationErrorType!]!
+}
+
+input ProjectUpdatePostInput {
+  workspaceSlug: String!
+  projectId: UUID!
+  health: Health!
+  body: String!
 }
 
 type Query {
@@ -788,6 +945,8 @@ type Query {
   cycles(workspaceSlug: String!, teamId: UUID!): [Cycle!]!
   project(workspaceSlug: String!, id: UUID!): Project
   projects(workspaceSlug: String!, first: Int! = 50, after: String = null): ProjectConnection!
+  initiative(workspaceSlug: String!, id: UUID!): Initiative
+  initiatives(workspaceSlug: String!, first: Int! = 50, after: String = null): InitiativeConnection!
   search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
   githubIntegration(workspaceSlug: String!): GithubIntegration!
   slackIntegration(workspaceSlug: String!): SlackIntegration!

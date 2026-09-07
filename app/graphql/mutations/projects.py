@@ -10,23 +10,29 @@ from app.graphql.inputs.project import (
     IssueSetProjectInput,
     ProjectCreateInput,
     ProjectDeleteInput,
+    ProjectDependencyInput,
     ProjectMilestoneCreateInput,
     ProjectMilestoneDeleteInput,
     ProjectMilestoneUpdateInput,
     ProjectTeamInput,
     ProjectUpdateInput,
+    ProjectUpdatePostInput,
 )
 from app.graphql.scope import authorized_scope
 from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import IssueSetProjectPayload, IssueType
 from app.graphql.types.project import (
     ProjectDeletePayload,
+    ProjectDependenciesType,
+    ProjectDependencyPayload,
     ProjectMilestoneDeletePayload,
     ProjectMilestonePayload,
     ProjectMilestoneType,
     ProjectPayload,
     ProjectStateType,
     ProjectType,
+    ProjectUpdatePayload,
+    ProjectUpdateType,
 )
 
 
@@ -258,6 +264,91 @@ class ProjectMutation:
 
         return ProjectMilestoneDeletePayload(
             deleted_milestone_id=input.id,
+            errors=[],
+        )
+
+    @strawberry.mutation
+    async def project_update_post(
+        self,
+        info: Info,
+        input: ProjectUpdatePostInput,
+    ) -> ProjectUpdatePayload:
+        """Report how a project is going, attributed to the viewer.
+
+        Writes two rows -- the history entry and the project's current health
+        -- in one transaction; see ProjectService.post_update for why both
+        exist and why the order of the two writes matters.
+
+        The author is `scope.user_id` -- the membership row the database
+        matched when it authorized this request -- and never an argument, so
+        authorship and permission cannot come from two lookups that disagree.
+        """
+        scope = await authorized_scope(info, input.workspace_slug)
+
+        try:
+            entity = await info.context.project_service.post_update(
+                scope=scope,
+                project_id=input.project_id,
+                health=input.health.value,
+                body=input.body,
+                author_id=scope.user_id,
+            )
+        except ValidationError as exc:
+            return ProjectUpdatePayload(update=None, errors=_errors(exc))
+
+        return ProjectUpdatePayload(
+            update=ProjectUpdateType.from_entity(entity),
+            errors=[],
+        )
+
+    @strawberry.mutation
+    async def project_dependency_add(
+        self,
+        info: Info,
+        input: ProjectDependencyInput,
+    ) -> ProjectDependencyPayload:
+        """Record that one project blocks another.
+
+        A cross-workspace pair is refused by PostgreSQL; a self-dependency and
+        a cycle are refused by ProjectService, the first by comparing two
+        arguments and the second by a reachability walk under a lock. All three
+        arrive here as the same ValidationError and go into the payload.
+        """
+        scope = await authorized_scope(info, input.workspace_slug)
+
+        try:
+            dependencies = await info.context.project_service.add_dependency(
+                scope=scope,
+                blocking_project_id=input.blocking_project_id,
+                blocked_project_id=input.blocked_project_id,
+            )
+        except ValidationError as exc:
+            return ProjectDependencyPayload(dependencies=None, errors=_errors(exc))
+
+        return ProjectDependencyPayload(
+            dependencies=ProjectDependenciesType.from_domain(dependencies),
+            errors=[],
+        )
+
+    @strawberry.mutation
+    async def project_dependency_remove(
+        self,
+        info: Info,
+        input: ProjectDependencyInput,
+    ) -> ProjectDependencyPayload:
+        scope = await authorized_scope(info, input.workspace_slug)
+
+        try:
+            dependencies = await info.context.project_service.remove_dependency(
+                scope=scope,
+                blocking_project_id=input.blocking_project_id,
+                blocked_project_id=input.blocked_project_id,
+            )
+        except ValidationError as exc:
+            return ProjectDependencyPayload(dependencies=None, errors=_errors(exc))
+
+        return ProjectDependencyPayload(
+            dependencies=ProjectDependenciesType.from_domain(dependencies),
             errors=[],
         )
 

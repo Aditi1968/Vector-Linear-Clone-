@@ -6,6 +6,7 @@ from uuid import UUID
 import asyncpg
 
 from app.domain.errors import ValidationError, ValidationIssue
+from app.domain.health import HEALTH_VALUES
 from app.domain.pagination import (
     InvalidCursorError,
     KeysetCursor,
@@ -15,11 +16,14 @@ from app.domain.pagination import (
 from app.domain.patch import UNSET, UnsetType
 from app.domain.projects import (
     PROJECT_STATES,
+    ProjectDependencies,
     ProjectEntity,
     ProjectMilestoneEntity,
     ProjectPage,
+    ProjectUpdateEntity,
 )
 from app.domain.tenancy import WorkspaceScope
+from app.repositories.initiatives import InitiativeRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.projects import ProjectRepository
 
@@ -30,6 +34,7 @@ from app.repositories.projects import ProjectRepository
 # explanation, including why `from __future__ import annotations` is the wrong
 # fix.
 Milestones = list[ProjectMilestoneEntity]
+Updates = list[ProjectUpdateEntity]
 
 
 NAME_MIN_LENGTH = 1
@@ -101,6 +106,26 @@ FIRST_MAX = 100
 # instead of paginating it.
 MILESTONE_LIST_LIMIT = 200
 
+# The longest body a project update may carry, matching
+# `project_updates_body_length` in migrations/022_initiatives.sql. Two
+# statements of one rule, and they have to change together: the database has
+# to refuse an oversized body whoever writes it, and this layer has to refuse
+# one without turning a CheckViolationError into a user-facing message.
+UPDATE_BODY_MAX_LENGTH = 10_000
+
+# The most updates one project answers with.
+#
+# The same shape as MILESTONE_LIST_LIMIT and the same argument: not a page size
+# and not a clamp on a user-supplied argument, but the bound that keeps an
+# unpaginated list reachable from a paginated one from being unbounded.
+#
+# ponytail: 200 is a ceiling on history, not pagination. A weekly update for
+# four years fits; a project that outgrows it silently loses its oldest
+# updates from this field. The upgrade is a cursor on `Project.updates`, the
+# way `projects` has one -- raising the number would paper over an unpaginated
+# list instead of paginating it.
+UPDATE_LIST_LIMIT = 200
+
 
 # Constraint name -> the field error it means, for the violations that are
 # ordinary consequences of client input rather than defects.
@@ -157,6 +182,43 @@ _CONSTRAINT_ERRORS: dict[str, ValidationIssue] = {
         code="NOT_MEMBER",
         message="Lead must be a member of this workspace",
     ),
+    "project_updates_project_fk": ValidationIssue(
+        field="projectId",
+        code="NOT_FOUND",
+        message="Project not found",
+    ),
+    # The author is not a member of this project's workspace.
+    #
+    # NOT_MEMBER rather than NOT_FOUND, for the reason projects_lead_fk gives,
+    # and reachable in one ordinary situation rather than only through a forged
+    # request: a session outliving the membership it was created under. The
+    # viewer is real and the project is real, and posting is still refused.
+    "project_updates_author_fk": ValidationIssue(
+        field="authorId",
+        code="NOT_MEMBER",
+        message="Author must be a member of this workspace",
+    ),
+    # Which end of the dependency is missing is named, because a client can
+    # only correct the half it got wrong. What is deliberately NOT
+    # distinguished is the tenant: a project in another workspace and a project
+    # that does not exist both break the same key and both produce NOT_FOUND,
+    # so this mutation cannot be used to ask whether an id exists somewhere the
+    # caller cannot see.
+    "project_dependencies_blocking_fk": ValidationIssue(
+        field="blockingProjectId",
+        code="NOT_FOUND",
+        message="Project not found",
+    ),
+    "project_dependencies_blocked_fk": ValidationIssue(
+        field="blockedProjectId",
+        code="NOT_FOUND",
+        message="Project not found",
+    ),
+    "project_dependencies_pkey": ValidationIssue(
+        field="blockedProjectId",
+        code="DUPLICATE",
+        message="That dependency already exists",
+    ),
 }
 
 _PROJECT_NOT_FOUND = ValidationIssue(
@@ -169,6 +231,25 @@ _MILESTONE_NOT_FOUND = ValidationIssue(
     field="id",
     code="NOT_FOUND",
     message="Milestone not found",
+)
+
+# Reported against `blockedProjectId` rather than the blocking half, because
+# that is the field the client is most likely to have mis-picked: the blocking
+# project is the subject of the mutation and the blocked one is the argument.
+_SELF_DEPENDENCY = ValidationIssue(
+    field="blockedProjectId",
+    code="SELF_DEPENDENCY",
+    message="A project cannot block itself",
+)
+
+# The multi-step cycle, which no constraint can see -- see the block at the top
+# of migrations/022_initiatives.sql. `CYCLE` is the code RelationService
+# already publishes for the sub-issue version of this refusal, reused rather
+# than invented so a client learns one vocabulary for one concept.
+_DEPENDENCY_CYCLE = ValidationIssue(
+    field="blockedProjectId",
+    code="CYCLE",
+    message="That project already blocks this one, directly or indirectly",
 )
 
 
@@ -222,6 +303,7 @@ class ProjectService:
         pool: asyncpg.Pool,
         repository: ProjectRepository,
         issue_repository: IssueRepository,
+        initiative_repository: InitiativeRepository,
     ):
         self._pool = pool
         self._repository = repository
@@ -232,6 +314,12 @@ class ProjectService:
         # transaction is the shape this architecture is for; a project
         # repository writing to `issues` would not be.
         self._issue_repository = issue_repository
+
+        # And the initiatives it belongs to, for exactly the same reason:
+        # `initiative_projects_project_fk` is RESTRICT, so those rows have to
+        # go first, and the SQL against that table belongs to the repository
+        # that owns it.
+        self._initiative_repository = initiative_repository
 
     # ----------------------------------------------------------------- reads
 
@@ -509,7 +597,8 @@ class ProjectService:
         The detachment is written out rather than delegated to ON DELETE
         CASCADE, and the order is the order the foreign keys require:
 
-            issues -> milestones -> team links -> the project itself
+            issues -> milestones -> team links -> updates -> dependencies
+            -> initiative links -> the project itself
 
         Two reasons for doing it here. The obvious one is that CASCADE would
         make `DELETE FROM projects WHERE id = ...` silently rewrite rows in
@@ -537,6 +626,30 @@ class ProjectService:
                     project_id=project_id,
                 )
                 await self._repository.clear_teams(
+                    connection,
+                    scope=scope,
+                    project_id=project_id,
+                )
+
+                # The update history goes with the project rather than being
+                # kept, unlike the issues above. An update is a statement
+                # ABOUT this project and about nothing else; keeping it would
+                # leave rows describing the health of something that no longer
+                # exists, and there is no other project they could be moved to.
+                await self._repository.clear_updates(
+                    connection,
+                    scope=scope,
+                    project_id=project_id,
+                )
+                # Both ends in one statement -- a project may be blocking and
+                # blocked, and clearing one direction at a time would leave the
+                # second statement to fail on the half already gone.
+                await self._repository.clear_dependencies(
+                    connection,
+                    scope=scope,
+                    project_id=project_id,
+                )
+                await self._initiative_repository.clear_project_links(
                     connection,
                     scope=scope,
                     project_id=project_id,
@@ -778,7 +891,283 @@ class ProjectService:
                 position=None,
             )
 
+    # --------------------------------------------------------------- updates
+
+    async def post_update(
+        self,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+        health: str,
+        body: str,
+        author_id: UUID,
+    ) -> ProjectUpdateEntity:
+        """Record how a project is going, and stamp the project with it.
+
+        TWO writes in ONE transaction, and that is the whole method. The row in
+        `project_updates` is the history; `projects.health` is the current
+        value the board renders. migrations/022_initiatives.sql argues at
+        length for storing both, and names this transaction as the thing that
+        keeps them in step -- so a failure between the two must roll both back,
+        not leave a project claiming a health nothing in its history reports.
+
+        The order matters as well as the atomicity. The insert runs FIRST
+        because it is the statement carrying the foreign keys: a project from
+        another workspace and an author who is not a member are both refused
+        there, before anything has stamped a row. Doing the UPDATE first would
+        write a health onto a project and then discover the author was not
+        entitled to report it.
+
+        `author_id` is not taken from the client. It arrives from the resolver
+        as the session's user, which is the difference between "who says so"
+        and "who a request claims says so"; `project_updates_author_fk` is the
+        second half of that and refuses an id that is not a member here,
+        whatever this code passes.
+        """
+        self._validate_update_fields(health=health, body=body)
+
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                try:
+                    entity = await self._repository.create_update(
+                        connection,
+                        scope=scope,
+                        project_id=project_id,
+                        health=health,
+                        body=body,
+                        author_id=author_id,
+                    )
+                except asyncpg.ForeignKeyViolationError as error:
+                    _raise_mapped(error)
+
+                await self._repository.set_health(
+                    connection,
+                    scope=scope,
+                    project_id=project_id,
+                    health=health,
+                )
+
+        return entity
+
+    async def list_updates(
+        self,
+        *,
+        scope: WorkspaceScope,
+        project_id: UUID,
+    ) -> Updates:
+        """One project's update history, newest first.
+
+        A project in another workspace, and one that does not exist, both
+        produce an empty list -- the same answer a real project nobody has
+        posted about gives. Nothing here reveals which of the three it was.
+        """
+        async with self._pool.acquire() as connection:
+            return await self._repository.list_updates(
+                connection,
+                scope=scope,
+                project_id=project_id,
+                limit=UPDATE_LIST_LIMIT,
+            )
+
+    async def list_updates_for_projects(
+        self,
+        *,
+        scope: WorkspaceScope,
+        project_ids: Sequence[UUID],
+    ) -> Updates:
+        """Several projects' updates at once, for batching.
+
+        The same UPDATE_LIST_LIMIT, applied PER PROJECT rather than to the
+        batch, for the reason `list_milestones_for_projects` states.
+        """
+        if not project_ids:
+            return []
+
+        async with self._pool.acquire() as connection:
+            return await self._repository.list_updates_for_projects(
+                connection,
+                scope=scope,
+                project_ids=project_ids,
+                limit_per_project=UPDATE_LIST_LIMIT,
+            )
+
+    # ---------------------------------------------------------- dependencies
+
+    async def add_dependency(
+        self,
+        *,
+        scope: WorkspaceScope,
+        blocking_project_id: UUID,
+        blocked_project_id: UUID,
+    ) -> ProjectDependencies:
+        """Record that one project blocks another, and return both directions.
+
+        Three refusals, in the order they become knowable:
+
+        * A project cannot block itself. This is a comparison of two arguments
+          -- it reads no row, so there is nothing to race, and it is settled
+          before a connection is taken. `project_dependencies_not_self` says
+          the same thing in the database and remains the guarantee; this only
+          produces the better message.
+        * The dependency must not close a loop. That is the cycle guard, and
+          unlike everything else here it is enforced by this code rather than
+          by a constraint -- no CHECK may read a second row. It runs inside the
+          transaction, after the workspace's dependency lock, so no concurrent
+          write can invalidate the reachability it read.
+        * Both projects must exist in this workspace, and the edge must not
+          already be there. Not checked here at all: the composite foreign keys
+          and the primary key refuse those, and the refusals are translated
+          into the field that named the offending id.
+
+        Cross-workspace is not among the checks this code performs, and that is
+        the point: `project_dependencies` holds ONE workspace_id read by both
+        foreign keys, so PostgreSQL is what refuses a project from another
+        tenant, as one statement, with nothing in between for a concurrent move
+        to exploit.
+        """
+        if blocking_project_id == blocked_project_id:
+            raise ValidationError([_SELF_DEPENDENCY])
+
+        async with self._pool.acquire() as connection:
+            # The transaction is load-bearing rather than conventional: the
+            # advisory lock below is released at its end, and it must not be
+            # released until the write it protects has committed.
+            async with connection.transaction():
+                await self._repository.lock_dependencies(connection, scope=scope)
+
+                if await self._repository.depends_on(
+                    connection,
+                    scope=scope,
+                    from_project_id=blocked_project_id,
+                    to_project_id=blocking_project_id,
+                ):
+                    raise ValidationError([_DEPENDENCY_CYCLE])
+
+                try:
+                    await self._repository.add_dependency(
+                        connection,
+                        scope=scope,
+                        blocking_project_id=blocking_project_id,
+                        blocked_project_id=blocked_project_id,
+                    )
+                except (
+                    asyncpg.ForeignKeyViolationError,
+                    asyncpg.UniqueViolationError,
+                ) as error:
+                    _raise_mapped(error)
+
+                found = await self._repository.list_dependencies_for_projects(
+                    connection,
+                    scope=scope,
+                    project_ids=[blocking_project_id],
+                )
+
+        return found[blocking_project_id]
+
+    async def remove_dependency(
+        self,
+        *,
+        scope: WorkspaceScope,
+        blocking_project_id: UUID,
+        blocked_project_id: UUID,
+    ) -> ProjectDependencies:
+        """Drop one dependency, and return the blocking project's remaining.
+
+        An edge that was not there, a project in another workspace and a
+        project that never existed are all answered the same way: the delete
+        matches nothing and the reload reports what is left. Removal is not a
+        failure when there was nothing to remove, because the caller's intent
+        -- this project does not block that one -- already holds.
+
+        No lock and no cycle check: removing an edge cannot close a loop.
+        """
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                await self._repository.remove_dependency(
+                    connection,
+                    scope=scope,
+                    blocking_project_id=blocking_project_id,
+                    blocked_project_id=blocked_project_id,
+                )
+
+                found = await self._repository.list_dependencies_for_projects(
+                    connection,
+                    scope=scope,
+                    project_ids=[blocking_project_id],
+                )
+
+        return found[blocking_project_id]
+
+    async def list_dependencies_for_projects(
+        self,
+        *,
+        scope: WorkspaceScope,
+        project_ids: Sequence[UUID],
+    ) -> dict[UUID, ProjectDependencies]:
+        """Both directions for several projects, for batching.
+
+        Unpaginated, and bounded by the caller's list rather than by a constant
+        of its own: `project_ids` is already a page, and a project has a
+        handful of dependencies rather than a history.
+        """
+        if not project_ids:
+            return {}
+
+        async with self._pool.acquire() as connection:
+            return await self._repository.list_dependencies_for_projects(
+                connection,
+                scope=scope,
+                project_ids=project_ids,
+            )
+
     # ------------------------------------------------------------ validation
+
+    @staticmethod
+    def _validate_update_fields(*, health: str, body: str) -> None:
+        """Collect every violation, then raise once.
+
+        The legal healths are named in the message. `project_updates_health_check`
+        would reject an unknown one too, but as a CheckViolationError carrying
+        the rendered constraint -- which is either masked (telling the client
+        nothing) or forwarded (telling it about the schema). Neither is a
+        usable answer to "which values may I send".
+        """
+        issues: list[ValidationIssue] = []
+
+        if health not in HEALTH_VALUES:
+            issues.append(
+                ValidationIssue(
+                    field="health",
+                    code="INVALID",
+                    message=f"Health must be one of: {', '.join(HEALTH_VALUES)}",
+                )
+            )
+
+        # Validated as supplied -- never trimmed or rewritten, matching
+        # `_validate_project_fields`. A body of three spaces is what the caller
+        # typed, and silently turning it into a REQUIRED failure would report
+        # an error about input the client never sent.
+        if len(body) < 1:
+            issues.append(
+                ValidationIssue(
+                    field="body",
+                    code="REQUIRED",
+                    message="Body is required",
+                )
+            )
+        elif len(body) > UPDATE_BODY_MAX_LENGTH:
+            issues.append(
+                ValidationIssue(
+                    field="body",
+                    code="TOO_LONG",
+                    message=(
+                        f"Body must be at most {UPDATE_BODY_MAX_LENGTH} characters"
+                    ),
+                )
+            )
+
+        if issues:
+            raise ValidationError(issues)
 
     @staticmethod
     def _validate_list(*, first: int, after: str | None) -> KeysetCursor | None:
