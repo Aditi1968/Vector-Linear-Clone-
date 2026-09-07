@@ -561,3 +561,165 @@ async def test_an_owner_may_step_down_once_there_is_a_second_one(memberships, po
         )
         == 1
     )
+
+
+# ------------------------------------------------------- removing a real member
+
+
+async def seed_issue(pool, teams, memberships) -> tuple[UUID, UUID]:
+    """A team and one issue in acme. Returns (workspace_id, issue_id).
+
+    Every row a departing member can hold hangs off an issue, so this is the
+    smallest fixture that lets the two tests below say anything.
+    """
+    scope = await owner_scope(memberships)
+    team = await teams.create(scope=scope, name="Engineering", key="ENG")
+
+    async with pool.acquire() as connection:
+        issue_id = await connection.fetchval(
+            """
+            INSERT INTO issues (
+                workspace_id, team_id, number, workflow_state_id, title, priority
+            )
+            VALUES (
+                $1, $2, 1,
+                (
+                    SELECT id FROM workflow_states
+                    WHERE workspace_id = $1 AND team_id = $2 AND type = 'unstarted'
+                ),
+                'Something to watch', 1
+            )
+            RETURNING id
+            """,
+            scope.workspace_id,
+            team.team.id,
+        )
+
+    return scope.workspace_id, issue_id
+
+
+async def test_a_member_holding_only_personal_rows_can_be_removed(
+    memberships, teams, pool
+):
+    """Regression: one unread notification made a member unremovable.
+
+    Thirteen foreign keys reference `workspace_members` and every one is
+    RESTRICT. That is right for the things a workspace shares -- 009 says a
+    project lead must be reassigned rather than silently vacated -- but it was
+    never narrowed, so it also caught rows only the departing person could ever
+    see. `remove_member` did not catch the RestrictViolationError either, so an
+    admin clicking Remove got a masked "Internal server error" naming nothing,
+    for a member whose entire footprint was a notification nobody had read.
+
+    All four personal kinds are seeded at once, deliberately. Each is deleted by
+    its own statement, so a fixture holding one of them would pass while the
+    other three still blocked the removal.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="member")
+
+    workspace_id, issue_id = await seed_issue(pool, teams, memberships)
+
+    async with pool.acquire() as connection:
+        await connection.execute(
+            "INSERT INTO notifications (workspace_id, user_id, issue_id, kind) "
+            "VALUES ($1, $2, $3, 'assigned')",
+            workspace_id,
+            COLLEAGUE_ID,
+            issue_id,
+        )
+        await connection.execute(
+            "INSERT INTO issue_subscribers (workspace_id, issue_id, user_id) "
+            "VALUES ($1, $2, $3)",
+            workspace_id,
+            issue_id,
+            COLLEAGUE_ID,
+        )
+        view_id = await connection.fetchval(
+            """
+            INSERT INTO saved_views (
+                workspace_id, name, filter, order_field, order_direction,
+                layout, visibility, created_by
+            )
+            VALUES ($1, 'Mine', '{}'::jsonb, 'created_at', 'desc',
+                    'list', 'personal', $2)
+            RETURNING id
+            """,
+            workspace_id,
+            COLLEAGUE_ID,
+        )
+        # A favourite pointing at that very view, which is what makes the
+        # deletion ORDER in delete_personal_rows load-bearing rather than
+        # incidental: favorites_saved_view_fk is RESTRICT like everything else.
+        await connection.execute(
+            "INSERT INTO favorites (workspace_id, user_id, saved_view_id, position) "
+            "VALUES ($1, $2, $3, 0)",
+            workspace_id,
+            COLLEAGUE_ID,
+            view_id,
+        )
+
+    removed = await memberships.remove_member(
+        scope=await owner_scope(memberships),
+        user_id=COLLEAGUE_ID,
+    )
+
+    assert removed == COLLEAGUE_ID
+
+    async with pool.acquire() as connection:
+        for table, column in (
+            ("workspace_members", "user_id"),
+            ("notifications", "user_id"),
+            ("issue_subscribers", "user_id"),
+            ("favorites", "user_id"),
+            ("saved_views", "created_by"),
+        ):
+            assert (
+                await connection.fetchval(
+                    f"SELECT count(*) FROM {table} WHERE {column} = $1",  # noqa: S608
+                    COLLEAGUE_ID,
+                )
+                == 0
+            ), f"{table} still holds a row for the removed member"
+
+
+async def test_a_member_who_leads_a_project_is_refused_by_name(
+    memberships, teams, pool
+):
+    """The other half: shared things still refuse, but say which one.
+
+    This is the policy 009 wrote down -- a lead is reassigned rather than
+    silently vacated -- and the only thing that changed is that the refusal now
+    arrives as a field error an admin can act on instead of as a 500. The
+    membership must still be there afterwards: a removal that half-happened,
+    clearing the personal rows and then failing, would be worse than the bug.
+    """
+    await acme(memberships)
+    await join_as(memberships, user_id=COLLEAGUE_ID, role="member")
+
+    scope = await owner_scope(memberships)
+
+    async with pool.acquire() as connection:
+        await connection.execute(
+            """
+            INSERT INTO projects (workspace_id, name, state, lead_id)
+            VALUES ($1, 'Launch', 'planned', $2)
+            """,
+            scope.workspace_id,
+            COLLEAGUE_ID,
+        )
+
+    with pytest.raises(ValidationError) as raised:
+        await memberships.remove_member(scope=scope, user_id=COLLEAGUE_ID)
+
+    assert [(issue.field, issue.code) for issue in raised.value.issues] == [
+        ("userId", "STILL_LEADS_PROJECT")
+    ]
+
+    assert (
+        await pool.fetchval(
+            "SELECT count(*) FROM workspace_members WHERE user_id = $1",
+            COLLEAGUE_ID,
+        )
+        == 1
+    )
