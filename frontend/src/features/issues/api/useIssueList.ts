@@ -5,7 +5,7 @@ import { useQuery } from '@apollo/client/react'
 import { useWorkspaceSlug } from '../../../app/routes'
 import { describeError } from '../lib/errors'
 import { IssueListDocument } from './documents'
-import type { IssueRowFields } from './types'
+import type { IssueFilterInput, IssueRowFields } from './types'
 
 /**
  * Stable identity for "no rows", so a render that has no data does not hand
@@ -13,9 +13,25 @@ import type { IssueRowFields } from './types'
  */
 const NO_ISSUES: readonly IssueRowFields[] = []
 
+export interface UseIssueListOptions {
+  /**
+   * What the server should narrow the list to, or nothing.
+   *
+   * Build the object so that a filter you are not applying is an ABSENT KEY.
+   * `assigneeId: null` is not "any assignee" -- it is the unassigned issues
+   * (see `IssueFilterInput` in the schema), so an optional id routed through
+   * this as null asks the wrong question and gets a plausible-looking answer.
+   */
+  filter?: IssueFilterInput
+  /** Do not ask yet, because the filter is not known. Never to hide a result. */
+  skip?: boolean
+}
+
 export interface UseIssueListResult {
   /** Every row loaded so far, newest first. Accumulated by the cache, not here. */
   issues: readonly IssueRowFields[]
+  /** How many issues match, ignoring paging. `0` until the first page lands. */
+  totalCount: number
   /** Whether the connection has more rows after the last one loaded. */
   hasNextPage: boolean
   /** The very first fetch, with nothing on screen yet. */
@@ -67,9 +83,11 @@ export interface UseIssueListResult {
  * the URL does not already state, and a prop would let two components on one
  * page disagree about which tenant they are showing. The cache keys pages on
  * the same argument (see `src/lib/graphql/cache.ts`), so moving between
- * workspaces reads a different list rather than merging two.
+ * workspaces reads a different list rather than merging two. The same policy
+ * keys on `filter`, so a narrowed list is its own list rather than a page of
+ * the workspace's.
  */
-export function useIssueList(): UseIssueListResult {
+export function useIssueList({ filter, skip }: UseIssueListOptions = {}): UseIssueListResult {
   const workspaceSlug = useWorkspaceSlug()
   const [loadMoreErrorMessage, setLoadMoreErrorMessage] = useState<string | null>(null)
 
@@ -92,7 +110,11 @@ export function useIssueList(): UseIssueListResult {
     // to decide whether a result starts the list or extends it, and stating
     // the cursor keeps that decision reading from a value the document
     // declares.
-    variables: { workspaceSlug, after: null },
+    // `filter` is passed through as it arrives, undefined included: an
+    // undefined variable is absent from the request and from the cache key,
+    // which is exactly what "not filtering on this" has to mean.
+    variables: { workspaceSlug, filter, after: null },
+    skip,
     notifyOnNetworkStatusChange: true,
   })
 
@@ -146,6 +168,7 @@ export function useIssueList(): UseIssueListResult {
 
   return {
     issues,
+    totalCount: connection?.totalCount ?? 0,
     hasNextPage,
     isLoadingFirstPage: networkStatus === NetworkStatus.loading,
     isLoadingMore,

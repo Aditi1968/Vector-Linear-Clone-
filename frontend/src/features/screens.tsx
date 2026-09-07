@@ -117,11 +117,6 @@ export interface ListFooterProps {
   /** A failure of the most recent "load more", which leaves rows intact. */
   errorMessage: string | null
   onLoadMore: () => void
-  /**
-   * Overrides "Load more" where the button loads something broader than what
-   * the list shows -- a client-side filter's "Load more workspace issues".
-   */
-  moreLabel?: string
 }
 
 /**
@@ -133,9 +128,9 @@ export interface ListFooterProps {
  * last is the one usually skipped, which leaves a "Load more" button that
  * sends no request and changes nothing.
  *
- * "Loaded" and never "total": no connection in this schema exposes a count,
- * so this states a fact about the screen and does not pretend to state one
- * about the database.
+ * "Loaded" and never "total": this states a fact about the screen. A caller
+ * that has a `totalCount` to state says so above its list, where the number
+ * can be put in a sentence rather than into a footer shared by six screens.
  */
 export function ListFooter({
   noun,
@@ -144,7 +139,6 @@ export function ListFooter({
   isLoadingMore,
   errorMessage,
   onLoadMore,
-  moreLabel = 'Load more',
 }: ListFooterProps) {
   const plural = loadedCount === 1 ? noun : `${noun}s`
 
@@ -165,7 +159,7 @@ export function ListFooter({
           </Button>
         </span>
       ) : hasNextPage ? (
-        <Button onClick={onLoadMore}>{moreLabel}</Button>
+        <Button onClick={onLoadMore}>Load more</Button>
       ) : (
         <span>
           End of list &middot; {loadedCount} {plural} loaded

@@ -125,17 +125,27 @@ fragment IssueDetailFields on Issue {
   creatorId
 }
 
-# One page of issues, newest first.
+# One page of issues, newest first, optionally narrowed.
 #
 # Cursor pagination, never offset: `after` carries the opaque keyset cursor
 # the server built from the last row it returned (`created_at`, `id`), and
 # there is no page number or row count anywhere in this feature to compute an
 # offset from even if someone wanted to.
 #
-# Cost: 25 x (20 per node + 2 on pageInfo) = 550 of 1000.
-query IssueList($workspaceSlug: String!, $after: String) {
+# `$filter` is what lets one document serve both the workspace list and My
+# Issues. It must be OMITTED rather than sent as null when nothing is being
+# filtered: `IssueFilterInput` spells "unassigned" as an explicit
+# `assigneeId: null`, so a nullable variable routed into it asks for the
+# unassigned issues instead of for all of them. ./useIssueList.ts builds the
+# object so an absent filter is an absent key.
+#
+# `totalCount` is how many issues match, ignoring paging -- so a filtered
+# screen can state the size of its answer rather than the size of its page.
+#
+# Cost: 25 x (20 per node + 2 on pageInfo + 1) = 575 of 1000.
+query IssueList($workspaceSlug: String!, $filter: IssueFilterInput, $after: String) {
   # 25 is a LITERAL and must stay one -- see the long note at the top.
-  issues(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+  issues(workspaceSlug: $workspaceSlug, filter: $filter, first: 25, after: $after) {
     nodes {
       ...IssueRowFields
     }
@@ -143,6 +153,7 @@ query IssueList($workspaceSlug: String!, $after: String) {
       hasNextPage
       endCursor
     }
+    totalCount
   }
 }
 

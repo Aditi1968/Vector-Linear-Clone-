@@ -154,12 +154,19 @@ export function issueDetail(
 export interface IssuePageOptions {
   hasNextPage?: boolean
   endCursor?: string | null
+  /**
+   * How many issues match, ignoring paging.
+   *
+   * Defaults to the page's own length, which is the truth whenever there is
+   * no next page. A test about a partial answer states a bigger number here.
+   */
+  totalCount?: number
 }
 
 /** One page of the `issues` connection. */
 export function issueListData(
   nodes: readonly IssueRowFields[],
-  { hasNextPage = false, endCursor = null }: IssuePageOptions = {},
+  { hasNextPage = false, endCursor = null, totalCount }: IssuePageOptions = {},
 ): IssueListData {
   return {
     issues: {
@@ -170,6 +177,7 @@ export function issueListData(
         hasNextPage,
         endCursor,
       },
+      totalCount: totalCount ?? nodes.length,
     },
   }
 }

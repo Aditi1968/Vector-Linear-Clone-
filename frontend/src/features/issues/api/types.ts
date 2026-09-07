@@ -64,6 +64,8 @@ import type { IssueCreateInput as IssueCreateInputType } from '../../../generate
  */
 export type {
   IssueCreateInput,
+  IssueFilterInput,
+  IssueOrderInput,
   IssueSetCycleInput,
   IssueSetProjectInput,
   IssueUpdateInput,

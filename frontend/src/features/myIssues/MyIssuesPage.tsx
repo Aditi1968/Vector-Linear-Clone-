@@ -17,24 +17,18 @@ const SKELETON_ROWS = 6
 /**
  * The issues assigned to the signed-in viewer, across every team.
  *
- * ## The filter runs in the browser, and the screen says so
+ * ## The server does the filtering
  *
- * `issues(workspaceSlug:, teamId:, first:, after:)` is the whole filter
- * surface the API offers. There is no `assigneeId` argument, so "assigned to
- * me" cannot be asked of the server: this loads a page of the *workspace's*
- * issues and keeps the ones whose `assigneeId` is the viewer's.
+ * `filter: { assigneeId }`, so every row that arrives is the viewer's and
+ * `totalCount` is how many there are rather than how many were noticed among
+ * a page of the workspace. What remains true is that the answer is still
+ * paginated: the footer says how many of the total are on screen.
  *
- * That has a consequence the user has to be told about, because it is
- * invisible otherwise: an issue assigned to you that is older than the last
- * row loaded is not on this screen, and nothing about an unfiltered-looking
- * list would suggest it. So the footnote states what the list is matched
- * against, the empty state distinguishes "none among those loaded" from
- * "none at all", and the button says it loads more of the workspace rather
- * than more of your issues. `features/projects` makes the same admission for
- * the same reason -- the API has no per-project filter either.
- *
- * When `issues(assigneeId:)` arrives, this screen loses the footnote and the
- * filter and gains a variable, and nothing else about it changes.
+ * The one trap in that filter, spelled out because it is silent: an absent
+ * `assigneeId` is "any assignee" and an explicit null is "unassigned". The
+ * query is therefore skipped rather than sent while the viewer is unknown --
+ * passing `assigneeId: viewer?.id ?? null` would quietly show somebody else's
+ * unassigned work under a heading that says it is yours.
  *
  * ## Landmarks
  *
@@ -43,9 +37,11 @@ const SKELETON_ROWS = 6
  */
 export function MyIssuesPage() {
   const { viewer } = useWorkspace()
+  const viewerId = viewer?.id ?? null
 
   const {
     issues,
+    totalCount,
     hasNextPage,
     isLoadingFirstPage,
     isLoadingMore,
@@ -54,21 +50,18 @@ export function MyIssuesPage() {
     loadMoreErrorMessage,
     loadMore,
     retry,
-  } = useIssueList()
+  } = useIssueList(
+    viewerId === null
+      ? { skip: true }
+      : { filter: { assigneeId: viewerId } },
+  )
 
   // The lookups every row needs in order to draw a status glyph and an
   // avatar from the raw UUIDs it carries. A failure here costs those two
   // columns and nothing else, so it is not raised to the page.
   const { stateById, memberById } = useWorkspaceContext()
 
-  const viewerId = viewer?.id ?? null
-
-  const mine =
-    viewerId === null
-      ? []
-      : issues.filter((issue) => issue.assigneeId === viewerId)
-
-  const hasMine = mine.length > 0
+  const hasMine = issues.length > 0
   const showError = !isLoadingFirstPage && errorMessage !== null && issues.length === 0
 
   return (
@@ -115,19 +108,19 @@ export function MyIssuesPage() {
 
             {!isLoadingFirstPage && !showError && (
               <>
-                {/* A live region, because the number that matters changes
-                    without the user doing anything visible: every "load more"
-                    can pull more of your issues into a list that otherwise
-                    just grows. */}
+                {/* A live region, because the number changes without the user
+                    doing anything visible: every "load more" brings more of
+                    the total onto the screen. */}
                 <p className={styles.footnote} role="status">
-                  {mine.length} of {issues.length} loaded{' '}
-                  {issues.length === 1 ? 'issue' : 'issues'} assigned to you.
+                  {hasNextPage
+                    ? `Showing ${String(issues.length)} of ${String(totalCount)} issues assigned to you.`
+                    : `${String(totalCount)} ${totalCount === 1 ? 'issue' : 'issues'} assigned to you.`}
                 </p>
 
                 {hasMine ? (
                   <IssueRows
                     label="Issues assigned to you"
-                    issues={mine}
+                    issues={issues}
                     stateById={stateById}
                     memberById={memberById}
                   />
@@ -135,21 +128,9 @@ export function MyIssuesPage() {
                   <EmptyState
                     icon={<IssueIcon />}
                     title="Nothing assigned to you"
-                    description={
-                      hasNextPage
-                        ? 'None among the issues loaded so far. Older issues may be assigned to you -- load more below.'
-                        : 'Every issue in this workspace has been checked; none is assigned to you.'
-                    }
+                    description="No issue in this workspace is assigned to you."
                   />
                 )}
-
-                <p className={styles.footnote}>
-                  The API offers no assignee filter, so this list is matched in
-                  the browser against the {issues.length} most recent{' '}
-                  {issues.length === 1 ? 'issue' : 'issues'} in the workspace.
-                  Loading more loads more of the workspace, not more of your
-                  issues.
-                </p>
 
                 <ListFooter
                   noun="issue"
@@ -158,7 +139,6 @@ export function MyIssuesPage() {
                   isLoadingMore={isLoadingMore}
                   errorMessage={loadMoreErrorMessage}
                   onLoadMore={loadMore}
-                  moreLabel="Load more workspace issues"
                 />
               </>
             )}
