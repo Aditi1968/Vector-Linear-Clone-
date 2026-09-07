@@ -225,6 +225,25 @@ mutation IssueCreate($slug: String!, $team: UUID!, $title: String!) {
 """
 
 
+ATTACH_LABEL = """
+mutation Attach($slug: String!, $id: UUID!, $label: UUID!) {
+  issueLabelAttach(input: {workspaceSlug: $slug, issueId: $id, labelId: $label}) {
+    issue { id labels { id name } }
+    errors { field code message }
+  }
+}
+"""
+
+DETACH_LABEL = """
+mutation Detach($slug: String!, $id: UUID!, $label: UUID!) {
+  issueLabelDetach(input: {workspaceSlug: $slug, issueId: $id, labelId: $label}) {
+    issue { id labels { id name } }
+    errors { field code message }
+  }
+}
+"""
+
+
 async def sign_up(client, email, name=None):
     """Register, and hand back the account the server created.
 
@@ -455,21 +474,27 @@ async def test_a_whole_product_journey_over_http(application):
             )
         )["label"]
 
-        labelled = (
-            await mutate(
-                ada,
-                "mutation M($slug: String!, $id: UUID!, $label: UUID!) "
-                "{ issueLabelAttach(input: {workspaceSlug: $slug, issueId: $id, "
-                "labelId: $label}) { issue { id labels { id name } } "
-                "errors { field code message } } }",
-                "issueLabelAttach",
-                slug="aurora",
-                id=issue["id"],
-                label=label["id"],
-            )
-        )["issue"]
+        # Sent through `post` rather than `mutate`, and the result is read back
+        # off the issue instead of out of the payload. That is not a
+        # convenience: `issueLabelAttach` writes the row and THEN crashes
+        # rendering its own payload, so the response it returns says nothing
+        # about what it did. See
+        # `test_attaching_a_label_reports_what_it_did` below, which is the
+        # test for that defect and will start failing the day it is fixed.
+        #
+        # The journey goes on regardless, because the label really is attached
+        # and every later step -- the filter, the final read -- depends on it.
+        await post(ada, ATTACH_LABEL, slug="aurora", id=issue["id"], label=label["id"])
 
-        assert labelled["labels"] == [{"id": label["id"], "name": "urgent"}]
+        labelled = await query(
+            ada,
+            "query Q($slug: String!, $id: UUID!) "
+            "{ issue(workspaceSlug: $slug, id: $id) { labels { id name } } }",
+            slug="aurora",
+            id=issue["id"],
+        )
+
+        assert labelled["issue"]["labels"] == [{"id": label["id"], "name": "urgent"}]
 
         # --- a comment ---------------------------------------------------
         comment = (
@@ -923,6 +948,113 @@ async def test_a_whole_product_journey_over_http(application):
         # Naming it here keeps the read above honest about which state the
         # issue is in: not the last one the test happened to look up.
         assert restored["issue"]["workflowStateId"] != done["id"]
+
+
+# --------------------------------------------------------------------------
+# The one step of that journey the product cannot report
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "app/graphql/mutations/labels.py:125 and :144 call "
+        "`self._issue_payload(...)`. `Mutation` is assembled by "
+        "`strawberry.tools.merge_types`, so the root value at execution is "
+        "None and `self` is None in every resolver -- these two are the only "
+        "resolvers in the schema that use it. The service call has already "
+        "committed by then, so the mutation writes the row, writes its "
+        "activity, and answers `data: null` with a masked 'Internal server "
+        "error'. Remove this marker when the resolvers stop reaching through "
+        "`self`."
+    ),
+)
+@pytest.mark.parametrize("operation", ["attach", "detach"])
+async def test_attaching_a_label_reports_what_it_did(operation, application):
+    """A label mutation must answer with the issue it changed.
+
+    This is the only defect this file found, and it is invisible to every
+    other kind of test. The service is right, the repository is right, the row
+    lands, the history lands -- so a service test passes, a repository test
+    passes, and a schema-level test would pass too if one existed. It does
+    not: `issueLabelAttach` and `issueLabelDetach` are the only two mutations
+    in this schema that nothing in `tests/` names, which is exactly why the
+    crash between the write and the payload has survived.
+
+    What a client sees today is the worst shape a bug can take. The write
+    succeeded, so retrying reports the label is already attached; the response
+    said "Internal server error", so no UI can know that. The label is on the
+    issue and the screen showing it says the request failed.
+
+    Asserted here as the behaviour the product should have, and marked
+    strict-xfail so that fixing the resolvers turns this green and makes the
+    marker itself the thing that fails.
+    """
+    async with browser(application) as client:
+        await sign_up(client, "labeller@example.test")
+        await mutate(
+            client, WORKSPACE_CREATE, "workspaceCreate", name="Aurora", slug="aurora"
+        )
+
+        team = (
+            await mutate(
+                client,
+                TEAM_CREATE,
+                "teamCreate",
+                slug="aurora",
+                name="Core",
+                key="ENG",
+            )
+        )["team"]
+
+        issue = (
+            await mutate(
+                client,
+                ISSUE_CREATE,
+                "issueCreate",
+                slug="aurora",
+                team=team["id"],
+                title="Labelled",
+            )
+        )["issue"]
+
+        label = (
+            await mutate(
+                client,
+                "mutation M($slug: String!) { labelCreate(input: "
+                '{workspaceSlug: $slug, name: "urgent"}) '
+                "{ label { id name } errors { field code message } } }",
+                "labelCreate",
+                slug="aurora",
+            )
+        )["label"]
+
+        if operation == "detach":
+            # Detaching needs something attached, and the attach path is the
+            # other half of the same defect -- so the row it leaves behind is
+            # exactly what this case needs, error and all.
+            await post(
+                client,
+                ATTACH_LABEL,
+                slug="aurora",
+                id=issue["id"],
+                label=label["id"],
+            )
+
+        document = ATTACH_LABEL if operation == "attach" else DETACH_LABEL
+        expected = [{"id": label["id"], "name": "urgent"}] if operation == "attach" else []
+
+        payload = await mutate(
+            client,
+            document,
+            f"issueLabel{operation.capitalize()}",
+            slug="aurora",
+            id=issue["id"],
+            label=label["id"],
+        )
+
+        assert payload["issue"]["id"] == issue["id"]
+        assert payload["issue"]["labels"] == expected
 
 
 # --------------------------------------------------------------------------
