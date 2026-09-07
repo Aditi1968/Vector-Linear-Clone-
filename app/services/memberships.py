@@ -121,6 +121,81 @@ INVITATION_NOT_FOUND = ValidationIssue(
 )
 
 
+# What a member still holds that another member would notice losing, keyed by
+# the constraint that refuses the removal.
+#
+# `MembershipRepository.delete_personal_rows` has already cleared everything
+# that answered to this person alone, so any RESTRICT still firing after it is
+# by definition about something shared -- a project someone else is waiting on,
+# an integration the whole workspace posts through, a list other people open.
+# 009 states the policy these constraints encode: such a removal is "refused
+# rather than silently vacating", and the caller reassigns first.
+#
+# Keyed on the constraint name rather than the exception class, for the reason
+# ProjectService gives about the same pattern: every one of these arrives as
+# the same RestrictViolationError, and they mean entirely different things. A
+# single "member still has data" would tell an admin to go looking without
+# saying where.
+#
+# The code, not the message, is the contract a UI acts on: each one names a
+# screen an admin can go to and fix the thing. The field is always `userId`,
+# because that is the argument the caller sent and the only one it can change.
+_REMOVAL_BLOCKED: dict[str, ValidationIssue] = {
+    "projects_lead_fk": ValidationIssue(
+        field="userId",
+        code="STILL_LEADS_PROJECT",
+        message="Member still leads a project; reassign the lead first",
+    ),
+    "initiatives_owner_fk": ValidationIssue(
+        field="userId",
+        code="STILL_OWNS_INITIATIVE",
+        message="Member still owns an initiative; reassign the owner first",
+    ),
+    "issues_assignee_fk": ValidationIssue(
+        field="userId",
+        code="STILL_ASSIGNED_ISSUES",
+        message="Member is still assigned issues; reassign them first",
+    ),
+    "comments_author_fk": ValidationIssue(
+        field="userId",
+        code="HAS_COMMENTS",
+        message="Member has authored comments and cannot be removed",
+    ),
+    "saved_views_creator_fk": ValidationIssue(
+        field="userId",
+        code="OWNS_SHARED_VIEW",
+        message="Member created a shared view; transfer or delete it first",
+    ),
+    "issue_templates_assignee_fk": ValidationIssue(
+        field="userId",
+        code="NAMED_IN_TEMPLATE",
+        message="Member is the default assignee of a template; change it first",
+    ),
+    "github_installations_connected_by_fk": ValidationIssue(
+        field="userId",
+        code="CONNECTED_GITHUB",
+        message="Member connected the GitHub integration; reconnect it as "
+        "someone else first",
+    ),
+    "slack_installations_connected_by_fk": ValidationIssue(
+        field="userId",
+        code="CONNECTED_SLACK",
+        message="Member connected the Slack integration; reconnect it as "
+        "someone else first",
+    ),
+    "project_updates_author_fk": ValidationIssue(
+        field="userId",
+        code="HAS_PROJECT_UPDATES",
+        message="Member has posted project updates and cannot be removed",
+    ),
+    "initiative_updates_author_fk": ValidationIssue(
+        field="userId",
+        code="HAS_INITIATIVE_UPDATES",
+        message="Member has posted initiative updates and cannot be removed",
+    ),
+}
+
+
 class MembershipService:
     """Business rules for workspace membership.
 
@@ -397,11 +472,44 @@ class MembershipService:
                 if user_id in owners and len(owners) == 1:
                     raise ValidationError([LAST_OWNER])
 
-                removed = await self._repository.delete(
+                # Personal rows first, in the same transaction as the deletion
+                # they exist to unblock. A member's own notifications, watched
+                # issues, shortcuts and private views answer to nobody else, so
+                # they leave with the membership rather than preventing it --
+                # before this, a single unread notification made a member
+                # permanently unremovable and reported it as a 500.
+                await self._repository.delete_personal_rows(
                     connection,
                     workspace_id=scope.workspace_id,
                     user_id=user_id,
                 )
+
+                try:
+                    removed = await self._repository.delete(
+                        connection,
+                        workspace_id=scope.workspace_id,
+                        user_id=user_id,
+                    )
+                except asyncpg.RestrictViolationError as error:
+                    # Everything personal is already gone, so a RESTRICT
+                    # surviving to here is about something the workspace
+                    # shares. `_REMOVAL_BLOCKED` names which, so the admin is
+                    # told what to reassign instead of reading "Internal
+                    # server error".
+                    #
+                    # An unmapped constraint is re-raised untouched, on the
+                    # same argument `ProjectService._raise_mapped` makes: a
+                    # violation nobody taught this mapping about is a defect --
+                    # a table added by a later migration whose policy was never
+                    # decided -- and dressing it as a field error would tell an
+                    # admin to fix input that was never the problem while
+                    # hiding the gap behind a 200.
+                    issue = _REMOVAL_BLOCKED.get(error.constraint_name or "")
+
+                    if issue is None:
+                        raise
+
+                    raise ValidationError([issue]) from None
 
                 if removed is None:
                     raise ValidationError([MEMBER_NOT_FOUND])

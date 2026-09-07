@@ -338,6 +338,83 @@ class MembershipRepository:
 
         return removed_id
 
+    async def delete_personal_rows(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        workspace_id: UUID,
+        user_id: UUID,
+    ) -> None:
+        """Clear what a departing member owns alone, before the membership goes.
+
+        Thirteen foreign keys across nine migrations reference
+        `workspace_members`, every one of them RESTRICT. That is deliberate --
+        009 says so directly, that removing someone who still leads a project is
+        "refused rather than silently vacating the projects they lead". But the
+        rule was written for the things a workspace shares, and it was never
+        narrowed, so it also caught the things only the departing person could
+        ever see. One unread notification made a member unremovable, and
+        `remove_member` did not catch the RestrictViolationError, so an admin
+        clicking Remove got a masked "Internal server error" naming nothing.
+
+        The four statements below are the rows that answer to exactly one
+        person: their notification feed, the issues they watch, their sidebar
+        shortcuts, and the saved views only they can open. None of them is a
+        record of anything the workspace did; deleting them destroys no history
+        and changes nothing another member can observe. Everything else is left
+        to its RESTRICT, and `MembershipService.remove_member` turns that
+        refusal into a field error naming what still has to be reassigned.
+
+        Why this lives on the membership repository rather than on four others:
+        each statement is keyed on `(workspace_id, user_id)` and none of them is
+        about notifications or favourites as such -- they are the lifecycle of a
+        membership, which is this class's subject. Reaching for four
+        repositories would also put four more constructor arguments on
+        MembershipService for a single code path.
+
+        Order is load-bearing. `favorites_saved_view_fk` is RESTRICT like
+        everything else, so a favourite pointing at one of this member's
+        personal views has to go before the view does. A personal view is
+        visible only to its creator, so their own favourites are the only ones
+        that can reference it -- which is what makes deleting favourites first
+        sufficient rather than merely likely.
+
+        Shared saved views are deliberately NOT deleted. A view the whole
+        workspace uses is not personal property, and dropping it because its
+        author left would take a working list away from everyone. It keeps its
+        RESTRICT and becomes something the caller must reassign, which is the
+        same answer 009 gives for a project lead.
+
+        No return value. Every statement is idempotent and a member with none of
+        these rows is the ordinary case, so "how many were deleted" is not a
+        question any caller has.
+        """
+        await connection.execute(
+            "DELETE FROM favorites WHERE workspace_id = $1 AND user_id = $2",
+            workspace_id,
+            user_id,
+        )
+        await connection.execute(
+            "DELETE FROM issue_subscribers WHERE workspace_id = $1 AND user_id = $2",
+            workspace_id,
+            user_id,
+        )
+        await connection.execute(
+            "DELETE FROM notifications WHERE workspace_id = $1 AND user_id = $2",
+            workspace_id,
+            user_id,
+        )
+        await connection.execute(
+            """
+            DELETE FROM saved_views
+            WHERE workspace_id = $1
+              AND created_by = $2
+              AND visibility = 'personal'
+            """,
+            workspace_id,
+            user_id,
+        )
+
     @staticmethod
     def _to_entity(row: asyncpg.Record) -> WorkspaceMembershipEntity:
         return WorkspaceMembershipEntity(
