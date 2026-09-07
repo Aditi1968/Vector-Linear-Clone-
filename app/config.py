@@ -60,8 +60,32 @@ class Settings(BaseSettings):
     # app.services.github.verify_webhook_signature.
     github_webhook_secret: SecretStr | None = None
 
+    # The same key, read from a file instead of the environment.
+    #
+    # A PEM is multi-line, and a multi-line value in a `.env` is a quoting
+    # problem with a different answer in every tool that reads one. GitHub
+    # also hands the key over as a `.pem` download, so a path is the shape an
+    # operator already has -- and it keeps the most valuable secret this
+    # process holds out of the environment block, where it would be visible
+    # to anything that can read `/proc/<pid>/environ` or a container inspect.
+    #
+    # Not a SecretStr: a filesystem path is not a credential. What it points
+    # at is, and `GithubAppConfig.from_settings` is the one frame that reads
+    # it. Exactly one of this and `github_app_private_key` may be set; see
+    # `github_private_key` below for why both exist.
+    github_private_key_path: str | None = None
+
     github_client_id: str | None = None
     github_client_secret: SecretStr | None = None
+
+    # Where GitHub sends the browser back, as a whole URL.
+    #
+    # Registered provider-side, so this is not a preference: it is a copy of
+    # a value GitHub already holds, and OAuth fails if the two disagree. It
+    # is separate from `github_redirect_allowlist`, which governs where the
+    # callback may send the browser NEXT -- one is the door GitHub knocks on,
+    # the other is where the user ends up.
+    github_oauth_callback_url: str | None = None
 
     # Where the install callback is allowed to send a browser afterwards, as
     # comma-separated origins ("https://app.vector.dev,http://localhost:5173").
@@ -107,6 +131,12 @@ class Settings(BaseSettings):
     # settings object.
     slack_client_secret: SecretStr | None = None
     slack_signing_secret: SecretStr | None = None
+
+    # Where Slack sends the browser back, as a whole URL, registered
+    # provider-side. Sent as `redirect_uri` on both legs of the flow, because
+    # Slack requires the value presented at the token exchange to match the
+    # one the authorization began with, byte for byte.
+    slack_oauth_callback_url: str | None = None
 
     @property
     def slack_configured(self) -> bool:

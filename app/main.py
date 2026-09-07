@@ -71,6 +71,15 @@ def create_app() -> FastAPI:
     # which are the same answer arrived at two ways -- and the second is the
     # one that stays right when the settings change without a redeploy.
     app.include_router(github_router)
+    # And again under `/integrations`, which is the prefix the deployment's
+    # GitHub App and its Smee relay are configured against
+    # (`/integrations/github/webhook`). Two paths, one router, one set of
+    # handlers -- so a delivery is verified identically whichever it arrives
+    # on, and neither path is a second implementation that can drift. The
+    # older prefix stays because a provider's registered URL is a thing this
+    # repository does not own: breaking it is a live integration outage that
+    # no test here would catch.
+    app.include_router(github_router, prefix="/integrations")
     # Mounted unconditionally, including on a deployment with no Slack
     # credentials. The routes exist and answer 503 "not configured" rather
     # than 404, because a mount that depended on configuration would make a
@@ -78,5 +87,10 @@ def create_app() -> FastAPI:
     # never deployed -- and would mean the routing table differs between
     # environments, which is the thing that makes a staging test meaningless.
     app.include_router(slack_router)
+    # The same dual mount, for the same reason: the Slack app's registered
+    # redirect URL is configured provider-side and this process cannot read
+    # it, so both spellings resolve rather than one of them 404ing an OAuth
+    # callback that has already left the user's browser.
+    app.include_router(slack_router, prefix="/integrations")
 
     return app

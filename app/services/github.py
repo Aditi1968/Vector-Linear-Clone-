@@ -14,6 +14,7 @@ import hmac
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import timedelta
+from pathlib import Path
 from typing import Any, Final
 from urllib.parse import urlsplit
 from uuid import UUID
@@ -110,6 +111,45 @@ CONFIRMING_ACTIONS: Final = frozenset(
 )
 
 
+def _private_key(settings: Settings) -> str | None:
+    """The app's PEM, from wherever this deployment keeps it.
+
+    Two sources because deployments differ and neither is wrong. A container
+    platform injects the key as an environment variable; a developer has the
+    `.pem` GitHub handed them and a path to it, because a PEM is multi-line
+    and a multi-line `.env` value is a quoting problem with a different answer
+    in every tool.
+
+    The inline value wins when both are set, and that ordering is deliberate
+    rather than arbitrary: an explicitly injected secret is the more specific
+    statement, and a stale path left in a `.env` should not override it.
+
+    A path that does not exist, or cannot be read, returns None rather than
+    raising. That makes the deployment UNCONFIGURED -- the state the whole
+    integration is already built to handle honestly -- instead of a crash at
+    the composition root that takes down an application whose GitHub
+    integration nobody may be using. The error is not swallowed silently: it
+    is what `configured` then reports, and the settings screen says so.
+
+    Nothing here logs the path's CONTENTS, and the OSError is not chained
+    into anything that reaches a client.
+    """
+    inline = _secret(settings.github_app_private_key)
+
+    if inline is not None:
+        return inline
+
+    path = settings.github_private_key_path
+
+    if not path:
+        return None
+
+    try:
+        return Path(path).read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class GithubAppConfig:
     """The deployment's GitHub App credentials, or the absence of them.
@@ -148,7 +188,7 @@ class GithubAppConfig:
         """
         return cls(
             app_id=settings.github_app_id,
-            private_key=_secret(settings.github_app_private_key),
+            private_key=_private_key(settings),
             webhook_secret=_secret(settings.github_webhook_secret),
             client_id=settings.github_client_id,
             client_secret=_secret(settings.github_client_secret),
