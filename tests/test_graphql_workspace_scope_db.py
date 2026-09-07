@@ -57,6 +57,7 @@ from app.repositories.cycles import CycleRepository
 from app.repositories.invitations import InvitationRepository
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
+from app.repositories.label_groups import LabelGroupRepository
 from app.repositories.labels import LabelRepository
 from app.repositories.memberships import MembershipRepository
 from app.repositories.projects import ProjectRepository
@@ -161,6 +162,7 @@ async def world(postgres_dsn):
                 pool=pool,
                 repository=LabelRepository(),
                 issue_label_repository=IssueLabelRepository(),
+                group_repository=LabelGroupRepository(),
             )
             cycle_service = CycleService(pool=pool, repository=CycleRepository())
             project_service = ProjectService(

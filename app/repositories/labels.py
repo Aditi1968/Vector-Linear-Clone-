@@ -52,6 +52,7 @@ class LabelRepository:
                 id,
                 name,
                 color,
+                group_id,
                 created_at,
                 updated_at
             FROM labels
@@ -88,6 +89,7 @@ class LabelRepository:
                 id,
                 name,
                 color,
+                group_id,
                 created_at,
                 updated_at
             """,
@@ -132,6 +134,7 @@ class LabelRepository:
                 id,
                 name,
                 color,
+                group_id,
                 created_at,
                 updated_at
             """,
@@ -209,6 +212,7 @@ class LabelRepository:
                     id,
                     name,
                     color,
+                    group_id,
                     created_at,
                     updated_at
                 FROM labels
@@ -226,6 +230,7 @@ class LabelRepository:
                     id,
                     name,
                     color,
+                    group_id,
                     created_at,
                     updated_at
                 FROM labels
@@ -241,12 +246,78 @@ class LabelRepository:
 
         return [self._to_entity(row) for row in rows]
 
+    async def set_group(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        label_id: UUID,
+        group_id: UUID | None,
+    ) -> LabelEntity | None:
+        """Move one label into a group, or take it out of whichever it is in.
+
+        None is the removal, and it is a real value here rather than a skipped
+        column: one statement whether the label is joining a group or leaving
+        one.
+
+        The interesting half is `group_exclusive`, which is written from a
+        SUBQUERY rather than from a parameter, and that is the whole design of
+        this method. Migration 021 makes the label carry a copy of its group's
+        `exclusive` flag so that PostgreSQL can compute `exclusivity_key` from
+        one row; the copy has to be correct, and the only correct source for it
+        is the group's row. Reading it here, inside the statement that writes
+        it, means there is no round trip during which the group could be
+        flipped -- and `labels_group_fk` checks the pair afterwards regardless,
+        so even a concurrent flip that landed between the subquery and the
+        constraint is refused rather than stored.
+
+        A group id that names nothing in this workspace makes the subquery
+        NULL, which leaves `group_id` set and `group_exclusive` NULL, which is
+        exactly what `labels_group_exclusive_paired` refuses. So an unknown
+        group and another tenant's group both arrive at the service as one
+        CheckViolationError and are answered identically -- telling them apart
+        would confirm that someone else's group exists.
+
+        `updated_at` is assigned in the statement because this schema has no
+        touch trigger.
+        """
+        row = await connection.fetchrow(
+            """
+            UPDATE labels
+            SET group_id = $3,
+                group_exclusive = (
+                    SELECT label_groups.exclusive
+                    FROM label_groups
+                    WHERE label_groups.workspace_id = $1
+                        AND label_groups.id = $3
+                ),
+                updated_at = now()
+            WHERE workspace_id = $1 AND id = $2
+            RETURNING
+                id,
+                name,
+                color,
+                group_id,
+                created_at,
+                updated_at
+            """,
+            scope.workspace_id,
+            label_id,
+            group_id,
+        )
+
+        if row is None:
+            return None
+
+        return self._to_entity(row)
+
     @staticmethod
     def _to_entity(row: asyncpg.Record) -> LabelEntity:
         return LabelEntity(
             id=row["id"],
             name=row["name"],
             color=row["color"],
+            group_id=row["group_id"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

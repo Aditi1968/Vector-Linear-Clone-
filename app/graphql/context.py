@@ -18,12 +18,14 @@ from app.graphql.loaders.projects import (
 )
 from app.http_cookies import read_session_token
 from app.repositories.activity import ActivityRepository
+from app.repositories.bulk import BulkRepository
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
 from app.repositories.github import GithubRepository
 from app.repositories.invitations import InvitationRepository
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
+from app.repositories.label_groups import LabelGroupRepository
 from app.repositories.labels import LabelRepository
 from app.repositories.memberships import MembershipRepository
 from app.repositories.notifications import NotificationRepository
@@ -32,10 +34,12 @@ from app.repositories.relations import RelationRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.slack import SlackRepository
 from app.repositories.teams import TeamRepository
+from app.repositories.triage import TriageRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.activity import ActivityService
 from app.services.auth import AuthService
+from app.services.bulk import BulkService
 from app.services.comments import CommentService
 from app.services.cycles import CycleService
 from app.services.github import GithubAppConfig, GithubService
@@ -48,6 +52,7 @@ from app.services.relations import RelationService
 from app.services.search import SearchService
 from app.services.slack import DatabaseTokenStore, SlackService
 from app.services.teams import TeamService
+from app.services.triage import TriageService
 
 
 class VectorContext(BaseContext):
@@ -68,6 +73,8 @@ class VectorContext(BaseContext):
         github_service: GithubService,
         slack_service: SlackService,
         activity_service: ActivityService,
+        triage_service: TriageService,
+        bulk_service: BulkService,
         environment: Environment,
     ):
         super().__init__()
@@ -103,6 +110,19 @@ class VectorContext(BaseContext):
         # record history for a change that had not happened yet -- or that
         # was about to be rolled back.
         self.activity_service = activity_service
+
+        # The triage queue and the multi-issue writes, each behind its own
+        # service. Both are required rather than defaulted, for the reason
+        # every other slot here is: a context built without one fails on the
+        # first request that reaches the field rather than at construction, and
+        # every test that never touches triage would go on passing.
+        self.triage_service = triage_service
+
+        # Nothing on this object is a way to mutate many issues without an
+        # authorized scope. `BulkService` takes a WorkspaceScope on every
+        # method, exactly as `IssueService` does, and the ids it is handed are
+        # checked against that scope and against nothing else.
+        self.bulk_service = bulk_service
 
         # Built here rather than in `get_context` so that a context assembled
         # by hand -- a test, a worker -- gets working loaders from the service
@@ -301,10 +321,14 @@ async def get_context() -> VectorContext:
         label_service=LabelService(
             pool=pool,
             repository=LabelRepository(),
-            # One service owns both tables, because applying a label is one
-            # operation over two of them: the join row is meaningless without
-            # the label, and the per-issue cap is a rule about the pair.
+            # One service owns all three tables, because applying a label is
+            # one operation over two of them -- the join row is meaningless
+            # without the label, and the per-issue cap is a rule about the pair
+            # -- and because a label's group decides whether the join row is
+            # allowed at all. Deleting a group also ungroups its labels in one
+            # transaction, which a separate service could not hold.
             issue_label_repository=IssueLabelRepository(),
+            group_repository=LabelGroupRepository(),
         ),
         comment_service=CommentService(pool=pool, repository=CommentRepository()),
         cycle_service=CycleService(pool=pool, repository=CycleRepository()),
@@ -351,6 +375,30 @@ async def get_context() -> VectorContext:
             pool=pool,
             repository=ActivityRepository(),
             notifications=NotificationRepository(),
+        ),
+        triage_service=TriageService(
+            pool=pool,
+            repository=TriageRepository(),
+            # Marking a duplicate writes an `issue_relations` row in the same
+            # transaction as the decline, and SQL against that table belongs to
+            # the repository that owns it. A fresh instance rather than the one
+            # RelationService holds: a repository here carries no state and no
+            # connection -- it is a namespace for statements -- so there is
+            # nothing for one request to get two of.
+            relations=RelationRepository(),
+            # Changing a queued issue's team allocates a number off the TARGET
+            # team's counter and resolves the state it arrives in, both inside
+            # the triage service's own transaction. Same instance as the issue
+            # service's: one request gets one team service.
+            teams=team_service,
+        ),
+        bulk_service=BulkService(
+            pool=pool,
+            repository=BulkRepository(),
+            # Bulk label changes write `issue_labels`, so the service reaches
+            # across to the repository that owns that table rather than
+            # BulkRepository growing statements about it.
+            issue_labels=IssueLabelRepository(),
         ),
         environment=environment,
     )

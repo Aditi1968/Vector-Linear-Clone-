@@ -81,6 +81,7 @@ EXPECTED_MIGRATIONS = [
     "015_issue_list_indexes.sql",
     "016_github_installation_trust.sql",
     "017_github_development.sql",
+    "021_triage_label_groups.sql",
 ]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the
