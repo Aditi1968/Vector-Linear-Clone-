@@ -3,12 +3,17 @@ import type { RouteObject } from 'react-router-dom'
 import { RequireAuth, authRoutes } from '../../features/auth'
 import { BoardScreen } from '../../features/board'
 import { CycleDetailPage, CycleListPage } from '../../features/cycles'
+import { InboxPage } from '../../features/inbox'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
+import { MembersPage } from '../../features/members'
+import { MyIssuesPage } from '../../features/myIssues'
 import { onboardingRoutes } from '../../features/onboarding'
 import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
+import { SearchPage } from '../../features/search'
+import { SettingsPage } from '../../features/settings'
+import { TeamIssuesPage, TeamPage } from '../../features/teams'
 import { AppLayout } from '../layout'
 import { NotFound } from './NotFound'
-import { Placeholder } from './Placeholder'
 import { ROUTE_SEGMENTS, WORKSPACE_SLUG_PARAM } from './paths'
 import { RouteError } from './RouteError'
 
@@ -38,11 +43,11 @@ import { RouteError } from './RouteError'
  *
  * ## Screens that are not built yet
  *
- * Several entries below render `Placeholder`, and that is deliberate. The
- * route is real, the URL is the one `paths` builds, the sidebar entry that
- * reaches it is real, and the screen says outright that it does not exist
- * yet. Swapping the `element` is the whole job of the agent who builds one --
- * see ./Placeholder.tsx.
+ * None, as of the workspace screens landing. `./Placeholder.tsx` is still
+ * exported from `./index.ts` and is still the right thing to mount for a
+ * route whose screen is somebody else's to write: the route is real, the URL
+ * is the one `paths` builds, and the page says outright that it does not
+ * exist yet rather than leaving a dead entry in the rail.
  *
  * Exported as data rather than JSX elements so tests can mount a subtree with
  * a memory router without booting the whole application.
@@ -89,66 +94,31 @@ export const routes: RouteObject[] = [
       },
       {
         path: ROUTE_SEGMENTS.myIssues,
-        element: (
-          <Placeholder
-            title="My Issues"
-            description="The issues assigned to you, across every team in this workspace."
-          />
-        ),
+        element: <MyIssuesPage />,
       },
       {
         path: ROUTE_SEGMENTS.inbox,
-        element: (
-          <Placeholder
-            title="Inbox"
-            description="Notifications about the issues you are following."
-          />
-        ),
+        element: <InboxPage />,
       },
       {
         path: ROUTE_SEGMENTS.team,
-        element: (
-          <Placeholder
-            title="Team"
-            description="One team's overview, its workflow states and its members."
-          />
-        ),
+        element: <TeamPage />,
       },
       {
         path: ROUTE_SEGMENTS.teamIssues,
-        element: (
-          <Placeholder
-            title="Team issues"
-            description="One team's issues, grouped by workflow state."
-          />
-        ),
+        element: <TeamIssuesPage />,
       },
       {
         path: ROUTE_SEGMENTS.members,
-        element: (
-          <Placeholder
-            title="Members"
-            description="Everyone in this workspace, the role each holds, and any outstanding invitations."
-          />
-        ),
+        element: <MembersPage />,
       },
       {
         path: ROUTE_SEGMENTS.settings,
-        element: (
-          <Placeholder
-            title="Settings"
-            description="Workspace settings, including the GitHub and Slack integrations."
-          />
-        ),
+        element: <SettingsPage />,
       },
       {
         path: ROUTE_SEGMENTS.search,
-        element: (
-          <Placeholder
-            title="Search"
-            description="Search this workspace's issues and projects."
-          />
-        ),
+        element: <SearchPage />,
       },
       {
         path: ROUTE_SEGMENTS.projects,

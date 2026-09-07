@@ -1,0 +1,318 @@
+/*
+ * Layout shared by the seven workspace screens: My Issues, Inbox, Team, Team
+ * issues, Members, Settings and Search.
+ *
+ * One stylesheet rather than six near-identical ones. Every screen here is
+ * the same two shapes -- a panel with a heading, and a stack of rows with a
+ * footer -- and six copies of `.panel` is how six panels end up with five
+ * different paddings. The features keep their own directories; only the
+ * geometry is shared.
+ *
+ * Every colour, space and radius comes from `src/styles/tokens.css`. There is
+ * not one literal hex or pixel value below.
+ *
+ * Deliberately absent, because `src/styles/base.css` already owns them:
+ * `box-sizing`, heading and list resets, form-control font inheritance, the
+ * `:focus-visible` ring and the reduced-motion override. Also absent: rows,
+ * buttons, badges, empty and error states -- those are `components/List`,
+ * `components/Button`, `components/Badge` and `components/States`.
+ */
+
+/* --------------------------------------------------------------- stacks */
+
+/* The vertical rhythm every one of these screens is built from. */
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-7);
+  min-width: 0;
+}
+
+.tight {
+  gap: var(--space-5);
+}
+
+/*
+ * Two columns on a wide viewport, one on a narrow one.
+ *
+ * `minmax(0, …)` on both tracks rather than `1fr`/`auto`: a grid item's
+ * default `min-width: auto` refuses to shrink below its content, so one long
+ * unbroken issue title would widen the column and push the page into a
+ * horizontal scroll.
+ */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: var(--space-7);
+  align-items: start;
+}
+
+/* Matches --layout-breakpoint-compact. A media query cannot read a custom
+ * property, so the literal is repeated; change both together. */
+@media (max-width: 60rem) {
+  .split {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* --------------------------------------------------------------- panels */
+
+.panel {
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface);
+  overflow: hidden;
+}
+
+.panelHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-5) var(--space-5) var(--space-4);
+}
+
+/* A heading level, not a size. `base.css` decouples the two on purpose, so a
+ * panel title can be an h2 inside the page's single h1 without being large. */
+.panelTitle {
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.panelBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: 0 var(--space-5) var(--space-5);
+}
+
+.panelNote {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* ---------------------------------------------------------------- facts */
+
+/*
+ * A real `<dl>`. The term/description association is what a screen reader
+ * uses to read "Workspace URL, acme" instead of two unrelated fragments, and
+ * no `aria-*` attribute reproduces it.
+ */
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-4) var(--space-6);
+  align-items: baseline;
+}
+
+.factTerm {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+.factValue {
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+/* A value the API did not supply. Distinguished by weight and colour as well
+ * as by wording, so "Not set" never reads as a real value. */
+.factEmpty {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ----------------------------------------------------------------- rows */
+
+/*
+ * The link that makes a whole row clickable.
+ *
+ * A real `<a>` in the row's flow -- in the tab order, with an accessible
+ * name, openable in a new tab -- stretched over the row by a pseudo-element.
+ * A `<div onClick>` is unreachable by keyboard and invisible to assistive
+ * technology.
+ *
+ * No focus styling here: `base.css` rings every `:focus-visible` element
+ * once, and the ring lands on the link's own text box. Overriding it to draw
+ * around the whole row would mean writing `outline: none` first, and this
+ * stylesheet does not.
+ */
+.rowLink {
+  color: inherit;
+  text-decoration: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowLink::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+}
+
+/* Sits above the stretched link so its own controls stay clickable. */
+.rowActions {
+  position: relative;
+  z-index: var(--z-raised);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.rowSub {
+  display: block;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ENG-42. Monospaced and tabular so the hyphen lines up down the column,
+ * which is what lets the eye use it as a ruler rather than reading each one. */
+.identifier {
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- footer */
+
+.listFooter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: center;
+  padding-block: var(--space-6);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+}
+
+/*
+ * The sentence that explains a client-side filter.
+ *
+ * Not a tooltip, because it is not a nicety: a list filtered in the browser
+ * shows what matched *among those loaded*, and a user who does not know that
+ * will read an incomplete list as a complete one.
+ */
+.footnote {
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.inlineError {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+}
+
+/* ---------------------------------------------------------------- forms */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) max-content;
+  gap: var(--space-5);
+  align-items: end;
+}
+
+@media (max-width: 40rem) {
+  .fieldRow {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+/* The message an `aria-describedby` points at. Never the only signal: the
+ * control also carries `aria-invalid`, so the state survives a stylesheet
+ * that does not load and a user who cannot see red. */
+.fieldError {
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+}
+
+.formError {
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* Something true and important that is not a failure -- "Vector cannot send
+ * email", "this filter runs in the browser". Informational colours, so it is
+ * never mistaken for an error. */
+.notice {
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-info-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-info-subtle);
+  color: var(--color-info-text);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* -------------------------------------------------------------- toolbar */
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* A secret shown once: an invite token. Monospaced and wrapping, because it
+ * has to be selectable and copyable by hand when the clipboard API is not
+ * available -- an insecure origin, a refused permission. */
+.secret {
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-surface-subtle);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+  user-select: all;
+}

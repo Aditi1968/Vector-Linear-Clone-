@@ -1,0 +1,83 @@
+# Every GraphQL document the team screens send.
+#
+# Source file. `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`; edit here, never there. The conventions are
+# set out at length in `src/features/issues/api/operations.graphql`, notably:
+#
+#   **`first` is a literal, never a variable.** `app/graphql/limits.py`
+#   prices a list field at `page size x fields below it` during *validation*,
+#   and a variable has no value at validation time, so `first: $first` is
+#   charged at `ASSUMED_PAGE_SIZE = 100`. The `25` below must equal
+#   `DEFAULT_PAGE_SIZE` in `src/lib/graphql/pagination.ts`.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`.
+# Hence `TeamBoards` rather than `WorkspaceTeams` or `ProjectTeams`, both of
+# which are taken.
+
+# Every team in the workspace, each with its board.
+#
+# The URL addresses a team by its **key** -- the ENG in ENG-42 -- and no root
+# field takes one. `teams(workspaceSlug:)` is the whole lookup surface, so the
+# screen resolves key to id over this list. That is why the query is for every
+# team and not for one: there is no query for one.
+#
+# `IssueWorkspaceContext` in `features/issues/api` selects the same shape and
+# this could in principle read its result out of the cache. It does not, and
+# the reason is the not-found case: that hook reports no error, so a *failed*
+# teams request and a workspace where this key names nothing are the same
+# empty list to it -- and rendering "no such team" for a network failure is
+# the wrong answer to the wrong question. This query surfaces its own error.
+#
+# `teams` declares no page-size argument, so the complexity rule charges it
+# once however many teams come back.
+query TeamBoards($workspaceSlug: String!) {
+  teams(workspaceSlug: $workspaceSlug) {
+    id
+    key
+    name
+    createdAt
+    # `position` is the order the board is drawn in, and `category` is what
+    # the UI branches on -- the name belongs to the team and may say
+    # anything, the category is the fixed meaning behind it.
+    workflowStates {
+      id
+      name
+      category
+      color
+      position
+    }
+  }
+}
+
+# One team's issues.
+#
+# `issues(teamId:)` is a real server-side filter, unlike "assigned to me" and
+# "in this project", so this list is complete rather than matched in the
+# browser over a page of the workspace.
+#
+# `src/lib/graphql/cache.ts` keys the `issues` field on `workspaceSlug` and
+# `teamId`, so this list and the unfiltered one are separate cache entries and
+# a team's page two cannot merge into the workspace's.
+#
+# The row selection is `IssueRowFields`, the fragment `features/issues` owns.
+# Shared deliberately: these rows are drawn by that feature's `IssueRow`, so
+# selecting anything else would be selecting the wrong thing.
+#
+# Cost: 25 x (20 per node + 2 on pageInfo) = 550 of 1000.
+query TeamIssueList($workspaceSlug: String!, $teamId: UUID!, $after: String) {
+  issues(
+    workspaceSlug: $workspaceSlug
+    teamId: $teamId
+    # 25 is a LITERAL and must stay one -- see the note at the top.
+    first: 25
+    after: $after
+  ) {
+    nodes {
+      ...IssueRowFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}

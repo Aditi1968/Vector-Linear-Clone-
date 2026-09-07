@@ -1,0 +1,124 @@
+# Every GraphQL document the members screen sends.
+#
+# Source file. `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`; edit here, never there. The conventions are
+# set out at length in `src/features/issues/api/operations.graphql`.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`.
+# Hence `WorkspaceMemberList` rather than `WorkspaceMembers`.
+
+# Everyone in the workspace, and the role each holds.
+#
+# `workspaceMembers` is members-only, so this succeeds for anyone who can see
+# the screen at all. It declares no page-size argument, so the complexity
+# rule charges it once however many members come back.
+#
+# `WorkspaceMember` exposes `userId` and no `id`, so Apollo does not
+# normalise it: these objects are stored inline under this field. That is why
+# `memberRoleUpdate` returning a member does not update this list on its own,
+# and why the mutations in ./api.ts refetch it. Adding a `keyFields` policy
+# would fix the role case and not the removal case, so it is not worth the
+# entry in the shared cache configuration.
+query WorkspaceMemberList($workspaceSlug: String!) {
+  workspaceMembers(workspaceSlug: $workspaceSlug) {
+    userId
+    email
+    name
+    role
+    createdAt
+  }
+}
+
+# Invitations that have not been accepted or expired.
+#
+# **A separate document, and that is load-bearing.** `invitations` is admins
+# and owners only, and it returns `[WorkspaceInvitation!]!` -- non-null. A
+# member asking for it gets an error that propagates up through the non-null
+# to `data`, which would take `workspaceMembers` down with it if the two
+# shared an operation: an ordinary member would see no member list at all,
+# because of a panel they were never going to be shown.
+#
+# Split, the screen simply does not send this one for a member. The role is
+# still not an authorization decision -- the server refuses regardless of
+# what the client believes -- and ./MembersPage.tsx renders that refusal
+# rather than assuming it cannot happen.
+query WorkspaceInvitationList($workspaceSlug: String!) {
+  invitations(workspaceSlug: $workspaceSlug) {
+    id
+    email
+    role
+    expiresAt
+    createdAt
+  }
+}
+
+# Invite an email address.
+#
+# `token` is the raw invitation token and the server returns it **once and
+# never again** -- no query can read it back. If the screen does not put it
+# in front of the person who asked for it, the invitation is unusable. So it
+# is selected here and held in component state; see ./MembersPage.tsx.
+mutation MemberInvitationCreate($input: InvitationCreateInput!) {
+  invitationCreate(input: $input) {
+    invitation {
+      id
+      email
+      role
+      expiresAt
+      createdAt
+    }
+    token
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Withdraw an invitation. Admins and owners only, server-side.
+mutation MemberInvitationRevoke($input: InvitationRevokeInput!) {
+  invitationRevoke(input: $input) {
+    revokedInvitationId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Change someone's role. Admins and owners only, server-side.
+mutation MemberRoleUpdate($input: MemberRoleUpdateInput!) {
+  memberRoleUpdate(input: $input) {
+    member {
+      userId
+      email
+      name
+      role
+      createdAt
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Remove someone from the workspace.
+#
+# Admins and owners only, and the server also refuses to remove the last
+# owner -- a rule the client does not reimplement, because a rule enforced in
+# two places is a rule that will disagree with itself. The refusal arrives in
+# `errors` and the screen shows it.
+mutation MemberRemove($input: MemberRemoveInput!) {
+  memberRemove(input: $input) {
+    removedUserId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

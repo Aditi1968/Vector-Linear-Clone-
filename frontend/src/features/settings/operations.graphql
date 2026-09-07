@@ -1,0 +1,75 @@
+# Every GraphQL document the settings screen sends.
+#
+# Source file. `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`; edit here, never there.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`.
+# `features/onboarding` already owns `OnboardingIntegrations`, which selects a
+# narrower version of the same two fields for its setup step; this is the
+# settings screen's own, with the repositories and the connection metadata a
+# settings panel shows and a setup step does not.
+
+# The same three fields both providers report, spelled once each.
+#
+# `GithubIntegrationStatus` and `SlackIntegrationStatus` are separate enums in
+# the schema with identical members, so these stay two fragments rather than
+# one -- they are not the same type, they merely narrow to the same union in
+# TypeScript.
+fragment GithubIntegrationFields on GithubIntegration {
+  status
+  # The GitHub account or organisation the app is installed on. Null unless
+  # CONNECTED.
+  accountLogin
+  connectedAt
+  repositories {
+    repositoryId
+    fullName
+  }
+}
+
+fragment SlackIntegrationFields on SlackIntegration {
+  status
+  teamName
+  # What the workspace actually granted. Shown because a connection with
+  # fewer scopes than a later version of Vector needs is a real state, and
+  # "connected" alone would not distinguish it.
+  scopes
+}
+
+# Both integrations, in one round trip.
+#
+# Neither field declares a page-size argument, so the complexity rule charges
+# each of them once however many repositories or scopes come back.
+query WorkspaceIntegrations($workspaceSlug: String!) {
+  githubIntegration(workspaceSlug: $workspaceSlug) {
+    ...GithubIntegrationFields
+  }
+  slackIntegration(workspaceSlug: $workspaceSlug) {
+    ...SlackIntegrationFields
+  }
+}
+
+# Disconnect GitHub.
+#
+# Returns the integration itself rather than a payload with an `errors` list
+# -- the schema's choice, and worth noticing at the call site: there is no
+# validation channel here, so a refusal arrives as a top-level GraphQL error
+# and a rejected promise.
+#
+# `GithubIntegration` carries no id, so Apollo cannot normalise it and the
+# result does not write itself into the query field above. ./api.ts refetches.
+mutation WorkspaceGithubDisconnect($input: GithubDisconnectInput!) {
+  githubDisconnect(input: $input) {
+    ...GithubIntegrationFields
+  }
+}
+
+# Disconnect Slack. Wrapped in a payload where GitHub's is not; again the
+# schema's choice rather than a difference in meaning.
+mutation WorkspaceSlackDisconnect($input: SlackDisconnectInput!) {
+  slackDisconnect(input: $input) {
+    integration {
+      ...SlackIntegrationFields
+    }
+  }
+}

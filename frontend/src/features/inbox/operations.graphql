@@ -1,0 +1,111 @@
+# Every GraphQL document the inbox sends.
+#
+# Source file. `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`; edit here, never there. The conventions are
+# set out at length in `src/features/issues/api/operations.graphql` and are
+# not restated -- except the one that is easy to get wrong and expensive to
+# discover:
+#
+#   **`first` is a literal, never a variable.** `app/graphql/limits.py`
+#   prices a list field at `page size x fields below it` during *validation*,
+#   and a variable has no value at validation time, so `first: $first` is
+#   charged at `ASSUMED_PAGE_SIZE = 100` however small a page we meant to
+#   ask for. The failure is the whole document being refused, not a short
+#   page. The `25` below must equal `DEFAULT_PAGE_SIZE` in
+#   `src/lib/graphql/pagination.ts`.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`,
+# because codegen emits one module.
+
+fragment NotificationFields on Notification {
+  id
+  # `actorId` is a raw UUID and there is no `Notification.actor`. The screen
+  # resolves it through `workspaceMembers`, the same way an issue row resolves
+  # its assignee.
+  actorId
+  # Likewise a raw UUID with no `Notification.issue` beside it, so a row can
+  # link to the issue but cannot name it. See ./InboxPage.tsx.
+  issueId
+  kind
+  # The read marker, and the only one. Non-null means read; the timestamp
+  # itself is not displayed, because "read 4 minutes ago" is not a fact
+  # anybody needs.
+  readAt
+  createdAt
+}
+
+# One page of notifications, newest first.
+#
+# `unreadOnly` is a variable and not a literal, because it selects a
+# *different list* rather than a page size -- the complexity rule does not
+# read it, and `src/lib/graphql/cache.ts` keys the two lists apart on it.
+#
+# Cost: 25 x (5 + 2) = 175 of 1000.
+query NotificationInbox(
+  $workspaceSlug: String!
+  $unreadOnly: Boolean!
+  $after: String
+) {
+  notifications(
+    workspaceSlug: $workspaceSlug
+    unreadOnly: $unreadOnly
+    # 25 is a LITERAL and must stay one -- see the note at the top.
+    first: 25
+    after: $after
+  ) {
+    nodes {
+      ...NotificationFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# The badge on the rail's Inbox row, as its own document.
+#
+# `ShellSidebar` in `src/app/workspace/operations.graphql` already selects
+# `notificationUnreadCount(workspaceSlug:)`. A cache field is keyed by its
+# name and its arguments and not by the operation that fetched it, so this
+# document reads and writes *the same cache entry* the rail is watching --
+# which is what makes marking something read update the badge with no
+# refetch of the rail and no cross-feature import. See ./api.ts.
+query NotificationUnreadCount($workspaceSlug: String!) {
+  notificationUnreadCount(workspaceSlug: $workspaceSlug)
+}
+
+# Mark one notification read.
+#
+# The payload returns the notification itself, so Apollo normalises the new
+# `readAt` over `Notification:<uuid>` and every list holding that row updates
+# without a refetch. The unread *count* is a scalar with no entity to
+# normalise over, so it is adjusted in the cache by hand -- see ./api.ts.
+mutation NotificationMarkRead($input: NotificationMarkReadInput!) {
+  notificationMarkRead(input: $input) {
+    notification {
+      ...NotificationFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Mark everything read.
+#
+# Returns only a count, not the notifications, so nothing normalises and the
+# list on screen has to be re-read. `markedCount` is selected because it is
+# what the confirmation says.
+mutation NotificationMarkAllRead($input: NotificationMarkAllReadInput!) {
+  notificationMarkAllRead(input: $input) {
+    markedCount
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
