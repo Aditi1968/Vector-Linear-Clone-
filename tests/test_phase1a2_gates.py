@@ -85,6 +85,7 @@ EXPECTED_MIGRATIONS = [
     "019_saved_views.sql",
     "020_subscribers_templates.sql",
     "022_initiatives.sql",
+    "025_semantic_search.sql",
 ]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the
@@ -697,10 +698,25 @@ def test_the_integration_job_pins_postgres_18():
 
     The major version is part of what is under test, so the tag the
     workflow warms has to be the tag the fixture starts.
+
+    The tag is `pgvector/pgvector:pg18` rather than `postgres:18`, and that
+    is not a loosening of this gate -- it is the same exact pin over an
+    image that satisfies one more requirement. `pgvector/pgvector:pg18` is
+    the official `postgres:18` image with pgvector compiled in, so the major
+    version this test exists to hold is unchanged; what it adds is the
+    `vector` extension that migrations/025_semantic_search.sql creates and
+    that `apply_all_migrations` therefore needs in EVERY db suite. On stock
+    postgres:18 that extension is unavailable, 025 fails, and the whole db
+    suite fails with it.
+
+    Both halves are still asserted exactly: the fixture's tag is pinned to a
+    literal, and the workflow warms that same literal. A tag drifting to
+    `:latest`, to a different major version, or away from a pgvector build
+    still fails here.
     """
     from tests.conftest import POSTGRES_IMAGE
 
-    assert POSTGRES_IMAGE == "postgres:18"
+    assert POSTGRES_IMAGE == "pgvector/pgvector:pg18"
     assert f"docker pull {POSTGRES_IMAGE}" in _workflow_text()
 
 

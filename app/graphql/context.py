@@ -23,6 +23,7 @@ from app.http_cookies import read_session_token
 from app.repositories.activity import ActivityRepository
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
+from app.repositories.embeddings import EmbeddingRepository
 from app.repositories.github import GithubRepository
 from app.repositories.initiatives import InitiativeRepository
 from app.repositories.invitations import InvitationRepository
@@ -45,6 +46,7 @@ from app.services.activity import ActivityService
 from app.services.auth import AuthService
 from app.services.comments import CommentService
 from app.services.cycles import CycleService
+from app.services.embeddings import load_embedder
 from app.services.github import GithubAppConfig, GithubService
 from app.services.initiatives import InitiativeService
 from app.services.issues import IssueService
@@ -393,13 +395,26 @@ async def get_context() -> VectorContext:
         ),
         search_service=SearchService(
             pool=pool,
-            # Two repositories, because search reads two tables and the SQL
-            # for a table belongs to the repository that owns it. Fresh
+            # Three repositories, because search reads three tables and the
+            # SQL for a table belongs to the repository that owns it. Fresh
             # instances rather than shared ones: a repository here holds no
             # state and no connection -- it is a namespace for statements --
             # so there is nothing for one request to get two of.
             issue_repository=IssueRepository(),
             project_repository=ProjectRepository(),
+            embedding_repository=EmbeddingRepository(),
+            # What makes search hybrid rather than lexical, decided HERE and
+            # not per request inside the service. `load_embedder` never fails
+            # -- it falls back to a deterministic local embedder when no model
+            # library is installed -- so this wire is always live; a deployment
+            # that wants lexical-only search passes None here, which is the one
+            # place that decision belongs. See SearchService's docstring on why
+            # degradation is a wire and not a try/except.
+            #
+            # Process-wide, not per request: `load_embedder` is cached, so a
+            # real model is loaded from disk once rather than on every GraphQL
+            # call this function serves.
+            embedder=load_embedder(),
         ),
         github_service=GithubService(
             pool=pool,

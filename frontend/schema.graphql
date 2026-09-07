@@ -83,6 +83,11 @@ scalar Date
 """Date with time (isoformat)"""
 scalar DateTime
 
+type DuplicateSuggestion {
+  issue: Issue!
+  similarity: Float!
+}
+
 """
 One shortcut in one person's sidebar. Exactly one of `teamId`, `projectId` and `savedViewId` is set.
 """
@@ -884,6 +889,7 @@ type Mutation {
   issueTemplateUpdate(input: IssueTemplateUpdateInput!): IssueTemplateSavePayload!
   issueTemplateDelete(input: IssueTemplateDeleteInput!): IssueTemplateDeletePayload!
   issueCreateFromTemplate(input: IssueCreateFromTemplateInput!): IssueCreateFromTemplatePayload!
+  embeddingsRefresh(workspaceSlug: String!, limit: Int! = 100): Int!
 }
 
 type Notification {
@@ -1116,6 +1122,7 @@ type Query {
   initiative(workspaceSlug: String!, id: UUID!): Initiative
   initiatives(workspaceSlug: String!, first: Int! = 50, after: String = null): InitiativeConnection!
   search(workspaceSlug: String!, query: String!, first: Int! = 20): SearchResults!
+  issueDuplicateSuggestions(workspaceSlug: String!, title: String!, description: String = null, excludeIssueId: UUID = null, first: Int! = 5): [DuplicateSuggestion!]!
   githubIntegration(workspaceSlug: String!): GithubIntegration!
   slackIntegration(workspaceSlug: String!): SlackIntegration!
   slackChannels(workspaceSlug: String!): [SlackChannel!]!

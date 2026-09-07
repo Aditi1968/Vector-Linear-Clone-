@@ -1,14 +1,45 @@
+from uuid import UUID
+
 import strawberry
 from graphql import GraphQLError
 from strawberry.types import Info
 
 from app.domain.errors import ValidationError, WorkspaceAccessDeniedError
 from app.graphql.queries.memberships import WORKSPACE_NOT_FOUND_MESSAGE
-from app.graphql.types.search import SearchResultsType
+from app.graphql.scope import authorized_scope
+from app.graphql.types.search import DuplicateSuggestionType, SearchResultsType
 from app.graphql.viewer import viewer_user_id
 
 
 DEFAULT_FIRST = 20
+
+# A shorter default than `search`, deliberately. This list is shown beside a
+# form somebody is still filling in, so it competes with the thing they came to
+# do; five candidates is a glance and twenty is an interruption.
+DEFAULT_DUPLICATE_FIRST = 5
+
+
+def _invalid(exc: ValidationError, message: str) -> GraphQLError:
+    """The one masked-input error this module raises, built once.
+
+    BAD_USER_INPUT is in `app.graphql.schema.PUBLIC_ERROR_CODES`, so everything
+    in `extensions` reaches the client verbatim -- which is the reason it is
+    built from `ValidationIssue` fields and never from an exception's own text.
+    """
+    return GraphQLError(
+        message,
+        extensions={
+            "code": "BAD_USER_INPUT",
+            "issues": [
+                {
+                    "field": issue.field,
+                    "code": issue.code,
+                    "message": issue.message,
+                }
+                for issue in exc.issues
+            ],
+        },
+    )
 
 
 @strawberry.type
@@ -77,19 +108,64 @@ class SearchQuery:
                 first=first,
             )
         except ValidationError as exc:
-            raise GraphQLError(
-                "Invalid search arguments",
-                extensions={
-                    "code": "BAD_USER_INPUT",
-                    "issues": [
-                        {
-                            "field": issue.field,
-                            "code": issue.code,
-                            "message": issue.message,
-                        }
-                        for issue in exc.issues
-                    ],
-                },
-            ) from None
+            raise _invalid(exc, "Invalid search arguments") from None
 
         return SearchResultsType.from_domain(results, scope)
+
+    @strawberry.field
+    async def issue_duplicate_suggestions(
+        self,
+        info: Info,
+        workspace_slug: str,
+        title: str,
+        description: str | None = None,
+        exclude_issue_id: UUID | None = None,
+        first: int = DEFAULT_DUPLICATE_FIRST,
+    ) -> list[DuplicateSuggestionType]:
+        """Issues in this workspace that might already be the one being written.
+
+        Takes the TEXT and not an issue id, so one field serves both moments it
+        is wanted: while somebody is typing an issue that does not exist yet,
+        and while somebody is editing one that does. `excludeIssueId` is what
+        separates them -- passed when editing, so the issue is not offered as a
+        duplicate of itself.
+
+        Authorized before anything is read, through the same
+        `authorized_scope` every workspace-scoped field uses: the slug is a
+        public string that may select what is being asked about and never who
+        is asking, the viewer comes from the session cookie, and a slug the
+        viewer does not belong to never reaches the service. That scope becomes
+        a `workspace_id` equality inside every arm of the SQL -- not a filter
+        over a top-k, which for a nearest-neighbour read would be the whole
+        vulnerability; see `EmbeddingRepository` and migration 025.
+
+        `excludeIssueId` is NOT authorized separately, and does not need to be:
+        it only ever REMOVES a row from a list already scoped to this
+        workspace, so an id from another tenant excludes nothing and the answer
+        is identical to having passed none. There is no id here whose presence
+        or absence in the result could be observed.
+
+        Empty when this deployment has no embedder wired. That is the honest
+        answer rather than a lexical impostor -- see
+        `SearchService.suggest_duplicates` -- and it is deliberately not
+        distinguishable from "nothing similar was found": both are "no
+        suggestions", and a client that rendered them differently would be
+        rendering a fact about the server's configuration.
+        """
+        scope = await authorized_scope(info, workspace_slug)
+
+        try:
+            suggestions = await info.context.search_service.suggest_duplicates(
+                scope=scope,
+                title=title,
+                description=description,
+                exclude_issue_id=exclude_issue_id,
+                first=first,
+            )
+        except ValidationError as exc:
+            raise _invalid(exc, "Invalid duplicate suggestion arguments") from None
+
+        return [
+            DuplicateSuggestionType.from_domain(suggestion, scope)
+            for suggestion in suggestions
+        ]

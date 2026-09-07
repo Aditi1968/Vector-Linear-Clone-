@@ -20,6 +20,7 @@ from app.graphql.mutations.notifications import NotificationMutation
 from app.graphql.mutations.projects import ProjectMutation
 from app.graphql.mutations.relations import RelationMutation
 from app.graphql.mutations.saved_views import FavoriteMutation, SavedViewMutation
+from app.graphql.mutations.search import SearchMutation
 from app.graphql.mutations.slack import SlackMutation
 from app.graphql.mutations.subscribers import SubscriberMutation
 from app.graphql.mutations.templates import TemplateMutation
@@ -101,6 +102,7 @@ MUTATION_TYPES = (
     FavoriteMutation,
     SubscriberMutation,
     TemplateMutation,
+    SearchMutation,
 )
 
 Mutation = merge_types("Mutation", MUTATION_TYPES)
