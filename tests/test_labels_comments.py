@@ -693,7 +693,7 @@ class FakeIssuePageService:
     def __init__(self, entities):
         self._entities = entities
 
-    async def list(self, *, scope, team_id, first, after):
+    async def list(self, *, scope, first, after, **kwargs):
         return IssuePage(nodes=self._entities, has_next_page=False, end_cursor=None)
 
 

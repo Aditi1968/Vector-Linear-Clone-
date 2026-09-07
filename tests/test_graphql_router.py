@@ -64,7 +64,7 @@ class FakeIssueService:
     def __init__(self, page: IssuePage):
         self._page = page
 
-    async def list(self, *, scope, team_id, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None, **kwargs):
         return self._page
 
 

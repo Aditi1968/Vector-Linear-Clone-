@@ -91,7 +91,7 @@ class RecordingIssueService:
         self._page = page
         self.calls = 0
 
-    async def list(self, *, scope, team_id, first: int, after: str | None):
+    async def list(self, *, scope, first: int, after: str | None, **kwargs):
         self.calls += 1
 
         return self._page

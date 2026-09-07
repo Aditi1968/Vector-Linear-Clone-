@@ -394,24 +394,29 @@ class FakePool:
 class FakeIssueRepository:
     """Returns canned entities and records the arguments it was called with."""
 
-    def __init__(self, rows=None):
+    def __init__(self, rows=None, total=0):
         self.rows = rows if rows is not None else []
+        self.total = total
         self.list_calls: list[dict] = []
+        self.count_calls: list[dict] = []
 
-    async def list(
-        self, connection, *, scope, team_id, limit, after_created_at, after_id
-    ):
+    async def list(self, connection, *, scope, issue_filter, order, limit, after):
         self.list_calls.append(
             {
                 "scope": scope,
-                "team_id": team_id,
+                "issue_filter": issue_filter,
+                "order": order,
                 "limit": limit,
-                "after_created_at": after_created_at,
-                "after_id": after_id,
+                "after": after,
             }
         )
 
         return list(self.rows)
+
+    async def count(self, connection, *, scope, issue_filter):
+        self.count_calls.append({"scope": scope, "issue_filter": issue_filter})
+
+        return self.total
 
 
 class AnonymousAuthService:

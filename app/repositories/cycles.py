@@ -62,6 +62,7 @@ class CycleRepository:
             VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING
                 id,
+                team_id,
                 number,
                 name,
                 starts_at,
@@ -98,6 +99,7 @@ class CycleRepository:
             """
             SELECT
                 id,
+                team_id,
                 number,
                 name,
                 starts_at,
@@ -139,6 +141,7 @@ class CycleRepository:
             """
             SELECT
                 id,
+                team_id,
                 number,
                 name,
                 starts_at,
@@ -180,6 +183,7 @@ class CycleRepository:
             """
             SELECT
                 id,
+                team_id,
                 number,
                 name,
                 starts_at,
@@ -234,6 +238,7 @@ class CycleRepository:
             WHERE workspace_id = $1 AND id = $2
             RETURNING
                 id,
+                team_id,
                 number,
                 name,
                 starts_at,
@@ -289,6 +294,7 @@ class CycleRepository:
     def _to_entity(row: asyncpg.Record) -> CycleEntity:
         return CycleEntity(
             id=row["id"],
+            team_id=row["team_id"],
             number=row["number"],
             name=row["name"],
             starts_at=row["starts_at"],

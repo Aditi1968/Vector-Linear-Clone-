@@ -12,14 +12,28 @@ from app.graphql.types.issue import IssueType
 class CycleType:
     """One team's iteration, as a client sees it.
 
-    Carries no team and no workspace, mirroring `Issue`. Every route to a
-    cycle already names its team -- `cycles(teamId:)` was asked for one, and
-    `Issue.cycle` reaches it through an issue that has one -- so a team field
-    here would be a second copy of a fact the client already holds, and the
-    copy that gets trusted when the two disagree.
+    Carries no workspace, mirroring `Issue`: publishing a tenant identifier
+    invites accepting one back as an argument, which is exactly what CLAUDE.md
+    forbids.
+
+    It does carry `teamId`, and used not to. The old argument was that every
+    route to a cycle already names its team, so the field would be a second
+    copy of a fact the client holds -- the copy that gets trusted when the two
+    disagree. That was true of `cycles(teamId:)` and false of everything
+    else: a client reaching a cycle through `Issue.cycle`, or landing on a
+    cycle route by id alone, holds no team, and it needs one to scope an issue
+    list to that cycle's team. Without this field a cycle screen could only
+    ask the whole workspace and match client-side.
     """
 
     id: UUID
+    team_id: UUID = strawberry.field(
+        description=(
+            "The team this cycle belongs to. Fixed for the cycle's life -- a "
+            "cycle cannot be moved between teams -- so a route or a cache may "
+            "be keyed on it."
+        )
+    )
     number: int
     name: str | None
     starts_at: datetime
@@ -31,6 +45,7 @@ class CycleType:
     def from_entity(cls, entity: CycleEntity) -> "CycleType":
         return cls(
             id=entity.id,
+            team_id=entity.team_id,
             number=entity.number,
             name=entity.name,
             starts_at=entity.starts_at,

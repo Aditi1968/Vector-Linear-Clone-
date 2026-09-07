@@ -5,7 +5,18 @@ from uuid import UUID
 import pytest
 
 from app.domain.errors import ValidationError
-from app.domain.pagination import decode_issue_cursor, encode_issue_cursor
+from app.domain.issues import (
+    NO_FILTER,
+    IssueFilter,
+    IssueOrder,
+    IssueOrderField,
+    OrderDirection,
+)
+from app.domain.pagination import (
+    IssueListCursor,
+    decode_issue_list_cursor,
+    encode_issue_list_cursor,
+)
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.teams import TeamRepository
 from app.services.issues import IssueService
@@ -81,15 +92,15 @@ async def test_first_page_without_extra_row():
 
     assert repository.list_calls[0] == {
         "scope": TEST_SCOPE,
-        "team_id": None,
+        "issue_filter": NO_FILTER,
+        "order": IssueOrder(),
         "limit": 3,
-        "after_created_at": None,
-        "after_id": None,
+        "after": None,
     }
 
-    decoded = decode_issue_cursor(page.end_cursor)
+    decoded = decode_issue_list_cursor(page.end_cursor)
     assert decoded.id == rows[1].id
-    assert decoded.created_at == rows[1].created_at
+    assert decoded.key == rows[1].created_at
 
 
 async def test_extra_row_sets_has_next_page_and_is_trimmed():
@@ -109,9 +120,9 @@ async def test_extra_row_sets_has_next_page_and_is_trimmed():
     assert rows[2].id not in returned_ids
 
     # endCursor comes from the SECOND row, not the discarded third.
-    decoded = decode_issue_cursor(page.end_cursor)
+    decoded = decode_issue_list_cursor(page.end_cursor)
     assert decoded.id == rows[1].id
-    assert decoded.created_at == rows[1].created_at
+    assert decoded.key == rows[1].created_at
     assert decoded.id != rows[2].id
 
 
@@ -127,7 +138,7 @@ async def test_empty_result():
 
 async def test_after_cursor_is_decoded_and_passed_to_repository():
     entity = make_entity(5)
-    cursor = encode_issue_cursor(entity.created_at, entity.id)
+    cursor = encode_issue_list_cursor(IssueOrder(), entity.created_at, entity.id)
 
     service, _, repository = build_service(rows=[make_entity(1)])
 
@@ -135,10 +146,14 @@ async def test_after_cursor_is_decoded_and_passed_to_repository():
 
     assert repository.list_calls[0] == {
         "scope": TEST_SCOPE,
-        "team_id": None,
+        "issue_filter": NO_FILTER,
+        "order": IssueOrder(),
         "limit": 11,
-        "after_created_at": entity.created_at,
-        "after_id": entity.id,
+        "after": IssueListCursor(
+            order=IssueOrder(),
+            key=entity.created_at,
+            id=entity.id,
+        ),
     }
 
 
@@ -199,3 +214,184 @@ async def test_first_and_cursor_errors_are_collected_together():
 
     assert fields == ["first", "after"]
     assert pool.acquire_count == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        (IssueOrderField.CREATED_AT, "created_at"),
+        (IssueOrderField.UPDATED_AT, "updated_at"),
+        (IssueOrderField.DUE_DATE, "due_date"),
+    ],
+)
+async def test_the_end_cursor_carries_the_key_the_ordering_sorted_by(field, expected):
+    """The cursor's key is read off the column that produced the order.
+
+    Minting `created_at` while ordering by `updated_at` is the bug this
+    guards: the walk resumes at a position in a sequence it never generated,
+    so the second page starts somewhere arbitrary. Nothing fails; the rows
+    are simply wrong.
+    """
+    rows = [make_entity(2), make_entity(1)]
+    service, _, _ = build_service(rows)
+    order = IssueOrder(field=field, direction=OrderDirection.DESC)
+
+    page = await service.list(scope=TEST_SCOPE, first=2, after=None, order=order)
+
+    decoded = decode_issue_list_cursor(page.end_cursor)
+
+    assert decoded.order == order
+    assert decoded.id == rows[1].id
+    assert decoded.key == getattr(rows[1], expected)
+
+
+async def test_an_untriaged_issue_mints_a_null_priority_key():
+    """Priority 0 is "no priority", so it has no key in the urgency order.
+
+    The repository sorts by `NULLIF(priority, 0)`, so the cursor has to carry
+    the same null the column expression produces -- a cursor holding 0 would
+    resume against a value the ordering never contains.
+    """
+    rows = [make_entity(1, priority=0)]
+    service, _, _ = build_service(rows)
+
+    page = await service.list(
+        scope=TEST_SCOPE,
+        first=1,
+        after=None,
+        order=IssueOrder(field=IssueOrderField.PRIORITY),
+    )
+
+    assert decode_issue_list_cursor(page.end_cursor).key is None
+
+
+async def test_a_cursor_from_another_ordering_is_refused():
+    """Resuming a keyset walk in a different sort returns the wrong rows.
+
+    It does not error and it does not return nothing: the resume predicate
+    compares a stored key against a different column, and what comes back is
+    a plausible page made of rows the client has already seen or rows it
+    never will. So the cursor carries its ordering and the mismatch is an
+    input error, raised before a connection is taken.
+    """
+    entity = make_entity(5)
+    cursor = encode_issue_list_cursor(IssueOrder(), entity.created_at, entity.id)
+
+    pool = ExplodingPool()
+    repository = FakeIssueRepository()
+    service = IssueService(
+        pool=pool,
+        repository=repository,
+        teams=TeamService(pool=pool, repository=TeamRepository()),
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        await service.list(
+            scope=TEST_SCOPE,
+            first=10,
+            after=cursor,
+            order=IssueOrder(field=IssueOrderField.PRIORITY),
+        )
+
+    issues = exc_info.value.issues
+
+    assert [issue.code for issue in issues] == ["ORDER_MISMATCH"]
+    assert issues[0].field == "after"
+
+    assert pool.acquire_count == 0
+    assert repository.list_calls == []
+
+
+async def test_the_same_cursor_under_the_same_ordering_is_accepted():
+    """The mismatch check must not refuse a walk that never changed sort."""
+    entity = make_entity(5)
+    order = IssueOrder(field=IssueOrderField.DUE_DATE, direction=OrderDirection.ASC)
+    cursor = encode_issue_list_cursor(order, entity.due_date, entity.id)
+
+    service, _, repository = build_service(rows=[])
+
+    await service.list(scope=TEST_SCOPE, first=10, after=cursor, order=order)
+
+    assert repository.list_calls[0]["after"].id == entity.id
+    assert repository.list_calls[0]["order"] == order
+
+
+@pytest.mark.parametrize("priority", [-1, 5, 100])
+async def test_an_impossible_priority_filter_is_refused_before_the_pool(priority):
+    """No row can hold a priority outside 0..4, so this is not a lookup.
+
+    `issues_priority_range` guarantees it, which makes the request one no
+    state of the database could satisfy rather than one that happens to
+    match nothing -- and the codes are the ones create and update already
+    publish for the same field.
+    """
+    pool = ExplodingPool()
+    repository = FakeIssueRepository()
+    service = IssueService(
+        pool=pool,
+        repository=repository,
+        teams=TeamService(pool=pool, repository=TeamRepository()),
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        await service.list(
+            scope=TEST_SCOPE,
+            first=10,
+            after=None,
+            issue_filter=IssueFilter(priority=priority),
+        )
+
+    assert [issue.field for issue in exc_info.value.issues] == ["priority"]
+    assert pool.acquire_count == 0
+    assert repository.list_calls == []
+
+
+async def test_an_id_filter_naming_nothing_is_an_empty_page_and_not_an_error():
+    """A project from another workspace must answer as one that never existed.
+
+    Validating it here would mean the service could tell a caller that
+    someone else's project is real, which is the distinction CLAUDE.md
+    requires stay invisible.
+    """
+    service, _, repository = build_service(rows=[])
+
+    page = await service.list(
+        scope=TEST_SCOPE,
+        first=10,
+        after=None,
+        issue_filter=IssueFilter(
+            project_id=UUID("00000000-0000-7000-8000-00000000dead")
+        ),
+    )
+
+    assert page.nodes == []
+    assert len(repository.list_calls) == 1
+
+
+async def test_count_forwards_the_filter_and_validates_it():
+    service, pool, repository = build_service(rows=[])
+    repository.total = 42
+
+    issue_filter = IssueFilter(assignee_id=None)
+
+    assert await service.count(scope=TEST_SCOPE, issue_filter=issue_filter) == 42
+    assert repository.count_calls == [
+        {"scope": TEST_SCOPE, "issue_filter": issue_filter}
+    ]
+    assert pool.acquire_count == 1
+
+
+async def test_count_refuses_the_same_impossible_filter_the_list_does():
+    pool = ExplodingPool()
+    repository = FakeIssueRepository()
+    service = IssueService(
+        pool=pool,
+        repository=repository,
+        teams=TeamService(pool=pool, repository=TeamRepository()),
+    )
+
+    with pytest.raises(ValidationError):
+        await service.count(scope=TEST_SCOPE, issue_filter=IssueFilter(priority=9))
+
+    assert pool.acquire_count == 0
+    assert repository.count_calls == []

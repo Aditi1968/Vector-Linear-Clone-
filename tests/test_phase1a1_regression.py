@@ -106,7 +106,9 @@ class RecordingIssueService:
     def __init__(self):
         self.firsts: list[int] = []
 
-    async def list(self, *, scope, team_id, first: int, after: str | None) -> IssuePage:
+    async def list(
+        self, *, scope, first: int, after: str | None, **kwargs
+    ) -> IssuePage:
         self.firsts.append(first)
 
         return IssuePage(nodes=[make_entity(1)], has_next_page=False, end_cursor=None)
@@ -245,7 +247,7 @@ async def test_an_internal_failure_is_masked_over_the_real_http_stack(
     marker = "asyncpg_dsn_leak_marker_4a91c7"
 
     class Exploding:
-        async def list(self, *, scope, team_id, first, after):
+        async def list(self, *, scope, first, after, **kwargs):
             raise RuntimeError(marker)
 
     use_environment(

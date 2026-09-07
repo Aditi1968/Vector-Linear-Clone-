@@ -2,11 +2,17 @@ import base64
 import binascii
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from app.domain.comments import CommentEntity
-from app.domain.issues import IssueEntity
+from app.domain.issues import (
+    IssueEntity,
+    IssueOrder,
+    IssueOrderField,
+    OrderDirection,
+    OrderKey,
+)
 from app.domain.labels import LabelEntity
 
 
@@ -24,6 +30,26 @@ class InvalidCursorError(Exception):
 @dataclass(frozen=True, slots=True)
 class IssueCursor:
     created_at: datetime
+    id: UUID
+
+
+@dataclass(frozen=True, slots=True)
+class IssueListCursor:
+    """A position in one ordering of the issue list.
+
+    `key` is whatever that ordering sorts by -- a timestamp, a date, a small
+    integer -- and None where the row has no key at all: an issue with no due
+    date, or one nobody has given a priority. That is a position like any
+    other, not a missing value, and the keyset predicate has a branch for it.
+
+    `order` is carried so a cursor cannot be replayed under a different sort.
+    IssueCursor above cannot express any of this and stays as it is: three
+    other lists page by `(created_at, id)` and none of them sorts by anything
+    else.
+    """
+
+    order: IssueOrder
+    key: OrderKey
     id: UUID
 
 
@@ -63,7 +89,7 @@ class CommentPage:
     end_cursor: str | None
 
 
-def _encode_payload(payload: dict[str, str]) -> str:
+def _encode_payload(payload: dict[str, str | None]) -> str:
     """Render a cursor payload as an opaque URL-safe Base64 string.
 
     Shared by every codec below so that all cursors are one wire format. The
@@ -155,6 +181,130 @@ def decode_issue_cursor(cursor: str) -> IssueCursor:
         raise InvalidCursorError()
 
     return IssueCursor(created_at=created_at, id=issue_id)
+
+
+def _optional_string_field(payload: dict, key: str) -> str | None:
+    """One string out of a decoded payload, where JSON null is a real value.
+
+    Separate from `_string_field` rather than a flag on it: a null `k` means
+    the row this cursor names sorts with no key at all -- no due date, no
+    priority -- which is a position in the ordering and not a missing field.
+    A key that is absent entirely is still invalid.
+    """
+    if key not in payload:
+        raise InvalidCursorError()
+
+    value = payload[key]
+
+    if value is not None and not isinstance(value, str):
+        raise InvalidCursorError()
+
+    return value
+
+
+def _order_key_text(key: OrderKey) -> str | None:
+    """A sort key as text, in the one spelling `_parse_order_key` reads back.
+
+    `datetime` before `date`, because a datetime IS a date and the wrong
+    branch would truncate a timestamp to its day -- which resumes a walk at
+    midnight and hands back a page the client has already seen.
+    """
+    if key is None:
+        return None
+
+    if isinstance(key, datetime | date):
+        return key.isoformat()
+
+    return str(key)
+
+
+def _parse_order_key(field: IssueOrderField, text: str | None) -> OrderKey:
+    """Text back into the type the column compares as, or InvalidCursorError.
+
+    The type comes from the FIELD the cursor names, never from the shape of
+    the text, so a cursor cannot smuggle a datetime into a comparison against
+    `priority` and make the server raise from the driver.
+    """
+    if text is None:
+        return None
+
+    try:
+        if field is IssueOrderField.PRIORITY:
+            return int(text)
+
+        if field is IssueOrderField.DUE_DATE:
+            return date.fromisoformat(text)
+
+        parsed = datetime.fromisoformat(text)
+    except (TypeError, ValueError):
+        raise InvalidCursorError() from None
+
+    if parsed.tzinfo is None:
+        # A naive instant compares against TIMESTAMPTZ under the server's
+        # timezone, so accepting one would make the resume point depend on
+        # the connection rather than on the row it was minted from.
+        raise InvalidCursorError()
+
+    return parsed
+
+
+def encode_issue_list_cursor(order: IssueOrder, key: OrderKey, issue_id: UUID) -> str:
+    """A position in ONE ordering of the issue list.
+
+    Three things rather than two, and the third is the whole reason this
+    codec exists beside the generic one above. A keyset cursor is a row's
+    coordinates in a particular sort; replay it under a different sort and
+    the resume predicate compares the wrong column against the wrong value,
+    which does not fail -- it returns a page, made of rows the client has
+    already seen or rows it never will. Carrying the ordering lets
+    `IssueService.list` refuse that instead of serving it.
+
+    Signed by nothing, and it does not need to be: everything inside is
+    either a value the client could read off the page it already has, or the
+    ordering it just asked for. The workspace is deliberately NOT in here --
+    it comes from the request's authorization, so a cursor minted in one
+    workspace and replayed against another selects nothing.
+    """
+    return _encode_payload(
+        {
+            "o": order.token,
+            "k": _order_key_text(key),
+            "id": str(issue_id),
+        }
+    )
+
+
+def decode_issue_list_cursor(cursor: str) -> IssueListCursor:
+    """Decode an ordered issue cursor, or raise InvalidCursorError.
+
+    The ordering is validated against the enums here rather than compared to
+    the request's: what this raises for is a cursor that names an ordering
+    that does not exist, which is malformed input. A cursor that names a real
+    ordering the caller is not currently asking for is a different mistake
+    with a different answer, and `IssueService` gives it.
+    """
+    payload = _decode_payload(cursor)
+
+    raw_order = _string_field(payload, "o")
+    raw_id = _string_field(payload, "id")
+    raw_key = _optional_string_field(payload, "k")
+
+    field_value, _, direction_value = raw_order.partition(":")
+
+    try:
+        order = IssueOrder(
+            field=IssueOrderField(field_value),
+            direction=OrderDirection(direction_value),
+        )
+        issue_id = UUID(raw_id)
+    except (AttributeError, TypeError, ValueError):
+        raise InvalidCursorError() from None
+
+    return IssueListCursor(
+        order=order,
+        key=_parse_order_key(order.field, raw_key),
+        id=issue_id,
+    )
 
 
 def encode_label_cursor(name: str, label_id: UUID) -> str:

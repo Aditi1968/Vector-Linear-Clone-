@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date
 from uuid import UUID
 
 import asyncpg
@@ -8,9 +8,14 @@ from app.domain.issues import (
     TERMINAL_STATE_CATEGORIES,
     UNSET,
     IssueEntity,
+    IssueFilter,
+    IssueOrder,
+    IssueOrderField,
     IssuePatch,
+    OrderDirection,
     Unset,
 )
+from app.domain.pagination import IssueListCursor
 from app.domain.tenancy import WorkspaceScope
 
 
@@ -74,6 +79,224 @@ ISSUE_COLUMNS = """
                 issues.created_at,
                 issues.updated_at
 """
+
+
+# The sort key each ordering compares by, as SQL.
+#
+# `NULLIF(issues.priority, 0)` and not `issues.priority`: 0 is "no priority",
+# not "the lowest one" -- 1 is Urgent and 4 is Low -- so the raw column sorts
+# untriaged issues either above Urgent or below Low, and a person who asked
+# for "by priority" wanted neither. Nulling it out puts 1..4 in urgency order
+# ascending and leaves the untriaged at the end, which is the same place the
+# undated issues sit under DUE_DATE. `app.domain.issues.order_key` computes
+# the matching value for the cursor and must keep agreeing with this.
+_ORDER_KEYS: dict[IssueOrderField, str] = {
+    IssueOrderField.PRIORITY: "NULLIF(issues.priority, 0)",
+    IssueOrderField.CREATED_AT: "issues.created_at",
+    IssueOrderField.UPDATED_AT: "issues.updated_at",
+    IssueOrderField.DUE_DATE: "issues.due_date",
+}
+
+# The keys that can be NULL for a row, which is what decides whether the
+# keyset comparison needs its null branches at all. `created_at` and
+# `updated_at` are NOT NULL columns, so a cursor over them never carries a
+# null key and the simple row-value comparison is total by itself.
+_NULLABLE_ORDER_KEYS = frozenset(
+    {IssueOrderField.PRIORITY, IssueOrderField.DUE_DATE},
+)
+
+
+class _Predicates:
+    """Optional WHERE clauses and the positional parameters they read.
+
+    Hand-built, and CLAUDE.md's SQLAlchemy Core exception is declined
+    deliberately. What a compiler would buy here is this class: a list of
+    predicate strings and a list of values whose index is the parameter
+    number. What it would cost is a dependency with an expression language of
+    its own, which every reader of `list` below would then have to know in
+    order to answer the only question that matters about this file -- whether
+    the tenant predicate is ANDed onto every statement. Nothing here needs
+    dialect portability, composable subqueries, or joins it cannot spell.
+
+    Values NEVER reach the SQL. `bind` appends a value and hands back the
+    `$n` that reads it, so a filter value can only ever arrive as a
+    parameter; the clause templates are module-local literals no input
+    reaches.
+
+    Constructed with the workspace as the first value, so `$1` is the
+    authorized workspace in every clause below -- including the subqueries,
+    which scope themselves to it rather than to a tenant read off a row.
+    """
+
+    def __init__(self, workspace_id: UUID) -> None:
+        self._values: list[object] = [workspace_id]
+        self._clauses: list[str] = []
+
+    def bind(self, value: object) -> str:
+        self._values.append(value)
+
+        return f"${len(self._values)}"
+
+    def add(self, clause: str) -> None:
+        self._clauses.append(clause)
+
+    @property
+    def sql(self) -> str:
+        return "".join(f"\n                    AND {c}" for c in self._clauses)
+
+    @property
+    def values(self) -> list[object]:
+        return self._values
+
+
+def _add_filters(predicates: _Predicates, issue_filter: IssueFilter) -> None:
+    """Turn a filter into predicates, one per field the caller named.
+
+    Every one of these NARROWS. They are ANDed onto `issues.workspace_id =
+    $1`, never substituted for it, so an id from another workspace -- a
+    project, a cycle, a team, a label, an assignee -- intersects with nothing
+    instead of selecting that workspace's rows. The two that reach other
+    tables carry `$1` themselves for the same reason.
+
+    Only the clauses the caller actually asked for are emitted, which is a
+    reversal of what `list` used to do with `team_id` (one statement, a bound
+    NULL, and `($n IS NULL OR ...)`). With eight optional filters that trick
+    stops being one statement and starts being a WHERE clause the planner
+    cannot see through: every filter would be opaque until execution, so a
+    highly selective one would be costed as if it matched everything. The
+    price is that the statement text varies with the filter COMBINATION, so
+    asyncpg caches one prepared statement per combination in use. That is
+    bounded by the screens the product has, and it is the right way round:
+    the plan follows the query.
+    """
+    if issue_filter.team_id is not UNSET:
+        predicates.add(f"issues.team_id = {predicates.bind(issue_filter.team_id)}")
+
+    if issue_filter.assignee_id is not UNSET:
+        predicates.add(
+            _maybe_null("issues.assignee_id", issue_filter.assignee_id, predicates)
+        )
+
+    if issue_filter.workflow_state_id is not UNSET:
+        predicates.add(
+            f"issues.workflow_state_id = {predicates.bind(issue_filter.workflow_state_id)}"
+        )
+
+    if issue_filter.state_category is not UNSET:
+        # A category is a property of the workflow state, not of the issue, so
+        # this is the one filter that has to leave the table. The subquery is
+        # scoped to $1: a state from another tenant resolves to no ids rather
+        # than to rows this workspace cannot see. `workflow_states` holds a
+        # handful of rows per team, so the planner hashes it and probes.
+        predicates.add(
+            f"""issues.workflow_state_id IN (
+                        SELECT workflow_states.id
+                        FROM workflow_states
+                        WHERE workflow_states.workspace_id = $1
+                            AND workflow_states.type = """
+            f"""{predicates.bind(issue_filter.state_category.value)}
+                    )"""
+        )
+
+    if issue_filter.label_id is not UNSET:
+        # EXISTS rather than a join, so an issue wearing the label twice --
+        # which `issue_labels_pkey` forbids, but which a join would have to be
+        # trusted about -- cannot duplicate a row and corrupt the page count.
+        predicates.add(
+            f"""EXISTS (
+                        SELECT 1
+                        FROM issue_labels
+                        WHERE issue_labels.workspace_id = $1
+                            AND issue_labels.issue_id = issues.id
+                            AND issue_labels.label_id = """
+            f"""{predicates.bind(issue_filter.label_id)}
+                    )"""
+        )
+
+    if issue_filter.priority is not UNSET:
+        predicates.add(f"issues.priority = {predicates.bind(issue_filter.priority)}")
+
+    if issue_filter.project_id is not UNSET:
+        predicates.add(
+            _maybe_null("issues.project_id", issue_filter.project_id, predicates)
+        )
+
+    if issue_filter.cycle_id is not UNSET:
+        predicates.add(
+            _maybe_null("issues.cycle_id", issue_filter.cycle_id, predicates)
+        )
+
+
+def _maybe_null(column: str, value: UUID | None, predicates: _Predicates) -> str:
+    """`column = $n`, or `column IS NULL` where the caller asked for nothing.
+
+    `= NULL` is never true in SQL, so a filter that bound None would return
+    an empty page instead of the unassigned issues -- silently, which is why
+    this is a branch and not a bound parameter.
+    """
+    if value is None:
+        return f"{column} IS NULL"
+
+    return f"{column} = {predicates.bind(value)}"
+
+
+def _add_keyset(
+    predicates: _Predicates,
+    *,
+    order: IssueOrder,
+    cursor: IssueListCursor,
+) -> None:
+    """Resume the walk after one row, in the ordering that row was read under.
+
+    The ordering is `(key, id)` and `id` is unique, so it is total: no two
+    rows compare equal, which is the property that makes a keyset walk neither
+    skip nor repeat. Everything below is about the one thing a row-value
+    comparison cannot express, which is where the NULL keys sit.
+
+    PostgreSQL's defaults are used rather than an explicit NULLS clause, and
+    that is a deliberate index decision: `ASC` is NULLS LAST and `DESC` is
+    NULLS FIRST, so one index in ascending order serves both directions --
+    forwards for one, backwards for the other. Spelling `DESC NULLS LAST`
+    instead would read slightly better on screen and would need a second
+    index to serve at all.
+
+    So, with the direction fixing where the nulls are:
+
+    * ASC, key present -- every null row is still ahead of us, plus the
+      non-null rows past the cursor.
+    * ASC, key null -- we are already among the nulls; only the nulls with a
+      greater id remain.
+    * DESC, key present -- the nulls are behind us, and the row comparison
+      already excludes them: `(NULL, id) < (k, i)` is NULL, not true.
+    * DESC, key null -- the rest of the nulls, and then everything non-null.
+    """
+    key_sql = _ORDER_KEYS[order.field]
+    descending = order.direction is OrderDirection.DESC
+    operator = "<" if descending else ">"
+
+    if cursor.key is None:
+        id_param = predicates.bind(cursor.id)
+
+        if descending:
+            predicates.add(
+                f"({key_sql} IS NOT NULL"
+                f" OR ({key_sql} IS NULL AND issues.id {operator} {id_param}))"
+            )
+        else:
+            predicates.add(f"({key_sql} IS NULL AND issues.id {operator} {id_param})")
+
+        return
+
+    key_param = predicates.bind(cursor.key)
+    id_param = predicates.bind(cursor.id)
+    row_value = f"({key_sql}, issues.id) {operator} ({key_param}, {id_param})"
+
+    if not descending and order.field in _NULLABLE_ORDER_KEYS:
+        predicates.add(f"({key_sql} IS NULL OR {row_value})")
+
+        return
+
+    predicates.add(row_value)
 
 
 class IssueRepository:
@@ -604,80 +827,102 @@ class IssueRepository:
         connection: asyncpg.Connection,
         *,
         scope: WorkspaceScope,
-        team_id: UUID | None,
+        issue_filter: IssueFilter,
+        order: IssueOrder,
         limit: int,
-        after_created_at: datetime | None,
-        after_id: UUID | None,
+        after: IssueListCursor | None,
     ) -> list[IssueEntity]:
-        """Keyset page of one workspace's live issues, newest first.
+        """Keyset page of one workspace's live issues, in one ordering.
 
         `limit` is expected to already be `first + 1` so the caller can
-        detect a following page. No OFFSET: the cursor is a row-value
-        comparison, and `workspace_id` leads both statements so a page is
-        served by the leading columns of
-        issues_workspace_live_created_at_id_idx.
+        detect a following page. No OFFSET at any page size: the cursor is a
+        row-value comparison, so the cost of page N is the cost of page 1.
 
-        The tenant predicate is ANDed with the cursor rather than folded
-        into it. Widening the row-value comparison to
+        The tenant predicate leads and is ANDed with everything else rather
+        than folded into any of it. Widening the row-value comparison to
         `(workspace_id, created_at, id) < (...)` would put workspaces into
         the ordering, which is how a page walk falls out of one tenant and
-        into whichever one sorts next; the workspace is an equality and only
-        `(created_at, id)` is the keyset.
+        into whichever one sorts next; the workspace is an equality, the
+        filters are equalities, and only `(key, id)` is the keyset.
 
-        `archived_at IS NULL` is ANDed on for exactly the same reason and
-        with the same care -- it is another equality-shaped filter, not part
-        of the ordering key. Migration 006 adds a partial index carrying
-        that predicate, so archived rows are absent from the index this walk
-        reads rather than fetched and discarded; without it the cost of a
-        page would grow with every issue the workspace had ever created
-        instead of with the ones still on its board.
+        `archived_at IS NULL` is ANDed on for the same reason and with the
+        same care -- it is another equality-shaped filter, not part of the
+        ordering key. Migration 006 adds a partial index carrying that
+        predicate, so archived rows are absent from the index this walk reads
+        rather than fetched and discarded; without it the cost of a page
+        would grow with every issue the workspace had ever created instead of
+        with the ones still on its board. Migration 015 keeps every ordering
+        index partial on it for the same reason.
 
-        `team_id` is an optional NARROWING and never a widening. It is ANDed
-        on alongside the workspace, in that order, so a team id belonging to
-        another workspace intersects with nothing rather than selecting that
-        workspace's rows -- the client-supplied id can only ever remove rows
-        the tenant predicate already admitted. It is bound as one parameter
-        with a NULL-means-all test rather than by building two statements,
-        because a filter that is absent must not change the plan the keyset
-        walk uses.
+        Every filter is a NARROWING and none is ever a widening -- see
+        `_add_filters`, which is where a client-supplied id from another
+        workspace becomes an empty page rather than a leak.
         """
-        if after_created_at is None or after_id is None:
-            rows = await connection.fetch(
-                f"""
+        predicates = _Predicates(scope.workspace_id)
+        _add_filters(predicates, issue_filter)
+
+        if after is not None:
+            _add_keyset(predicates, order=order, cursor=after)
+
+        direction = "DESC" if order.direction is OrderDirection.DESC else "ASC"
+        key_sql = _ORDER_KEYS[order.field]
+        limit_param = predicates.bind(limit)
+
+        rows = await connection.fetch(
+            f"""
                 SELECT
 {ISSUE_COLUMNS}
                 FROM issues
-                WHERE workspace_id = $1
-                    AND ($2::UUID IS NULL OR team_id = $2)
-                    AND archived_at IS NULL
-                ORDER BY created_at DESC, id DESC
-                LIMIT $3
-                """,
-                scope.workspace_id,
-                team_id,
-                limit,
-            )
-        else:
-            rows = await connection.fetch(
-                f"""
-                SELECT
-{ISSUE_COLUMNS}
-                FROM issues
-                WHERE workspace_id = $1
-                    AND ($2::UUID IS NULL OR team_id = $2)
-                    AND (created_at, id) < ($3, $4)
-                    AND archived_at IS NULL
-                ORDER BY created_at DESC, id DESC
-                LIMIT $5
-                """,
-                scope.workspace_id,
-                team_id,
-                after_created_at,
-                after_id,
-                limit,
-            )
+                WHERE issues.workspace_id = $1
+                    AND issues.archived_at IS NULL{predicates.sql}
+                ORDER BY {key_sql} {direction}, issues.id {direction}
+                LIMIT {limit_param}
+            """,
+            *predicates.values,
+        )
 
         return [self._to_entity(row) for row in rows]
+
+    async def count(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        issue_filter: IssueFilter,
+    ) -> int:
+        """How many live issues in this workspace match, ignoring paging.
+
+        The same WHERE clause as `list` minus the keyset, built by the same
+        code so the two cannot disagree about what a filter means. No ORDER
+        BY and no LIMIT: an aggregate over a set has no position in it.
+
+        This is a SECOND aggregate over the same predicate, and it is worth
+        paying exactly where a number is the answer rather than a decoration
+        -- a board column that has to say "8 in progress" when it has paged
+        in three of them, a filter chip that reports what it would select. It
+        is not worth paying for an infinite scroll, which needs to know only
+        whether there is more, and `pageInfo.hasNextPage` answers that from
+        the page it already fetched. `IssueConnection.totalCount` is a
+        resolver for that reason: a document that does not select it does not
+        run this.
+
+        `count(*)` and not `count(id)`: identical here, since `id` is NOT
+        NULL, and the star form is the one the planner special-cases.
+        """
+        predicates = _Predicates(scope.workspace_id)
+        _add_filters(predicates, issue_filter)
+
+        total = await connection.fetchval(
+            f"""
+                SELECT count(*)
+                FROM issues
+                WHERE issues.workspace_id = $1
+                    AND issues.archived_at IS NULL{predicates.sql}
+            """,
+            *predicates.values,
+        )
+
+        return int(total)
 
     async def set_cycle(
         self,
