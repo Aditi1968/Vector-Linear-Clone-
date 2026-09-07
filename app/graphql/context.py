@@ -10,17 +10,21 @@ from app.domain.auth import UserEntity
 from app.domain.issues import IssueEntity
 from app.domain.labels import LabelEntity
 from app.graphql.loaders.cycles import CycleLoader
+from app.graphql.loaders.initiatives import build_initiative_updates_loader
 from app.graphql.loaders.issues import IssueKey, build_issue_loader
 from app.graphql.loaders.labels import IssueLabelKey, issue_label_loader
 from app.graphql.loaders.projects import (
+    build_project_dependencies_loader,
     build_project_loader,
     build_project_milestones_loader,
+    build_project_updates_loader,
 )
 from app.http_cookies import read_session_token
 from app.repositories.activity import ActivityRepository
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
 from app.repositories.github import GithubRepository
+from app.repositories.initiatives import InitiativeRepository
 from app.repositories.invitations import InvitationRepository
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
@@ -39,6 +43,7 @@ from app.services.auth import AuthService
 from app.services.comments import CommentService
 from app.services.cycles import CycleService
 from app.services.github import GithubAppConfig, GithubService
+from app.services.initiatives import InitiativeService
 from app.services.issues import IssueService
 from app.services.labels import LabelService
 from app.services.memberships import MembershipService
@@ -63,6 +68,7 @@ class VectorContext(BaseContext):
         comment_service: CommentService,
         cycle_service: CycleService,
         project_service: ProjectService,
+        initiative_service: InitiativeService,
         relation_service: RelationService,
         search_service: SearchService,
         github_service: GithubService,
@@ -79,6 +85,7 @@ class VectorContext(BaseContext):
         self.comment_service = comment_service
         self.cycle_service = cycle_service
         self.project_service = project_service
+        self.initiative_service = initiative_service
         self.search_service = search_service
 
         # Holds the deployment's GitHub App credentials, and is the reason
@@ -116,6 +123,13 @@ class VectorContext(BaseContext):
         self.project_loader = build_project_loader(project_service)
         self.project_milestones_loader = build_project_milestones_loader(
             project_service
+        )
+        self.project_updates_loader = build_project_updates_loader(project_service)
+        self.project_dependencies_loader = build_project_dependencies_loader(
+            project_service
+        )
+        self.initiative_updates_loader = build_initiative_updates_loader(
+            initiative_service
         )
 
         # Teams as entities, for the resolvers that ask about them rather
@@ -291,6 +305,15 @@ async def get_context() -> VectorContext:
             # that owns that table, so the service reaches across to it rather
             # than the project repository growing statements about issues.
             issue_repository=IssueRepository(),
+            # And the initiatives it belongs to, for the same reason:
+            # `initiative_projects_project_fk` is RESTRICT, so those rows go
+            # first, and the SQL against that table belongs to the repository
+            # that owns it.
+            initiative_repository=InitiativeRepository(),
+        ),
+        initiative_service=InitiativeService(
+            pool=pool,
+            repository=InitiativeRepository(),
         ),
         auth_service=AuthService(
             pool=pool,

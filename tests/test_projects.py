@@ -33,10 +33,12 @@ from uuid import UUID
 import pytest
 
 from app.domain.errors import ValidationError
+from app.domain.health import HEALTH_VALUES
 from app.domain.patch import UNSET
 from app.domain.projects import DEFAULT_PROJECT_STATE, PROJECT_STATES
 from app.graphql.schema import build_schema
 from app.graphql.types.project import ProjectStateType
+from app.repositories.initiatives import InitiativeRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.projects import ProjectRepository
 from app.services.projects import (
@@ -63,6 +65,7 @@ def service(exploding_pool: ExplodingPool) -> ProjectService:
         pool=exploding_pool,
         repository=ProjectRepository(),
         issue_repository=IssueRepository(),
+        initiative_repository=InitiativeRepository(),
     )
 
 
@@ -296,5 +299,69 @@ async def test_a_negative_milestone_position_is_refused(service, exploding_pool)
 
     assert [(issue.field, issue.code) for issue in raised.value.issues] == [
         ("position", "OUT_OF_RANGE")
+    ]
+    assert exploding_pool.acquire_count == 0
+
+
+# ------------------------------------------------- health and dependencies
+
+
+async def test_a_self_dependency_is_refused_before_a_connection_is_taken(
+    service, exploding_pool
+):
+    """A comparison of two arguments reads no row, so it needs no server.
+
+    `project_dependencies_not_self` says the same thing in the database and
+    remains the guarantee; settling it here is what keeps the obvious mistake
+    from costing a lock and a reachability walk. The multi-step cycle guard
+    DOES need a server and is in tests/test_initiatives_db.py.
+    """
+    with pytest.raises(ValidationError) as raised:
+        await service.add_dependency(
+            scope=TEST_SCOPE,
+            blocking_project_id=PROJECT_ID,
+            blocked_project_id=PROJECT_ID,
+        )
+
+    assert [(issue.field, issue.code) for issue in raised.value.issues] == [
+        ("blockedProjectId", "SELF_DEPENDENCY")
+    ]
+    assert exploding_pool.acquire_count == 0
+
+
+async def test_an_unknown_health_is_refused_here_rather_than_by_the_constraint(
+    service, exploding_pool
+):
+    """The service names the legal values; `project_updates_health_check` would
+    only say no, as a CheckViolationError that is either masked or forwarded.
+    Neither answers "which values may I send"."""
+    with pytest.raises(ValidationError) as raised:
+        await service.post_update(
+            scope=TEST_SCOPE,
+            project_id=PROJECT_ID,
+            health="probably_fine",
+            body="Should be OK.",
+            author_id=UUID("00000000-0000-7000-8000-0000000000ff"),
+        )
+
+    issue = raised.value.issues[0]
+
+    assert (issue.field, issue.code) == ("health", "INVALID")
+    assert all(value in issue.message for value in HEALTH_VALUES)
+    assert exploding_pool.acquire_count == 0
+
+
+async def test_an_empty_update_body_is_refused(service, exploding_pool):
+    with pytest.raises(ValidationError) as raised:
+        await service.post_update(
+            scope=TEST_SCOPE,
+            project_id=PROJECT_ID,
+            health="on_track",
+            body="",
+            author_id=UUID("00000000-0000-7000-8000-0000000000ff"),
+        )
+
+    assert [(issue.field, issue.code) for issue in raised.value.issues] == [
+        ("body", "REQUIRED")
     ]
     assert exploding_pool.acquire_count == 0

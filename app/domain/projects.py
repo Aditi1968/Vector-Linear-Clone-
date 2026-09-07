@@ -51,6 +51,23 @@ class ProjectEntity:
     name: str
     description: str | None
     state: str
+
+    # How the project is going, as most recently reported, or None if nobody
+    # has posted an update yet.
+    #
+    # A separate axis from `state`, not a finer grain of it, which is what
+    # makes both columns worth having: `state` is where the project is in its
+    # lifecycle and is set by moving it, `health` is whether it is going well
+    # and is set by reporting on it. A started project may be off track and a
+    # paused one may be fine.
+    #
+    # A string holding one of `app.domain.health.HEALTH_VALUES`, and not an
+    # enum, for the reason `AuthorizedWorkspaceScope.role` is a string: the
+    # value's authority comes from the CHECK that admitted the row rather than
+    # from a type this process defines, and the transport keeps its own
+    # vocabulary and converts at the boundary.
+    health: str | None
+
     target_date: date | None
 
     # The workspace member accountable for this project, or None.
@@ -84,6 +101,45 @@ class ProjectMilestoneEntity:
     position: int
     created_at: datetime
     updated_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectUpdateEntity:
+    """One posted update on a project: the health, the body, and who said so.
+
+    `project_id` is carried for the reason ProjectMilestoneEntity carries it --
+    an update read on its own is indistinguishable from another project's
+    without it.
+
+    No `updated_at`, matching migrations/022_initiatives.sql: an update is a
+    statement somebody made at a moment and there is no edit path, so a second
+    timestamp could only ever equal the first.
+    """
+
+    id: UUID
+    project_id: UUID
+    health: str
+    body: str
+    author_id: UUID
+    created_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class ProjectDependencies:
+    """One project's dependencies, read from that project's side.
+
+    Two lists rather than a list of edges with a direction on each, because the
+    direction is not a property a client should have to interpret: the table
+    stores one row per edge and never the inverse, so naming the two sides here
+    is where "blocked_by" comes into existence at all. The subject is not
+    carried -- every caller supplied it to get this back.
+    """
+
+    # Projects this one is stopping.
+    blocks: tuple[UUID, ...]
+
+    # Projects stopping this one.
+    blocked_by: tuple[UUID, ...]
 
 
 @dataclass(frozen=True, slots=True)

@@ -3,6 +3,7 @@ from uuid import UUID
 
 import strawberry
 
+from app.graphql.types.health import HealthType
 from app.graphql.types.project import ProjectStateType
 
 
@@ -118,6 +119,50 @@ class ProjectMilestoneUpdateInput:
 class ProjectMilestoneDeleteInput:
     workspace_slug: str
     id: UUID
+
+
+@strawberry.input
+class ProjectUpdatePostInput:
+    """Post an update on a project: how it is going, and why.
+
+    `health` is required rather than optional, because an update with no health
+    in it would leave `projects.health` claiming a value nothing in the history
+    reports -- which is the one thing the pair of them is arranged to prevent.
+
+    No `authorId`. The author is the session's user, read off the authorized
+    scope, and is not something a client may assert about itself -- the same
+    rule `CommentCreateInput` follows, and `project_updates_author_fk` is what
+    makes it true of the database rather than merely of a resolver.
+
+    Deliberately not a `health` field on `ProjectUpdateInput` beside `state`.
+    Setting the health silently, without a body or an author, is exactly what
+    the update log exists to prevent: every value a board renders red has a
+    reason and a name behind it.
+    """
+
+    workspace_slug: str
+    project_id: UUID
+    health: HealthType
+    body: str
+
+
+@strawberry.input
+class ProjectDependencyInput:
+    """The argument of both dependency mutations.
+
+    Named for the direction the table stores rather than for the direction a
+    UI happens to be showing: `blockingProjectId` blocks `blockedProjectId`.
+    One input for add and remove, for the reason `ProjectTeamInput` gives.
+
+    A client that wants "this project is blocked by that one" sends the same
+    pair the other way round. That is deliberate -- a `blockedBy` mutation
+    would be a second spelling of one operation, and the two spellings would be
+    a place for a direction to get inverted with nothing able to notice.
+    """
+
+    workspace_slug: str
+    blocking_project_id: UUID
+    blocked_project_id: UUID
 
 
 @strawberry.input

@@ -54,6 +54,7 @@ from app.graphql.scope import WORKSPACE_NOT_FOUND_MESSAGE
 from app.graphql.viewer import UNAUTHENTICATED_MESSAGE
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
+from app.repositories.initiatives import InitiativeRepository
 from app.repositories.invitations import InvitationRepository
 from app.repositories.issue_labels import IssueLabelRepository
 from app.repositories.issues import IssueRepository
@@ -167,6 +168,7 @@ async def world(postgres_dsn):
                 pool=pool,
                 repository=ProjectRepository(),
                 issue_repository=IssueRepository(),
+                initiative_repository=InitiativeRepository(),
             )
             comment_service = CommentService(pool=pool, repository=CommentRepository())
             relation_service = RelationService(

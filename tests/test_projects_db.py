@@ -23,6 +23,7 @@ import pytest
 
 from app.domain.errors import ValidationError
 from app.domain.tenancy import WorkspaceScope
+from app.repositories.initiatives import InitiativeRepository
 from app.repositories.issues import IssueRepository
 from app.repositories.projects import ProjectRepository
 from app.services.projects import ProjectService
@@ -106,6 +107,7 @@ def service(pool) -> ProjectService:
         pool=pool,
         repository=ProjectRepository(),
         issue_repository=IssueRepository(),
+        initiative_repository=InitiativeRepository(),
     )
 
 
