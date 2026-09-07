@@ -154,20 +154,32 @@ class SlackOAuthClient:
     this class needs and is otherwise discarded rather than raised or logged.
     """
 
-    def __init__(self, *, client_id: str, client_secret: str) -> None:
+    def __init__(
+        self,
+        *,
+        client_id: str,
+        client_secret: str,
+        redirect_uri: str | None = None,
+    ) -> None:
         self._client_id = client_id
         self._client_secret = client_secret
+        self._redirect_uri = redirect_uri
 
     async def exchange(self, *, code: str) -> SlackGrant:
-        payload = await asyncio.to_thread(
-            _post_form,
-            SLACK_ACCESS_URL,
-            {
-                "client_id": self._client_id,
-                "client_secret": self._client_secret,
-                "code": code,
-            },
-        )
+        fields = {
+            "client_id": self._client_id,
+            "client_secret": self._client_secret,
+            "code": code,
+        }
+
+        # Presented again here because Slack compares it with the value the
+        # authorization began with and refuses the exchange when they differ.
+        # Sent only when one was sent on the first leg, so the two legs cannot
+        # disagree about whether there is a redirect_uri at all.
+        if self._redirect_uri:
+            fields["redirect_uri"] = self._redirect_uri
+
+        payload = await asyncio.to_thread(_post_form, SLACK_ACCESS_URL, fields)
 
         return _grant_from_response(payload)
 
@@ -258,7 +270,9 @@ def _grant_from_response(payload: dict[str, Any]) -> SlackGrant:
     )
 
 
-def authorize_url(*, client_id: str, state: str) -> str:
+def authorize_url(
+    *, client_id: str, state: str, redirect_uri: str | None = None
+) -> str:
     """Where an admin's browser is sent to approve the installation.
 
     Built here rather than in the REST layer so the requested scopes and the
@@ -266,19 +280,25 @@ def authorize_url(*, client_id: str, state: str) -> str:
     scope is. `state` is quoted along with everything else by urlencode, which
     is what stops a state value from being able to add parameters of its own.
 
-    No `redirect_uri` is sent. Slack then uses the single callback URL
-    registered on the app, which is one fewer value to keep in agreement
-    across a settings file, a Slack app config and this code -- and one fewer
-    place where a mismatch turns into an OAuth flow that fails only in
-    production.
+    `redirect_uri` is sent when the deployment configured one, and omitting
+    it was a real failure rather than a simplification: Slack answered
+    "redirect_uri did not match any configured URIs. Passed URI:" with nothing
+    after the colon, because it will only infer the callback for an app that
+    has exactly one and treats an absent value as a mismatch otherwise. The
+    same value has to be presented again at the token exchange -- Slack
+    compares the two and refuses the exchange when they differ -- which is why
+    it is threaded through rather than rebuilt in each place.
     """
-    query = urllib.parse.urlencode(
-        {
-            "client_id": client_id,
-            "scope": ",".join(REQUESTED_SCOPES),
-            "state": state,
-        }
-    )
+    parameters = {
+        "client_id": client_id,
+        "scope": ",".join(REQUESTED_SCOPES),
+        "state": state,
+    }
+
+    if redirect_uri:
+        parameters["redirect_uri"] = redirect_uri
+
+    query = urllib.parse.urlencode(parameters)
 
     return f"{SLACK_AUTHORIZE_URL}?{query}"
 

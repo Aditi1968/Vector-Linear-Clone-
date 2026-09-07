@@ -398,7 +398,17 @@ class SlackRequestServices:
     auth: AuthService
     membership: MembershipService
     slack: SlackService
+
     oauth: SlackOAuthExchange | None
+
+    # The callback URL registered on the Slack app, or None. Carried here
+    # rather than read from settings where it is used, so the authorize leg
+    # and the token exchange present one value rather than two.
+    #
+    # Last and defaulted, because a dataclass field with a default may not
+    # precede one without -- and because None is a real state: an app with a
+    # single registered callback needs no redirect_uri.
+    oauth_callback_url: str | None = None
 
 
 def slack_services() -> SlackRequestServices:
@@ -429,11 +439,15 @@ def slack_services() -> SlackRequestServices:
             # straight into the client that needs it. The value is never
             # bound to a name this module can reach afterwards.
             client_secret=client_secret.get_secret_value(),
+            # The same value the authorize leg sends, so the two cannot
+            # disagree -- Slack compares them and refuses the exchange.
+            redirect_uri=settings.slack_oauth_callback_url,
         )
 
     return SlackRequestServices(
         environment=settings.environment,
         client_id=settings.slack_client_id,
+        oauth_callback_url=settings.slack_oauth_callback_url,
         signing_secret=(
             signing_secret.get_secret_value() if signing_secret is not None else None
         ),
@@ -574,7 +588,11 @@ async def slack_oauth_start(
     state = secrets.token_urlsafe(STATE_ENTROPY_BYTES)
 
     response = RedirectResponse(
-        authorize_url(client_id=services.client_id, state=state),
+        authorize_url(
+            client_id=services.client_id,
+            state=state,
+            redirect_uri=services.oauth_callback_url,
+        ),
         # 303, so the browser follows with GET whatever this request was.
         status_code=status.HTTP_303_SEE_OTHER,
     )
