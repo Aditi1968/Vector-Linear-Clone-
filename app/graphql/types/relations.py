@@ -14,7 +14,7 @@ leads back to an issue.
 """
 
 import enum
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 import strawberry
@@ -93,6 +93,37 @@ class IssueSummaryType:
     second query for it, keyed by the id below. For a tree the product
     reveals one level at a time, that is the same number of round trips
     either way.
+
+    "Every scalar field" is the intent, and for a while it was not the
+    behaviour. The type carried title, priority and the timestamps and
+    dropped the rest of the row -- the state the issue is in, who it is
+    assigned to and who filed it, when it is due, what it was sized at, and
+    the ids that place it in a team, a cycle, a project and a milestone.
+    Every one of those is already on the entity this is built from, already
+    read by the query that produced it, and costs nothing to project.
+
+    `archivedAt` is the one deliberate omission. `Issue` carries it and
+    documents it as always null, because archived issues are absent from
+    every query that could reach one; repeating an always-null field on the
+    summary would be repeating the confusion rather than the value.
+
+    What that omission actually caused is worth recording, because it is the
+    failure mode this schema is otherwise careful about. The triage screen
+    renders one row per `TriageIssue`, whose `issue` is this type; with no
+    `assigneeId` to read it drew every row as unassigned, and with no
+    `workflowStateId` it drew every row with no status. Not "unknown" -- the
+    two are indistinguishable to a client, which is the point. A field that
+    is absent because nobody added it renders identically to a field that is
+    genuinely empty, and the screen states something false about every issue
+    on it while looking entirely correct.
+
+    Ids and not objects, so the acyclicity argument above is untouched: a
+    `workflowStateId` is a UUID, and a client that wants the state's name
+    reads it from the workspace lists it already holds. That is also why
+    there is no `labels` here -- a list of labels is an edge, needs a
+    resolver and a loader, and would make this type fan out per row. A
+    client needing labels on a summary row asks `issue(id:)` for the one it
+    is showing.
     """
 
     id: UUID
@@ -106,6 +137,22 @@ class IssueSummaryType:
     title: str
     description: str | None
     priority: int
+
+    team_id: UUID
+    workflow_state_id: UUID
+    assignee_id: UUID | None
+    creator_id: UUID | None
+    estimate: int | None
+    due_date: date | None
+
+    # All three are None for the great majority of issues, and that is a real
+    # state rather than a missing value -- see IssueEntity, which says so of
+    # each. A client rendering a summary row shows nothing for them; it does
+    # not show a placeholder that implies a lookup failed.
+    cycle_id: UUID | None
+    project_id: UUID | None
+    milestone_id: UUID | None
+
     completed_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -118,6 +165,15 @@ class IssueSummaryType:
             title=entity.title,
             description=entity.description,
             priority=entity.priority,
+            team_id=entity.team_id,
+            workflow_state_id=entity.workflow_state_id,
+            assignee_id=entity.assignee_id,
+            creator_id=entity.creator_id,
+            estimate=entity.estimate,
+            due_date=entity.due_date,
+            cycle_id=entity.cycle_id,
+            project_id=entity.project_id,
+            milestone_id=entity.milestone_id,
             completed_at=entity.completed_at,
             created_at=entity.created_at,
             updated_at=entity.updated_at,

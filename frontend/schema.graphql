@@ -814,6 +814,15 @@ type IssueSummary {
   title: String!
   description: String
   priority: Int!
+  teamId: UUID!
+  workflowStateId: UUID!
+  assigneeId: UUID
+  creatorId: UUID
+  estimate: Int
+  dueDate: Date
+  cycleId: UUID
+  projectId: UUID
+  milestoneId: UUID
   completedAt: DateTime
   createdAt: DateTime!
   updatedAt: DateTime!

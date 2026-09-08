@@ -861,15 +861,24 @@ export type IssueSubscriptionPayload = {
 
 export type IssueSummary = {
   __typename?: 'IssueSummary';
+  assigneeId?: Maybe<Scalars['UUID']['output']>;
   completedAt?: Maybe<Scalars['DateTime']['output']>;
   createdAt: Scalars['DateTime']['output'];
+  creatorId?: Maybe<Scalars['UUID']['output']>;
+  cycleId?: Maybe<Scalars['UUID']['output']>;
   description?: Maybe<Scalars['String']['output']>;
+  dueDate?: Maybe<Scalars['Date']['output']>;
+  estimate?: Maybe<Scalars['Int']['output']>;
   id: Scalars['UUID']['output'];
   /** The name this issue is known by outside the product -- ENG-42. Costs nothing to select: it is the team's key and the issue's number, both already on the row. */
   identifier: Scalars['String']['output'];
+  milestoneId?: Maybe<Scalars['UUID']['output']>;
   priority: Scalars['Int']['output'];
+  projectId?: Maybe<Scalars['UUID']['output']>;
+  teamId: Scalars['UUID']['output'];
   title: Scalars['String']['output'];
   updatedAt: Scalars['DateTime']['output'];
+  workflowStateId: Scalars['UUID']['output'];
 };
 
 export type IssueSummaryConnection = {
