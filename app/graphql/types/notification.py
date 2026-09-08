@@ -25,7 +25,7 @@ DEFAULT_NOTIFICATION_FIRST = 50
 
 @strawberry.enum(name="NotificationKind")
 class NotificationKindEnum(enum.Enum):
-    """The four events that reach an inbox.
+    """The five events that reach an inbox.
 
     Declared here rather than by decorating the domain enum, for the reason
     `IssueActivityKind` gives. There is no MENTIONED: mentions do not exist in
@@ -34,12 +34,19 @@ class NotificationKindEnum(enum.Enum):
     STATUS_CHANGED arrived with subscribers in migration 020: it is the event a
     watcher is watching for, and until there were watchers its only recipients
     would have been people who can already see the status on an issue they own.
+
+    DUE_SOON arrived with migration 029, and it is the only one of the five that
+    nobody DID: the other four are somebody's action reaching the people it
+    concerns, and this one is a date arriving. So `actorId` is null on every one
+    of them, and a client rendering "X did Y" needs a different sentence for this
+    kind.
     """
 
     ASSIGNED = "assigned"
     COMMENTED = "commented"
     BLOCKED = "blocked"
     STATUS_CHANGED = "status_changed"
+    DUE_SOON = "due_soon"
 
 
 @strawberry.type(name="Notification")

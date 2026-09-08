@@ -3,6 +3,7 @@ from uuid import UUID
 
 import strawberry
 
+from app.domain.estimates import EstimateScale
 from app.domain.teams import (
     TeamWorkflow,
     WorkflowStateCategory,
@@ -26,6 +27,25 @@ WorkflowStateCategoryType = strawberry.enum(
     WorkflowStateCategory,
     name="WorkflowStateCategory",
     description="What a workflow state means, independent of what it is called.",
+)
+
+
+# The estimate scale, published rather than restated, for the same reason and
+# by the same mechanism as the category above: two enums of strings that must
+# agree drift in a way that type-checks, and `strawberry.enum` annotates the
+# class it is given and returns it, so `app/domain/estimates.py` still imports
+# nothing from strawberry.
+EstimateScaleType = strawberry.enum(
+    EstimateScale,
+    name="EstimateScale",
+    description=(
+        "What a team's estimates count. NONE is a whole number with no unit "
+        "named, which is what every estimate written before this setting "
+        "existed means. POINTS and HOURS are units and put no ceiling on the "
+        "value. TSHIRT is a LADDER rather than a quantity: the stored integer "
+        "is a position, 1 through 5, rendered XS, S, M, L, XL -- so a team on "
+        "that scale can only write those five numbers."
+    ),
 )
 
 
@@ -66,6 +86,15 @@ class TeamType:
         )
     )
     name: str
+    estimate_scale: EstimateScale = strawberry.field(
+        description=(
+            "The unit this team's estimates are in. Read it to LABEL an "
+            "`Issue.estimate` -- the number alone says nothing, which is what "
+            "this field exists to fix -- and to decide which values an "
+            "estimate input may offer. An issue's scale is its team's; there "
+            "is no per-issue override."
+        )
+    )
     created_at: datetime
     workflow_states: list[WorkflowStateType]
 
@@ -75,6 +104,7 @@ class TeamType:
             id=workflow.team.id,
             key=workflow.team.key,
             name=workflow.team.name,
+            estimate_scale=workflow.team.estimate_scale,
             created_at=workflow.team.created_at,
             workflow_states=[
                 WorkflowStateType.from_entity(state)

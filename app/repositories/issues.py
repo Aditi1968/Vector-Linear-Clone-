@@ -5,9 +5,12 @@ from uuid import UUID
 import asyncpg
 
 from app.domain.activity import IssueSnapshot
+from app.domain.estimates import EstimateScale
 from app.domain.issues import (
     TERMINAL_STATE_CATEGORIES,
+    THIS_WEEK_DAYS,
     UNSET,
+    DueWindow,
     IssueEntity,
     IssueFilter,
     IssueOrder,
@@ -105,6 +108,46 @@ _ORDER_KEYS: dict[IssueOrderField, str] = {
 _NULLABLE_ORDER_KEYS = frozenset(
     {IssueOrderField.PRIORITY, IssueOrderField.DUE_DATE},
 )
+
+
+# Each relative due window, as the predicate it becomes.
+#
+# `CURRENT_DATE` and not a bound parameter, which is the whole point of the
+# window existing rather than a client sending two dates. The server decides
+# what today is, once, for everybody looking at the workspace -- see
+# `DueWindow` and migrations/029_estimates_dates.sql on why that clock is UTC.
+#
+# These carry no `$n` and are interpolated as module-level literals, which is
+# the same rule `ISSUE_COLUMNS` above is interpolated under: "parameterized SQL
+# only" is a rule about VALUES, and there is no value here. Nothing a client
+# sends reaches this text -- the enum member selects a whole clause, so an
+# unknown one is a KeyError in this process rather than a fragment on the wire.
+#
+# EVERY ONE IS A BOUND ON `due_date`, deliberately, so that all four can be
+# answered from `issues_workspace_live_due_date_id_idx` (migration 015) as
+# ranges under the tenant equality rather than as predicates applied to rows
+# that had to be fetched first:
+#
+#   * OVERDUE   -- `< CURRENT_DATE`, and NULL is excluded for free, because
+#                  `NULL < x` is NULL rather than true. An issue with no due
+#                  date has missed nothing.
+#   * TODAY     -- an equality.
+#   * THIS_WEEK -- a half-open range: today, and the six days after it. The
+#                  upper bound is exclusive so that the arithmetic reads as
+#                  "seven days" once rather than as "six" with a comment
+#                  explaining the seventh.
+#   * NO_DUE_DATE -- `IS NULL`, which a btree indexes, so the undated issues
+#                  are a range at the far end of that index. The same property
+#                  015 relies on for `assigneeId: null`.
+_DUE_WINDOW_CLAUSES: dict[DueWindow, str] = {
+    DueWindow.OVERDUE: "issues.due_date < CURRENT_DATE",
+    DueWindow.TODAY: "issues.due_date = CURRENT_DATE",
+    DueWindow.THIS_WEEK: (
+        "issues.due_date >= CURRENT_DATE"
+        f" AND issues.due_date < CURRENT_DATE + {THIS_WEEK_DAYS}"
+    ),
+    DueWindow.NO_DUE_DATE: "issues.due_date IS NULL",
+}
 
 
 class _Predicates:
@@ -226,6 +269,19 @@ def _add_filters(predicates: _Predicates, issue_filter: IssueFilter) -> None:
         predicates.add(
             _maybe_null("issues.cycle_id", issue_filter.cycle_id, predicates)
         )
+
+    if issue_filter.due_window is not UNSET:
+        predicates.add(_DUE_WINDOW_CLAUSES[issue_filter.due_window])
+
+    # The absolute range, ANDed alongside whatever window was asked for. Both
+    # ends inclusive, which is what a person dragging a calendar means by
+    # "these two days"; an exclusive end would make the last day of a sprint
+    # not part of it.
+    if issue_filter.due_after is not UNSET:
+        predicates.add(f"issues.due_date >= {predicates.bind(issue_filter.due_after)}")
+
+    if issue_filter.due_before is not UNSET:
+        predicates.add(f"issues.due_date <= {predicates.bind(issue_filter.due_before)}")
 
 
 def _maybe_null(column: str, value: UUID | None, predicates: _Predicates) -> str:
@@ -411,6 +467,65 @@ class IssueRepository:
         )
 
         return [self._to_entity(row) for row in rows]
+
+    async def find_estimate_scale(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        issue_id: UUID,
+    ) -> EstimateScale | None:
+        """The unit this issue's team estimates in, or nothing.
+
+        A statement about `teams` in the issues repository, which needs a word.
+        The question is "what does THIS ISSUE's estimate count", so the issue is
+        what it is asked about and the team is a join on the way -- the same
+        judgement `ISSUE_COLUMNS` already makes for `team_key`, which is a
+        correlated subquery against the same table for the same reason. A
+        method on `TeamRepository` would have to be handed a team id, which is
+        the value the caller does not have: an update carries an issue.
+
+        Used by `IssueService` to check an estimate against the scale before it
+        is written. That check cannot be a database constraint -- the two
+        columns are in different tables and a CHECK cannot join -- so this is
+        the read the rule is enforced from; see
+        migrations/029_estimates_dates.sql on why a trigger was not the answer
+        either.
+
+        The join is on the ISSUE's own stored `(workspace_id, team_id)`, so the
+        scale returned is the one belonging to the team the database has, not
+        one derived from anything a caller sent. `issues_team_fk` guarantees
+        the join finds a row for every live issue.
+
+        None means the issue is not here to ask about -- nonexistent, another
+        tenant's, or archived -- which is the answer every read on this class
+        gives for those three, and the caller treats it the same way: there is
+        nothing to validate, and the write that follows will answer None too.
+        """
+        scale = await connection.fetchval(
+            """
+            SELECT teams.estimate_scale
+            FROM issues
+            JOIN teams
+                ON teams.workspace_id = issues.workspace_id
+                AND teams.id = issues.team_id
+            WHERE issues.workspace_id = $1
+                AND issues.id = $2
+                AND issues.archived_at IS NULL
+            """,
+            scope.workspace_id,
+            issue_id,
+        )
+
+        if scale is None:
+            return None
+
+        # Constructed through the enum rather than passed through as a string,
+        # so a scale the domain does not know about fails here -- at the one
+        # place that reads it out of a row -- rather than flowing on as a str
+        # that every `is`-comparison in the application quietly answers False
+        # for. The same move `TeamRepository._to_workflow_state` makes.
+        return EstimateScale(scale)
 
     async def lock_snapshot(
         self,

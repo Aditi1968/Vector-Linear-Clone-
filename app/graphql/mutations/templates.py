@@ -4,6 +4,8 @@ from strawberry.types import Info
 from app.domain.errors import ValidationError
 from app.graphql.inputs.template import (
     IssueCreateFromTemplateInput,
+    IssueRecurrenceClearInput,
+    IssueRecurrenceSetInput,
     IssueTemplateCreateInput,
     IssueTemplateDeleteInput,
     IssueTemplateUpdateInput,
@@ -13,6 +15,9 @@ from app.graphql.types.errors import ValidationErrorType
 from app.graphql.types.issue import IssueType
 from app.graphql.types.template import (
     IssueCreateFromTemplatePayload,
+    IssueRecurrenceClearPayload,
+    IssueRecurrenceSetPayload,
+    IssueRecurrenceType,
     IssueTemplateDeletePayload,
     IssueTemplateSavePayload,
     IssueTemplateType,
@@ -128,6 +133,77 @@ class TemplateMutation:
             return IssueTemplateDeletePayload(id=None, errors=_errors(exc))
 
         return IssueTemplateDeletePayload(id=deleted, errors=[])
+
+    @strawberry.mutation
+    async def issue_template_recurrence_set(
+        self,
+        info: Info,
+        input: IssueRecurrenceSetInput,
+    ) -> IssueRecurrenceSetPayload:
+        """Make one template file itself on a schedule.
+
+        The template is read under the scope this call authorized, so a
+        template id from another tenant answers "Template not found" -- the same
+        answer an id that exists nowhere gets. The team is checked by
+        `issue_recurrences_team_fk` against that same workspace, inside the
+        write, rather than by a lookup here.
+
+        Nothing about the schedule is trusted to be renderable later: it is
+        stored as typed columns with CHECK constraints, so the background sweep
+        that reads it months from now cannot be handed a frequency or a weekday
+        this server does not understand.
+
+        There is no role check, matching the rest of this class. A recurring
+        template files issues without a person, which is the closest thing to
+        the "notification-shaped consequence" this class's docstring names as
+        the moment to revisit that -- and it is deliberately not that moment:
+        the issues land on a board where everybody can see and archive them,
+        under a template any member could already have applied by hand every
+        Monday. `require_workspace_admin` is where it would go.
+        """
+        scope = await authorized_scope(info, input.workspace_slug)
+
+        try:
+            entity = await info.context.template_service.set_recurrence(
+                scope=scope,
+                template_id=input.template_id,
+                team_id=input.team_id,
+                rule=input.to_rule(),
+            )
+        except ValidationError as exc:
+            return IssueRecurrenceSetPayload(recurrence=None, errors=_errors(exc))
+
+        return IssueRecurrenceSetPayload(
+            recurrence=IssueRecurrenceType.from_entity(entity),
+            errors=[],
+        )
+
+    @strawberry.mutation
+    async def issue_template_recurrence_clear(
+        self,
+        info: Info,
+        input: IssueRecurrenceClearInput,
+    ) -> IssueRecurrenceClearPayload:
+        """Stop one template recurring.
+
+        Idempotent, and it never fails: clearing a schedule that was never set,
+        and clearing one on a template this workspace does not have, both
+        answer `cleared: false` with no errors. That is the state the caller
+        asked for in every case, and reporting a failure for the second would
+        tell a caller holding a guessed id that the template is real and simply
+        not theirs.
+
+        The issues the schedule already filed are ordinary issues and are
+        untouched.
+        """
+        scope = await authorized_scope(info, input.workspace_slug)
+
+        cleared = await info.context.template_service.clear_recurrence(
+            scope=scope,
+            template_id=input.template_id,
+        )
+
+        return IssueRecurrenceClearPayload(cleared=cleared, errors=[])
 
     @strawberry.mutation
     async def issue_create_from_template(

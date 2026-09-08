@@ -4,6 +4,8 @@ from enum import StrEnum
 from typing import Final
 from uuid import UUID
 
+from app.domain.estimates import EstimateScale
+
 
 class WorkflowStateCategory(StrEnum):
     """The fixed vocabulary application code is allowed to branch on.
@@ -66,6 +68,21 @@ class TeamEntity:
     workspace_id: UUID
     key: str
     name: str
+
+    # What this team's estimates count -- points, hours, t-shirt sizes, or
+    # nothing named. migration 006 stored `issues.estimate INTEGER` with no
+    # unit and said so out loud: "a limit the product wants is a product
+    # policy, enforced where the product knows the team's unit". This is where
+    # the unit is known.
+    #
+    # On the TEAM and not the workspace, because estimation is a team practice:
+    # one workspace legitimately holds an engineering team on points and a
+    # support team on hours, and `issues.team_id` is NOT NULL so the scale an
+    # estimate is in is never ambiguous. Defaulted to NONE by
+    # migrations/029_estimates_dates.sql, which is what every estimate written
+    # before it already meant.
+    estimate_scale: EstimateScale
+
     created_at: datetime
 
 

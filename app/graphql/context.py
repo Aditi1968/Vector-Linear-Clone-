@@ -42,6 +42,7 @@ from app.repositories.memberships import MembershipRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
 from app.repositories.rate_limits import RateLimitRepository
+from app.repositories.recurrences import RecurrenceRepository
 from app.repositories.relations import RelationRepository
 from app.repositories.releases import ReleaseRepository
 from app.repositories.saved_views import FavoriteRepository, SavedViewRepository
@@ -546,6 +547,13 @@ async def get_context() -> VectorContext:
         template_service=TemplateService(
             pool=pool,
             repository=TemplateRepository(),
+            # The schedule a template files itself on. A second repository
+            # rather than statements about `issue_recurrences` inside
+            # `TemplateRepository`: a recurrence has no life without the
+            # template it names, so it belongs to this service -- but the SQL
+            # for a table belongs to the repository that owns that table. Same
+            # split as `SavedViewService` and `FavoriteRepository`.
+            recurrences=RecurrenceRepository(),
             # Services, not repositories: applying a template must go through
             # the same rules `issueCreate` and `issueLabelAttach` enforce, and
             # through the same composite foreign keys, so a stored id is

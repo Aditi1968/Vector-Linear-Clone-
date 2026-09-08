@@ -219,6 +219,55 @@ def mapper_definitions() -> list[tuple[str, str, ast.FunctionDef]]:
 MAPPERS = mapper_definitions()
 
 
+# Entity fields that legitimately have no column behind them, per entity.
+#
+# The gate below asserts a mapper reads one row key per field of the entity it
+# builds, and that claim is about COLUMNS. A field filled in from a second
+# statement is outside it: the mapper cannot read a key for something the
+# SELECT does not return, and requiring it to would make the gate impossible to
+# satisfy rather than making the code safer.
+#
+# Kept as an exact, keyed set rather than a per-entity opt-out, so an exemption
+# covers one named field and not everything an entity might later gain. Each
+# entry needs the sentence for why:
+#
+#   IssueTemplateEntity.recurrence -- lives in `issue_recurrences`, read by
+#     `RecurrenceRepository` and attached by `TemplateService._with_recurrences`
+#     in one batched statement over the whole page. `TemplateRepository`
+#     deliberately holds no SQL against that table; see migration 029.
+#
+# `test_the_exemptions_are_still_earned` below is what stops this list growing
+# into a way to silence the gate.
+NOT_A_COLUMN = {
+    "IssueTemplateEntity": frozenset({"recurrence"}),
+}
+
+
+def test_the_exemptions_are_still_earned():
+    """Every exemption names an entity and a field that both still exist.
+
+    An entry that has gone stale -- a renamed field, a deleted entity -- would
+    silently exempt nothing, which is harmless, or would sit here suggesting
+    that a field nobody can find is checked somewhere else, which is not. The
+    size assertion is the other half: this list is for fields read from another
+    table, and there are very few of those.
+    """
+    assert len(NOT_A_COLUMN) <= 2, (
+        "NOT_A_COLUMN has grown; each entry exempts a field from the mapper "
+        "gate, so a long list is a gate that checks less than it claims"
+    )
+
+    for entity_name, exempt in NOT_A_COLUMN.items():
+        module = importlib.import_module(f"app.domain.{_domain_module(entity_name)}")
+        entity = getattr(module, entity_name)
+        declared = {field.name for field in fields(entity)}
+
+        assert exempt <= declared, (
+            f"{entity_name} has no field(s) {sorted(exempt - declared)}; the "
+            "exemption in NOT_A_COLUMN is stale"
+        )
+
+
 def test_the_mappers_were_found():
     """A gate that found nothing to check is a gate that always passes.
 
@@ -272,7 +321,7 @@ def test_every_mapper_reads_every_field_of_its_entity(
         and isinstance(node.slice.value, str)
     }
 
-    missing = expected - read
+    missing = expected - read - NOT_A_COLUMN.get(entity_name, frozenset())
 
     assert not missing, (
         f"{filename}:{definition.name} builds {entity_name} but never reads "
@@ -309,6 +358,7 @@ def _domain_module(entity_name: str) -> str:
         "SubscriberEntity": "subscribers",
         "IssueTemplateEntity": "templates",
         "DomainEventEntity": "events",
+        "RecurrenceEntity": "recurrence",
     }
 
     assert entity_name in known, (

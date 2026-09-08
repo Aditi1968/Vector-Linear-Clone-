@@ -7,6 +7,11 @@ import asyncpg
 
 from app.domain.activity import ActivityKind, IssueSnapshot
 from app.domain.errors import ValidationError, ValidationIssue
+from app.domain.estimates import (
+    EstimateScale,
+    estimate_error_message,
+    is_valid_estimate,
+)
 from app.domain.issues import (
     DEFAULT_ORDER,
     NO_FILTER,
@@ -295,6 +300,34 @@ class IssueService:
         self._validate_create(title=title, priority=priority, estimate=estimate)
 
         async with self._pool.acquire() as connection:
+            # The scale check, on this connection but OUTSIDE the transaction
+            # below, and both halves of that placement matter.
+            #
+            # On this connection, so a create that is about to be refused does
+            # not take a second one from the pool. Outside the transaction,
+            # because the transaction's first act is to lock the team row for
+            # the number allocation and hold it until commit -- serialising
+            # every other create on that team -- so a read that needs no lock
+            # belongs before it, for the same reason
+            # `default_workflow_state_id` is resolved before the allocation.
+            #
+            # The race that opens is an admin changing the scale between this
+            # read and the insert, which stores an estimate the new scale would
+            # not admit. That is harmless BY CONSTRUCTION rather than by luck:
+            # a scale change already leaves every issue the team has ever
+            # estimated in exactly that state -- migration 029 argues that the
+            # scale bounds writes and not history -- so this window produces
+            # one more row of a kind the product already renders and repairs
+            # on its next edit. It is not the time-of-check-to-time-of-use gap
+            # 006 refuses for the assignee, where the fact being checked is a
+            # permission.
+            await self._check_estimate_scale(
+                connection,
+                scope=scope,
+                team_id=team_id,
+                estimate=estimate,
+            )
+
             # The service owns the transaction boundary, and the history
             # write below is inside it: an issue that exists without the row
             # saying it was created, or a "created" row for an issue the
@@ -423,6 +456,26 @@ class IssueService:
         self._validate_patch(patch)
 
         async with self._pool.acquire() as connection:
+            # Only when the patch actually sets an estimate, so an ordinary
+            # title edit costs no extra round trip. Clearing one (None) needs
+            # no scale either: every scale admits an issue that is not sized,
+            # which is what `estimate IS NULL` has meant since 006.
+            if isinstance(patch.estimate, int):
+                scale = await self._repository.find_estimate_scale(
+                    connection,
+                    scope=scope,
+                    issue_id=issue_id,
+                )
+
+                # None is the issue not being there -- nonexistent, another
+                # tenant's, or archived. It is deliberately NOT reported here:
+                # the update below matches nothing and answers None, which is
+                # the one answer this method gives for all three, and raising a
+                # different error for a bad estimate on an unreachable issue
+                # would be an oracle for which ids exist.
+                if scale is not None:
+                    _raise_for_estimate_scale(scale, patch.estimate)
+
             try:
                 async with connection.transaction():
                     before = await self._repository.lock_snapshot(
@@ -770,6 +823,40 @@ class IssueService:
                 issue_filter=issue_filter,
             )
 
+    async def _check_estimate_scale(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        team_id: UUID,
+        estimate: int | None,
+    ) -> None:
+        """Refuse an estimate the team's own scale has no meaning for.
+
+        Nothing to check for an issue that is not sized -- every scale admits
+        NULL, which is what 006 defines the column's absence as -- so the
+        common create pays no round trip at all.
+
+        A team that is not here answers None and is not reported. The create
+        this precedes raises `TeamNotFoundError` from
+        `default_workflow_state_id` a moment later, which is the one answer
+        every path in this service gives for a team in another workspace or no
+        workspace, and inventing a second one here would distinguish them.
+        """
+        if estimate is None:
+            return
+
+        scale = await self._teams.estimate_scale(
+            connection,
+            scope=scope,
+            team_id=team_id,
+        )
+
+        if scale is None:
+            return
+
+        _raise_for_estimate_scale(scale, estimate)
+
     @staticmethod
     def _validate_list(
         *,
@@ -1030,10 +1117,20 @@ def _priority_issues(priority: int) -> list[ValidationIssue]:
 
 
 def _estimate_issues(estimate: int | None) -> list[ValidationIssue]:
-    """No upper bound, matching `issues_estimate_non_negative` in 006.
+    """The half of the estimate rule that needs no database.
 
-    A ceiling here would be a guess at the unit a team estimates in, and
-    the schema declines to make that guess for the reasons 006 records.
+    `issues_estimate_non_negative` in 006 and nothing more, so this stays the
+    check a request can fail without a connection being taken. There is still
+    no upper bound here, for 006's reason: a ceiling would be a guess at the
+    unit, and the unit is a fact about the team rather than about the request.
+
+    The scale-dependent half is `_raise_for_estimate_scale` below, which runs
+    once the team is known. Two checks and not one, because they answer to two
+    different things -- this one to a constraint every row in the table
+    satisfies, that one to a setting a team may change tomorrow -- and folding
+    them together would mean acquiring a connection to reject a negative
+    number.
+
     Clearing an estimate (None) is always allowed.
     """
     if estimate is not None and estimate < ESTIMATE_MIN:
@@ -1046,3 +1143,36 @@ def _estimate_issues(estimate: int | None) -> list[ValidationIssue]:
         ]
 
     return []
+
+
+def _raise_for_estimate_scale(scale: EstimateScale, estimate: int) -> None:
+    """Refuse a number this scale is not a ladder for, as a field error.
+
+    Module-level and shared by the create and update paths, so there is one
+    answer to "may this team write this estimate" rather than one per write --
+    which is the shape `filter_issues` above already takes for the same reason.
+
+    OUT_OF_RANGE and not a new code, deliberately: it is the code both paths
+    already publish for this field, and a client that renders it beside the
+    estimate input needs no change to render this. What differs is the message,
+    which `app.domain.estimates` writes next to the ladder it describes so that
+    somebody told "1-5 for XS, S, M, L, XL" can act on it -- where a bare
+    "invalid estimate" would leave them to discover that the setting exists.
+
+    Raising rather than returning a list, because this is the only check on
+    either path that has already spent a round trip: there is nothing left to
+    collect it with, and a caller that had to remember to raise is a caller
+    that can forget.
+    """
+    if is_valid_estimate(scale, estimate):
+        return
+
+    raise ValidationError(
+        [
+            ValidationIssue(
+                field="estimate",
+                code="OUT_OF_RANGE",
+                message=estimate_error_message(scale),
+            )
+        ]
+    )

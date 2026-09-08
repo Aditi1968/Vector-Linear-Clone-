@@ -24,6 +24,7 @@ import pytest
 import strawberry
 
 from app.domain.errors import ValidationError, WorkspaceAccessDeniedError
+from app.domain.recurrence import RecurrenceEntity
 from app.domain.templates import IssueTemplateDraft, IssueTemplateEntity
 from app.domain.tenancy import AuthorizedWorkspaceScope
 from app.graphql.schema import build_schema
@@ -83,6 +84,9 @@ def template(**overrides) -> IssueTemplateEntity:
         "project_id": None,
         "cycle_id": None,
         "label_ids": (),
+        # Nearly every template has none, and the schedule is read by a
+        # separate statement anyway -- see `TemplateService._with_recurrences`.
+        "recurrence": None,
         "created_at": BASE_TIME,
         "updated_at": BASE_TIME,
     }
@@ -118,6 +122,60 @@ class RecordingRepository:
         self.lists.append({"scope": scope, "team_id": team_id, "limit": limit})
 
         return [self.entity]
+
+
+class RecordingRecurrenceRepository:
+    """The schedule half, recorded, with nothing scheduled by default.
+
+    Deliberately answers an empty mapping from `find_many_for_templates`, which
+    is what almost every template's schedule is -- so a test about the shape of
+    a template save is not also a test about recurrences.
+    """
+
+    def __init__(self, schedules: dict | None = None):
+        self.schedules = schedules if schedules is not None else {}
+        self.upserts: list[dict] = []
+        self.deletes: list[dict] = []
+        self.lookups: list[dict] = []
+
+    async def upsert(
+        self, connection, *, scope, template_id, team_id, rule, next_run_on
+    ):
+        self.upserts.append(
+            {
+                "scope": scope,
+                "template_id": template_id,
+                "team_id": team_id,
+                "rule": rule,
+                "next_run_on": next_run_on,
+            }
+        )
+
+        return RecurrenceEntity(
+            template_id=template_id,
+            team_id=team_id,
+            frequency=rule.frequency,
+            interval_count=rule.interval_count,
+            weekdays=rule.weekdays,
+            day_of_month=rule.day_of_month,
+            starts_on=rule.starts_on,
+            due_in_days=rule.due_in_days,
+            next_run_on=next_run_on,
+        )
+
+    async def delete(self, connection, *, scope, template_id):
+        self.deletes.append({"scope": scope, "template_id": template_id})
+
+        return template_id in self.schedules
+
+    async def find_many_for_templates(self, connection, *, scope, template_ids):
+        self.lookups.append({"scope": scope, "template_ids": list(template_ids)})
+
+        return {
+            template_id: self.schedules[template_id]
+            for template_id in template_ids
+            if template_id in self.schedules
+        }
 
 
 class RecordingIssueService:
@@ -156,6 +214,7 @@ class RecordingLabelService:
 def service(
     *,
     repository=None,
+    recurrences=None,
     issues=None,
     labels=None,
     pool=None,
@@ -163,6 +222,9 @@ def service(
     return TemplateService(
         pool=pool if pool is not None else FakePool(),
         repository=repository if repository is not None else RecordingRepository(),
+        recurrences=(
+            recurrences if recurrences is not None else RecordingRecurrenceRepository()
+        ),
         issues=issues if issues is not None else RecordingIssueService(),
         labels=labels if labels is not None else RecordingLabelService(),
     )
@@ -669,7 +731,9 @@ def test_no_template_field_accepts_a_workspace_id():
         if "issueTemplate" in line or "issueCreateFromTemplate" in line
     ]
 
-    # Four mutations and two queries. Asserted rather than assumed, so this
-    # test cannot pass on a schema that lost the feature entirely.
-    assert len(fields) == 6, fields
+    # Six mutations and two queries. Asserted rather than assumed, so this
+    # test cannot pass on a schema that lost the feature entirely -- and the
+    # count moved when migration 029 added the two recurrence mutations, which
+    # is the assertion doing its job rather than an inconvenience.
+    assert len(fields) == 8, fields
     assert not any("workspaceId" in line for line in fields)

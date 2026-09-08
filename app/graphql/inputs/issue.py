@@ -5,6 +5,7 @@ import strawberry
 
 from app.domain.issues import (
     UNSET,
+    DueWindow,
     IssueFilter,
     IssueOrder,
     IssueOrderField,
@@ -13,6 +14,13 @@ from app.domain.issues import (
     Unset,
 )
 from app.domain.teams import WorkflowStateCategory
+
+# Imported for its side effect, exactly as `WorkflowStateCategoryType` below
+# is and for the same reason: `types/issue.py` is where `strawberry.enum`
+# annotates DueWindow with its GraphQL definition, and a field referencing the
+# bare class before that has run makes Strawberry mint a SECOND definition for
+# the same name -- at which point the schema refuses to build.
+from app.graphql.types.issue import DueWindowType  # noqa: F401
 
 # Imported for its side effect, not for the name. `types/team.py` is where
 # `strawberry.enum` annotates WorkflowStateCategory with its GraphQL
@@ -198,6 +206,21 @@ class IssueFilterInput:
     project_id: UUID | None = strawberry.UNSET
     cycle_id: UUID | None = strawberry.UNSET
 
+    # The due-date filters. `due` is RELATIVE and the server resolves it, which
+    # is the point: a client sending its own idea of today would give two
+    # colleagues in two timezones two different lists from one screen. `NO_DUE
+    # DATE` lives in that enum rather than as a null here, so there is one
+    # spelling of the undated set instead of two that could be sent together.
+    #
+    # `dueAfter` and `dueBefore` are absolute and inclusive at both ends -- a
+    # sprint window, a month, a range dragged on a calendar. All three narrow
+    # and all three may be combined; a range that excludes itself selects
+    # nothing rather than erroring, exactly as an id from another workspace
+    # does.
+    due: DueWindow | None = strawberry.UNSET
+    due_after: date | None = strawberry.UNSET
+    due_before: date | None = strawberry.UNSET
+
     def to_filter(self) -> IssueFilter:
         """Translate Strawberry's sentinel onto the domain's own.
 
@@ -214,6 +237,13 @@ class IssueFilterInput:
             priority=_present(self.priority),
             project_id=_nullable(self.project_id),
             cycle_id=_nullable(self.cycle_id),
+            # `_present` on all three, so an explicit null reads as "no filter"
+            # rather than as a request for the empty set. None of these columns
+            # has a "has none" a null could mean: the undated issues are
+            # `due: NO_DUE_DATE`, and a null bound on a range is not a range.
+            due_window=_present(self.due),
+            due_after=_present(self.due_after),
+            due_before=_present(self.due_before),
         )
 
 

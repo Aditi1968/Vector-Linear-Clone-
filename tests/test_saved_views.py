@@ -25,6 +25,7 @@ is where the constraints themselves are exercised.
 
 import re
 from dataclasses import fields
+from datetime import date
 from pathlib import Path
 from uuid import UUID
 
@@ -33,6 +34,7 @@ import pytest
 from app.domain.errors import ValidationError
 from app.domain.issues import (
     UNSET,
+    DueWindow,
     IssueFilter,
     IssueOrder,
     IssueOrderField,
@@ -82,6 +84,13 @@ EVERYTHING = IssueFilter(
     priority=2,
     project_id=PROJECT_ID,
     cycle_id=CYCLE_ID,
+    # The three migration 029 adds. `due_window` is the relative one and is the
+    # reason a saved "Overdue" view works at all: it stores the WORD, so the
+    # view resolves against the day it is opened rather than the day it was
+    # saved -- which a stored date could not do.
+    due_window=DueWindow.OVERDUE,
+    due_after=date(2026, 1, 1),
+    due_before=date(2026, 12, 31),
 )
 
 
