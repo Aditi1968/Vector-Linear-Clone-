@@ -12,14 +12,22 @@ Every call runs in a worker thread. argon2 is CPU-bound by construction --
 that is what makes it worth using -- so calling it inline would park the
 event loop for the whole cost of the hash, and a handful of concurrent
 logins would stall every other request in the process. `asyncio.to_thread`
-puts it on the default executor instead, which is bounded (min(32, cpus+4)
-workers), so the number of hashes running at once is bounded too. That bound
-is also a memory bound worth knowing about: each concurrent hash holds
-64 MiB while it runs.
+puts it on the default executor instead.
+
+That used to be the whole story, and the paragraph that stood here claimed
+the default executor's size was an adequate memory bound. It was wrong, and
+the arithmetic is in `MAX_CONCURRENT_HASHES` below: the default executor is
+min(32, cpus + 4) threads, which on an ordinary machine is dozens, and every
+concurrent argon2id operation allocates 64 MiB. Nothing about reaching that
+number requires an account or a correct password -- `verify_decoy` spends
+the full cost for an address that matches nothing, which is exactly the
+property that makes log-in constant-time and exactly the property that made
+it an amplifier. The decoy is correct and stays. What was missing was a bound.
 """
 
 import asyncio
 import secrets
+import weakref
 from functools import cache
 from typing import Protocol
 
@@ -31,6 +39,81 @@ from argon2.exceptions import VerifyMismatchError
 # entropy. It is never checked against anything, so this only has to be far
 # beyond guessing; 32 bytes matches the session token.
 DECOY_PASSWORD_BYTES = 32
+
+# How many argon2id operations this process will run at once, and the
+# arithmetic behind the number.
+#
+#   argon2-cffi's default memory_cost is 65536 KiB     = 64 MiB per operation
+#   k8s/30-api.yaml sets resources.limits.memory       = 512 MiB per replica
+#   k8s/30-api.yaml sets resources.requests.memory     = 192 MiB, which is the
+#                                                        deployment's own claim
+#                                                        about the resident
+#                                                        footprint of a process
+#                                                        serving requests
+#
+#   headroom to the limit                = 512 - 192   = 320 MiB
+#   4 concurrent x 64 MiB                              = 256 MiB
+#   slack left over                                    =  64 MiB
+#
+# So: FOUR. That is the worst case this file accepts -- a quarter of a gibibyte
+# of argon2 arenas live at once, inside a container that will be OOMKilled at
+# half a gibibyte. Five would be 320 MiB and leave nothing; the unbounded
+# version this replaces was 26 x 64 MiB = 1.6 GiB on a 22-core machine, which
+# is not a tight fit, it is a guaranteed kill an unauthenticated client can
+# trigger on demand.
+#
+# WHICH DEFENCE IS THE REAL ONE. The rate limiter in `app.services.auth` is,
+# and this is the backstop. The limiter is what stops an attacker getting
+# thousands of hashes started in the first place, and it is shared state so it
+# holds across both replicas; but it counts per attempt and cannot bound a
+# burst that arrives inside one window, because every one of those attempts is
+# individually within budget. The semaphore is what makes that burst queue
+# instead of allocating. Neither is sufficient alone: without the limiter this
+# only converts an OOM into an unbounded queue of waiters, and without the
+# semaphore the limiter's own budget still permits enough simultaneity to fill
+# the heap.
+#
+# The cost is latency under load: at ~100 ms a hash, four at a time is 40
+# operations a second per replica, and the 41st waits. That is far above what
+# the limiter permits from any one subject and far below what would be needed
+# to inconvenience a real sign-in queue.
+#
+# ponytail: a fixed number tuned against one manifest's memory limit. If the
+# limit in k8s/30-api.yaml changes, this changes with it -- there is no
+# reader of that file at runtime and inventing one would be a config value
+# for something that changes once a year. The upgrade path if it starts
+# mattering is to read a MiB budget from Settings and divide by memory_cost.
+MAX_CONCURRENT_HASHES = 4
+
+# One gate per event loop, not one per hasher.
+#
+# Per hasher would be no gate at all: `app.graphql.context` constructs an
+# `Argon2PasswordHasher` per REQUEST, so a semaphore held on the instance would
+# be a semaphore of one, per caller, which is arithmetic that permits exactly
+# the concurrency it is meant to refuse.
+#
+# Keyed by loop rather than a bare module-level object because an
+# `asyncio.Semaphore` binds itself to the first loop that has to WAIT on it and
+# refuses every other one afterwards. One process legitimately runs several
+# loops -- every `asyncio.run` in the test suite is one -- and the failure would
+# appear only in the contended case, which is to say only under the load this
+# exists for. Weak keys so a finished loop takes its gate with it rather than
+# leaving an entry per test.
+_gates: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, asyncio.Semaphore]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _gate() -> asyncio.Semaphore:
+    """The concurrency bound for this loop, built on first use."""
+    loop = asyncio.get_running_loop()
+    gate = _gates.get(loop)
+
+    if gate is None:
+        gate = asyncio.Semaphore(MAX_CONCURRENT_HASHES)
+        _gates[loop] = gate
+
+    return gate
 
 
 class PasswordHasher(Protocol):
@@ -66,7 +149,8 @@ class Argon2PasswordHasher:
         The return value is safe to store and to log the *existence* of.
         The argument is not safe to do anything with except pass here.
         """
-        return await asyncio.to_thread(self._hasher.hash, password)
+        async with _gate():
+            return await asyncio.to_thread(self._hasher.hash, password)
 
     async def verify(self, *, password_hash: str, password: str) -> bool:
         """Whether `password` is the one `password_hash` was made from.
