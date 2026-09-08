@@ -29,6 +29,7 @@ from uuid import UUID
 import pytest
 
 from app.domain.errors import TeamNotFoundError, WorkspaceAccessDeniedError
+from app.domain.estimates import EstimateScale
 from app.domain.teams import (
     TeamEntity,
     TeamWorkflow,
@@ -95,6 +96,9 @@ def team_record(key: str = "CORE", team_id: UUID = TEAM_ID) -> dict:
         "workspace_id": WORKSPACE_ID,
         "key": key,
         "name": "Core",
+        # The column migration 029 adds, at the default every team that
+        # predates it is in: a whole number with no unit named.
+        "estimate_scale": "none",
         "created_at": CREATED_AT,
     }
 
@@ -112,12 +116,17 @@ def state_record(category: str = "unstarted", position: int = 1) -> dict:
     }
 
 
-def team_entity(key: str = "CORE", team_id: UUID = TEAM_ID) -> TeamEntity:
+def team_entity(
+    key: str = "CORE",
+    team_id: UUID = TEAM_ID,
+    estimate_scale: EstimateScale = EstimateScale.NONE,
+) -> TeamEntity:
     return TeamEntity(
         id=team_id,
         workspace_id=WORKSPACE_ID,
         key=key,
         name="Core",
+        estimate_scale=estimate_scale,
         created_at=CREATED_AT,
     )
 
@@ -292,7 +301,7 @@ async def test_listing_teams_is_scoped_to_the_workspace_and_ordered_by_key():
 
     assert normalize(sent["query"]) == normalize(
         """
-        SELECT id, workspace_id, key, name, created_at
+        SELECT id, workspace_id, key, name, estimate_scale, created_at
         FROM teams
         WHERE workspace_id = $1
         ORDER BY key
@@ -318,7 +327,7 @@ async def test_finding_a_team_by_key_compares_exactly_and_binds_both_values():
 
     assert statement == normalize(
         """
-        SELECT id, workspace_id, key, name, created_at
+        SELECT id, workspace_id, key, name, estimate_scale, created_at
         FROM teams
         WHERE workspace_id = $1 AND key = $2
         """

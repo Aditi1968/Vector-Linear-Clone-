@@ -2,7 +2,16 @@ from uuid import UUID
 
 import strawberry
 
+from app.domain.estimates import EstimateScale
 from app.graphql.types.membership import WorkspaceRoleType
+
+# Imported for its side effect, not for the name: `types/team.py` is where
+# `strawberry.enum` annotates EstimateScale with its GraphQL definition, and a
+# field referencing the bare class before that has run makes Strawberry mint a
+# SECOND definition for the same name -- at which point the schema refuses to
+# build. Whether that module happens to be imported first is a question about
+# import order, which is not a thing to leave to luck.
+from app.graphql.types.team import EstimateScaleType  # noqa: F401
 
 
 @strawberry.input
@@ -41,6 +50,28 @@ class TeamCreateInput:
             "letter. Unique within the workspace."
         )
     )
+
+
+@strawberry.input
+class TeamEstimateScaleSetInput:
+    """What one team's estimates count, from now on.
+
+    `scale` is the enum rather than a String, so an unknown value is refused
+    during GraphQL validation -- before a resolver runs, before a connection is
+    taken -- instead of reaching `teams_estimate_scale_known` as a masked
+    error. The same reason `MemberRoleUpdateInput.role` is one.
+
+    THE ISSUES ALREADY ESTIMATED ARE NOT TOUCHED, and there is no field here
+    that could ask for them to be. A scale bounds what may be WRITTEN and not
+    what has been: a team moving to TSHIRT keeps the numbers its issues hold,
+    and each conforms the next time somebody edits it. The alternative was
+    either refusing the change over data nobody is editing, or rewriting
+    estimates a team spent real time agreeing.
+    """
+
+    workspace_slug: str
+    team_id: UUID
+    scale: EstimateScale
 
 
 @strawberry.input

@@ -19,11 +19,11 @@ Pure application code -- no Strawberry, FastAPI, asyncpg or PostgreSQL.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Final
 from uuid import UUID
 
-from app.domain.issues import UNSET, IssueFilter, IssueOrder, Unset
+from app.domain.issues import UNSET, DueWindow, IssueFilter, IssueOrder, Unset
 from app.domain.teams import WorkflowStateCategory
 
 
@@ -164,6 +164,38 @@ def _decode_category(raw: object) -> WorkflowStateCategory:
         raise InvalidStoredFilterError() from None
 
 
+def _decode_due_window(raw: object) -> DueWindow:
+    if not isinstance(raw, str):
+        raise InvalidStoredFilterError()
+
+    try:
+        return DueWindow(raw)
+    except ValueError:
+        raise InvalidStoredFilterError() from None
+
+
+def _decode_date(raw: object) -> date:
+    """An ISO calendar day, parsed and not trusted.
+
+    `date.fromisoformat` and not `datetime.fromisoformat(...).date()`: the
+    second accepts a whole timestamp, so a stored `"2026-09-08T13:00:00+02:00"`
+    would decode to a day that depends on a zone the filter has nothing to say
+    about -- which is the exact confusion 006 refuses TIMESTAMPTZ to avoid. A
+    document carrying one was not written by `encode_filter`.
+
+    Python 3.11 widened `fromisoformat` to accept forms like `"20260908"`, and
+    that is left alone rather than tightened with a regex: every one of them
+    names exactly one calendar day, which is all this value is.
+    """
+    if not isinstance(raw, str):
+        raise InvalidStoredFilterError()
+
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        raise InvalidStoredFilterError() from None
+
+
 def _decode_priority(raw: object) -> int:
     """An integer, and specifically not a bool.
 
@@ -204,6 +236,15 @@ _FILTER_FIELDS: Final = (
     "priority",
     "project_id",
     "cycle_id",
+    # The three due-date filters, and a saved view is exactly where they earn
+    # their keep: "Overdue" is a list somebody opens every morning, and it is a
+    # list that has to be RELATIVE. `due_window` stores the word rather than a
+    # date, so the view resolves against the day it is opened instead of
+    # against the day it was saved -- which a stored `due_before` could not do,
+    # and which is why the window is a vocabulary and not sugar over a date.
+    "due_window",
+    "due_after",
+    "due_before",
 )
 
 
@@ -243,7 +284,17 @@ def _encode_value(value: object) -> object:
     if isinstance(value, UUID):
         return str(value)
 
-    if isinstance(value, WorkflowStateCategory):
+    if isinstance(value, date):
+        # Before the enum branches, because `date` is the one type here that
+        # json cannot serialise on its own -- a missed branch would be a
+        # TypeError at write time rather than a silent widening.
+        return value.isoformat()
+
+    if isinstance(value, WorkflowStateCategory | DueWindow):
+        # Both are StrEnum, so `json.dumps` would already produce the right
+        # string. Named anyway, because that is a property of the base class
+        # rather than of these types, and a plain Enum added here later would
+        # otherwise serialise as its repr with nothing complaining.
         return value.value
 
     return value
@@ -290,6 +341,12 @@ def decode_filter(payload: object) -> IssueFilter:
         priority=_present(payload, "priority", _decode_priority),
         project_id=_nullable(payload, "project_id", _decode_uuid),
         cycle_id=_nullable(payload, "cycle_id", _decode_uuid),
+        # `_present` on all three: none of them admits None on the way in
+        # either, because "no due date" is `DueWindow.NONE` rather than a null
+        # date. A stored null here is a document this codec did not write.
+        due_window=_present(payload, "due_window", _decode_due_window),
+        due_after=_present(payload, "due_after", _decode_date),
+        due_before=_present(payload, "due_before", _decode_date),
     )
 
 

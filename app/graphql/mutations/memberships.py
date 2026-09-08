@@ -1,7 +1,11 @@
 import strawberry
 from strawberry.types import Info
 
-from app.domain.errors import ValidationError, WorkspaceAccessDeniedError
+from app.domain.errors import (
+    TeamNotFoundError,
+    ValidationError,
+    WorkspaceAccessDeniedError,
+)
 from app.domain.tenancy import AuthorizedWorkspaceScope
 from app.graphql.inputs.membership import (
     InvitationAcceptInput,
@@ -10,6 +14,7 @@ from app.graphql.inputs.membership import (
     MemberRemoveInput,
     MemberRoleUpdateInput,
     TeamCreateInput,
+    TeamEstimateScaleSetInput,
     WorkspaceCreateInput,
 )
 from app.graphql.queries.memberships import workspace_not_found
@@ -108,6 +113,70 @@ class MembershipMutation:
             )
         except WorkspaceAccessDeniedError:
             raise workspace_not_found() from None
+        except ValidationError as exc:
+            return TeamPayload(team=None, errors=_errors(exc))
+
+        return TeamPayload(team=TeamType.from_domain(workflow), errors=[])
+
+    @strawberry.mutation(
+        description=(
+            "Choose what a team's estimates count -- points, hours, t-shirt "
+            "sizes, or nothing named. Requires the admin or owner role. Issues "
+            "already estimated keep their numbers; the scale bounds what may "
+            "be written from now on."
+        )
+    )
+    async def team_estimate_scale_set(
+        self, info: Info, input: TeamEstimateScaleSetInput
+    ) -> TeamPayload:
+        """Set the unit a team estimates in.
+
+        Declared here beside `team_create` rather than in a mutation class of
+        its own, because it is the second thing anybody does to a team and a
+        one-field feature class merged into the root would be a file, an import
+        and an entry in `MUTATION_TYPES` bought for one resolver. If teams grow
+        a third mutation, they earn their own module and both move together.
+
+        `TeamPayload`, the same type `team_create` answers, and the service
+        reads the board back inside its transaction so it is populated. A
+        payload whose `workflowStates` were empty would be a client's cue to
+        blank the board it is rendering.
+
+        Requires admin or owner, unlike labels, cycles and templates, which any
+        member may write: this setting decides which estimates the WHOLE team
+        may write from now on, so a member switching it would start refusing
+        their colleagues' next edit.
+        """
+        try:
+            scope = await _scope(info, input.workspace_slug)
+
+            workflow = await info.context.team_service.set_estimate_scale(
+                scope=scope,
+                team_id=input.team_id,
+                # The enum member and not `.value`: `TeamService` takes an
+                # `EstimateScale`, so the vocabulary is checked once by GraphQL
+                # validation and never converted back to a bare string on the
+                # way in. `member_role_update` beside this passes `.value`
+                # because roles are a plain `str` in the domain, deliberately
+                # -- see `AuthorizedWorkspaceScope.role`.
+                scale=input.scale,
+            )
+        except WorkspaceAccessDeniedError:
+            raise workspace_not_found() from None
+        except TeamNotFoundError:
+            # A team in another workspace and one that does not exist are the
+            # same field error, because telling them apart would confirm that
+            # another tenant's team is real.
+            return TeamPayload(
+                team=None,
+                errors=[
+                    ValidationErrorType(
+                        field="teamId",
+                        code="NOT_FOUND",
+                        message="Team not found",
+                    )
+                ],
+            )
         except ValidationError as exc:
             return TeamPayload(team=None, errors=_errors(exc))
 

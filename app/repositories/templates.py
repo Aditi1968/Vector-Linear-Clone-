@@ -273,6 +273,14 @@ class TemplateRepository:
         working as 009 describes for project_teams, as a guard on this ordering
         rather than an obstacle to it.
 
+        The SCHEDULE goes first for the same reason and is NOT deleted here:
+        `issue_recurrences_template_fk` is RESTRICT too, so the caller removes
+        it through `RecurrenceRepository.delete` in this same transaction
+        before calling this. Doing it here instead would mean this class held
+        SQL against a table it does not own -- and would put "deleting a
+        template silently stops a schedule" in a statement nobody reading the
+        recurrence feature would find.
+
         A template in another workspace deletes nothing and answers False,
         indistinguishable from an id that exists nowhere.
         """
@@ -386,6 +394,18 @@ class TemplateRepository:
             project_id=row["project_id"],
             cycle_id=row["cycle_id"],
             label_ids=tuple(row["label_ids"]),
+            # Always None here, and filled in by `TemplateService` from
+            # `RecurrenceRepository`. A schedule lives in its own table, so its
+            # SQL belongs to the repository that owns that table -- the split
+            # `ProjectService` makes when it reaches for `IssueRepository`, and
+            # `SavedViewService` for `FavoriteRepository`.
+            #
+            # A LEFT JOIN into `_TEMPLATE_COLUMNS` would save a round trip and
+            # was declined for that reason plus one more: `list_for_team`'s
+            # shape is a plain ORDER BY over one table, and the day somebody
+            # needs a second schedule column it would be added here, to a
+            # statement about templates, by whoever was editing recurrences.
+            recurrence=None,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )

@@ -16,7 +16,7 @@ from uuid import UUID
 
 
 class NotificationKind(StrEnum):
-    """The four events worth interrupting somebody for.
+    """The five events worth interrupting somebody for.
 
     Deliberately far shorter than `ActivityKind`. Everything that happens to
     an issue belongs in its history; almost none of it belongs in anybody's
@@ -41,14 +41,23 @@ class NotificationKind(StrEnum):
     Adding the kind now would mean inventing the concept, so the kind lands
     with the feature.
 
+    DUE_SOON is the only one of the five that nobody DID. The other four are
+    somebody's action reaching the people it concerns; this one is a date
+    arriving. It is what makes `issues.due_date` more than decoration -- until
+    migration 029 the column was visible on an issue somebody already had open
+    and silent to everybody who did not, which is a commitment the product
+    recorded and then declined to help with.
+
     The application's copy of `notifications_kind_known` -- declared in
-    migration 012 and widened by 020 -- for the reason `ActivityKind` gives.
+    migration 012, widened by 020 and again by 029 -- for the reason
+    `ActivityKind` gives.
     """
 
     ASSIGNED = "assigned"
     COMMENTED = "commented"
     BLOCKED = "blocked"
     STATUS_CHANGED = "status_changed"
+    DUE_SOON = "due_soon"
 
 
 @dataclass(frozen=True, slots=True)

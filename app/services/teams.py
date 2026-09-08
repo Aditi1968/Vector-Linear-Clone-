@@ -5,6 +5,7 @@ from uuid import UUID
 import asyncpg
 
 from app.domain.errors import TeamNotFoundError, ValidationError, ValidationIssue
+from app.domain.estimates import EstimateScale
 from app.domain.teams import TeamWorkflow, WorkflowStateEntity
 from app.domain.tenancy import (
     AuthorizedWorkspaceScope,
@@ -258,6 +259,101 @@ class TeamService:
             raise TeamNotFoundError()
 
         return number
+
+    async def estimate_scale(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        team_id: UUID,
+    ) -> EstimateScale | None:
+        """The unit this team's estimates count, or None if it is not here.
+
+        Takes the caller's connection, like `allocate_issue_number` and
+        `default_workflow_state_id` and for the milder of their two reasons:
+        `IssueService.create` is about to write an estimate on the connection
+        it already holds, and reading the rule that governs that write from a
+        second one would be a second slot out of the pool for a single-column
+        SELECT.
+
+        Returns None rather than raising, which is the opposite of
+        `default_workflow_state_id` beside it and is deliberate. That method's
+        answer feeds a NOT NULL column, so an Optional would move an
+        unavoidable failure somewhere less informative. This one's answer feeds
+        a validation decision, and "no such team" is not a fact about the
+        estimate -- the create raises `TeamNotFoundError` from the next call
+        anyway, which keeps one answer for a team in another workspace rather
+        than two that a caller could tell apart.
+        """
+        return await self._repository.find_estimate_scale(
+            connection,
+            scope.workspace_id,
+            team_id,
+        )
+
+    async def set_estimate_scale(
+        self,
+        *,
+        scope: AuthorizedWorkspaceScope,
+        team_id: UUID,
+        scale: EstimateScale,
+    ) -> TeamWorkflow:
+        """Choose what this team's estimates count.
+
+        Requires admin or owner, unlike labels, cycles and templates, which any
+        member may write. The difference is what the setting DOES: this one
+        decides which estimates the whole team may write from now on, so a
+        member switching it to t-shirt sizes would start refusing their
+        colleagues' next edit. It is configuration in the same sense creating a
+        team is, and `team_create` beside it is guarded the same way.
+
+        THE ISSUES ALREADY ESTIMATED ARE LEFT ALONE. The scale bounds writes
+        and not history -- see `TeamRepository.set_estimate_scale` and
+        migration 029 -- so a team that moves to t-shirt sizes keeps the
+        numbers its issues hold, and each conforms the next time somebody edits
+        it. There is deliberately no confirmation step counting how many issues
+        that is: it would be a scan of the whole board to warn about a state
+        nothing is broken by.
+
+        A team in another workspace and one that does not exist are the same
+        `TeamNotFoundError`, on the same terms as every other method here.
+
+        The scale arrives as an `EstimateScale` and not a string, so a value
+        `teams_estimate_scale_known` would refuse cannot reach the statement --
+        the GraphQL layer converts at the boundary and raises on a word it does
+        not know.
+
+        Answers a `TeamWorkflow` and not the bare entity, matching `create`, so
+        that both mutations return the same `Team` shape. The board is read back
+        in the same transaction rather than left empty: a payload whose
+        `workflowStates` were an empty list would be a client's cue to blank the
+        board it is rendering, and one query on an admin action nobody performs
+        twice a year is cheaper than that bug.
+        """
+        require_workspace_admin(scope)
+
+        async with self._pool.acquire() as connection:
+            # A write, so the service owns the transaction -- and here it holds
+            # two statements rather than one, so the states come back as they
+            # are alongside the team that was just changed.
+            async with connection.transaction():
+                team = await self._repository.set_estimate_scale(
+                    connection,
+                    workspace_id=scope.workspace_id,
+                    team_id=team_id,
+                    scale=scale,
+                )
+
+                if team is None:
+                    raise TeamNotFoundError()
+
+                states = await self._repository.list_workflow_states(
+                    connection,
+                    scope.workspace_id,
+                    [team.id],
+                )
+
+        return TeamWorkflow(team=team, workflow_states=tuple(states))
 
     async def default_workflow_state_id(
         self,

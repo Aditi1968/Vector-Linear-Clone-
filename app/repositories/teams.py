@@ -3,6 +3,7 @@ from uuid import UUID
 
 import asyncpg
 
+from app.domain.estimates import EstimateScale
 from app.domain.teams import (
     DEFAULT_WORKFLOW_STATES,
     TeamEntity,
@@ -44,6 +45,7 @@ class TeamRepository:
                 workspace_id,
                 key,
                 name,
+                estimate_scale,
                 created_at
             FROM teams
             WHERE workspace_id = $1
@@ -80,6 +82,7 @@ class TeamRepository:
                 workspace_id,
                 key,
                 name,
+                estimate_scale,
                 created_at
             FROM teams
             WHERE workspace_id = $1 AND key = $2
@@ -285,6 +288,7 @@ class TeamRepository:
                 workspace_id,
                 key,
                 name,
+                estimate_scale,
                 created_at
             """,
             workspace_id,
@@ -335,6 +339,95 @@ class TeamRepository:
             ],
         )
 
+    async def find_estimate_scale(
+        self,
+        connection: asyncpg.Connection,
+        workspace_id: UUID,
+        team_id: UUID,
+    ) -> EstimateScale | None:
+        """The unit this team estimates in, or nothing if it is not here.
+
+        A narrow read rather than `find_by_key`-shaped, because the one caller
+        -- `IssueService.create`, checking an estimate before it writes one --
+        wants a single column and is already about to pay for a workflow-state
+        lookup and a counter increment on the same connection.
+
+        Scoped by workspace as well as by id, like every other statement on
+        this class: a team id that reaches this process from a client is a
+        value, and looking it up without the tenant predicate is what turns a
+        guessed id into a read of another workspace's configuration.
+
+        None means "no such team in this workspace", and the caller does not
+        turn it into an error of its own -- the create it precedes raises
+        `TeamNotFoundError` from `default_workflow_state_id` a moment later,
+        which is the one answer this repository's callers already give for a
+        team that is not here.
+        """
+        scale = await connection.fetchval(
+            """
+            SELECT estimate_scale
+            FROM teams
+            WHERE workspace_id = $1 AND id = $2
+            """,
+            workspace_id,
+            team_id,
+        )
+
+        if scale is None:
+            return None
+
+        return EstimateScale(scale)
+
+    async def set_estimate_scale(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        workspace_id: UUID,
+        team_id: UUID,
+        scale: EstimateScale,
+    ) -> TeamEntity | None:
+        """Change what this team's estimates count; None if it is not here.
+
+        THE ISSUES ALREADY ESTIMATED ARE NOT TOUCHED, and that is the decision
+        rather than an omission. A scale bounds WRITES and not history --
+        migrations/029_estimates_dates.sql argues it -- so a team moving to
+        t-shirt sizes keeps whatever numbers its issues hold, and each one
+        conforms the next time somebody edits it. The alternatives were
+        scanning every live issue to refuse the switch, which blocks a
+        legitimate product action over data nobody is editing, or rewriting
+        estimates a team spent real time agreeing.
+
+        `scale.value` and not the member: asyncpg would send a StrEnum as its
+        own subclass, which the driver encodes as text correctly today and
+        which is not a property to depend on. The CHECK is the floor either
+        way.
+
+        The row comes back rather than a count, because the caller returns a
+        team and the client is about to re-render one.
+        """
+        row = await connection.fetchrow(
+            """
+            UPDATE teams
+            SET estimate_scale = $3
+            WHERE workspace_id = $1 AND id = $2
+            RETURNING
+                id,
+                workspace_id,
+                key,
+                name,
+                estimate_scale,
+                created_at
+            """,
+            workspace_id,
+            team_id,
+            scale.value,
+        )
+
+        if row is None:
+            return None
+
+        return self._to_team(row)
+
     @staticmethod
     def _to_team(row: asyncpg.Record) -> TeamEntity:
         return TeamEntity(
@@ -342,6 +435,10 @@ class TeamRepository:
             workspace_id=row["workspace_id"],
             key=row["key"],
             name=row["name"],
+            # Through the enum rather than passed through as a string, so a
+            # value the domain does not know about fails here rather than
+            # flowing on as a str that every `is`-comparison answers False for.
+            estimate_scale=EstimateScale(row["estimate_scale"]),
             created_at=row["created_at"],
         )
 

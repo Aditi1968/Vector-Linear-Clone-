@@ -9,6 +9,7 @@ from strawberry.types import Info
 from app.domain.errors import ValidationError
 from app.domain.issues import (
     NO_FILTER,
+    DueWindow,
     IssueEntity,
     IssueFilter,
     IssueOrderField,
@@ -67,6 +68,30 @@ OrderDirectionType = strawberry.enum(
     OrderDirection,
     name="OrderDirection",
     description="Which end of an ordering a list starts from.",
+)
+
+# Declared here beside the other two rather than in `app/graphql/inputs`,
+# because the three are one vocabulary -- what an issue list is sorted by,
+# which way, and which slice of the calendar -- and a client reading the schema
+# finds them together. The input imports it for its side effect; see the note
+# there on why that import is not optional.
+DueWindowType = strawberry.enum(
+    DueWindow,
+    name="DueWindow",
+    description=(
+        "A slice of the calendar, resolved by the SERVER against its own "
+        "today. OVERDUE is strictly before today and never includes the "
+        "undated -- an issue with no due date has missed nothing. TODAY is "
+        "that day. THIS_WEEK is today and the six days after it, a rolling "
+        "seven rather than a Monday-to-Sunday week, which would be nearly "
+        "empty by Friday afternoon. NO_DUE_DATE is the issues that have "
+        "committed to no day, which is most of them and is an ordinary state "
+        "rather than missing data. "
+        "Today is UTC and is the same day for everyone in the workspace: a due "
+        "date is a calendar day with no timezone, so resolving it against each "
+        "viewer's local today would make one issue overdue for one colleague "
+        "and not another."
+    ),
 )
 
 

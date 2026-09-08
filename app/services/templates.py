@@ -1,3 +1,5 @@
+from dataclasses import replace
+from datetime import date
 from typing import TYPE_CHECKING
 from uuid import UUID
 
@@ -5,8 +7,14 @@ import asyncpg
 
 from app.domain.errors import ValidationError, ValidationIssue
 from app.domain.issues import IssueEntity
+from app.domain.recurrence import (
+    RecurrenceEntity,
+    RecurrenceRule,
+    first_occurrence,
+)
 from app.domain.templates import IssueTemplateDraft, IssueTemplateEntity
 from app.domain.tenancy import WorkspaceScope
+from app.repositories.recurrences import RecurrenceRepository
 from app.repositories.templates import TemplateRepository
 
 
@@ -48,6 +56,23 @@ TEMPLATES_MAX = 200
 # `tests/test_templates.py` pins the two equal so they cannot drift apart
 # silently.
 LABELS_PER_TEMPLATE_MAX = 50
+
+# The bounds `issue_recurrences_interval_range` and
+# `issue_recurrences_due_in_days_range` declare, restated so a client is told
+# what is wrong with its schedule instead of receiving a masked CHECK
+# violation. `tests/test_recurrence.py` pins each to its constraint.
+#
+# 52 is a year of weeks, a quarter of days and longer than most of these
+# templates will exist in months -- and it is also what bounds the forward scan
+# `app.domain.recurrence.next_occurrence` performs, which is how that function
+# stays a loop over a predicate instead of closed-form calendar arithmetic.
+INTERVAL_MIN = 1
+INTERVAL_MAX = 52
+
+# A year. An offset longer than that puts the generated issue's due date beyond
+# the next occurrence, which is a schedule producing issues in an order nobody
+# can read.
+DUE_IN_DAYS_MAX = 365
 
 
 # Foreign keys whose violation is a client mistake, and the field error each
@@ -91,6 +116,20 @@ _EXPECTED_FOREIGN_KEYS: dict[str, ValidationIssue] = {
         field="labelIds",
         code="NOT_FOUND",
         message="Label not found",
+    ),
+    # The two migration 029 adds. `set_recurrence` reads the template first --
+    # it has to, to compare the team -- so the template key can only fire if
+    # the template is deleted between that read and the upsert, which is a race
+    # a client corrects the same way as a stale id: by refreshing the menu.
+    "issue_recurrences_team_fk": ValidationIssue(
+        field="teamId",
+        code="NOT_FOUND",
+        message="Team not found",
+    ),
+    "issue_recurrences_template_fk": ValidationIssue(
+        field="templateId",
+        code="NOT_FOUND",
+        message="Template not found",
     ),
 }
 
@@ -144,11 +183,23 @@ class TemplateService:
         self,
         pool: asyncpg.Pool,
         repository: TemplateRepository,
+        recurrences: RecurrenceRepository,
         issues: "IssueService",
         labels: "LabelService",
     ):
         self._pool = pool
         self._repository = repository
+
+        # The schedule that files a template by itself. A second repository
+        # rather than a second service, and rather than statements about
+        # `issue_recurrences` inside `TemplateRepository`: a recurrence is not a
+        # resource of its own -- it has no life without the template it names,
+        # `issue_recurrences_pkey` allows exactly one per template, and every
+        # read of a template wants it -- but the SQL for a table belongs to the
+        # repository that owns that table. The same split `SavedViewService`
+        # makes for `FavoriteRepository` and `ProjectService` for
+        # `IssueRepository`.
+        self._recurrences = recurrences
 
         # Applying a template files an issue and puts labels on it, and both
         # of those are rules that live somewhere already: which state a new
@@ -239,9 +290,15 @@ class TemplateService:
     ) -> UUID:
         """Discard one template, returning the id that went.
 
-        The label rows go first and in the same transaction; see
-        `TemplateRepository.delete` for why the RESTRICT that forces that
-        ordering is the wanted behaviour rather than an obstacle.
+        The schedule and the label rows go first and in the same transaction;
+        see `TemplateRepository.delete` for why the RESTRICTs that force that
+        ordering are the wanted behaviour rather than an obstacle.
+
+        A template that recurs is deleted rather than refused, and that is the
+        deliberate call: the alternative -- "clear its schedule first" -- is an
+        extra step in front of an operation whose meaning is unambiguous, and
+        it protects nothing, because a schedule with no shape to file is not a
+        thing anybody wanted to keep. The issues it already filed are untouched.
 
         Deleting a template does NOT touch the issues filed from it. There is
         no link between them by design: a template is a starting shape, and an
@@ -249,6 +306,12 @@ class TemplateService:
         """
         async with self._pool.acquire() as connection:
             async with connection.transaction():
+                await self._recurrences.delete(
+                    connection,
+                    scope=scope,
+                    template_id=template_id,
+                )
+
                 deleted = await self._repository.delete(
                     connection,
                     scope=scope,
@@ -266,17 +329,71 @@ class TemplateService:
         scope: WorkspaceScope,
         template_id: UUID,
     ) -> IssueTemplateEntity | None:
-        """One template from this workspace, or nothing.
+        """One template from this workspace, with its schedule, or nothing.
 
-        A single SELECT needs no explicit write transaction, so this acquires
-        a connection without opening one.
+        Two SELECTs and no explicit transaction. Neither statement writes, and
+        the second is restricted to an id the first returned -- so a schedule
+        saved or cleared between them can add nothing and can only remove a row
+        this call would have attached to a template it still lists correctly.
+        The same argument `TeamService.list_workflows` makes for its pair.
+
+        The second is skipped entirely for a template that is not here, which
+        is not an optimisation: `= ANY('{}')` is a round trip whose answer is
+        known.
         """
         async with self._pool.acquire() as connection:
-            return await self._repository.get(
+            template = await self._repository.get(
                 connection,
                 scope=scope,
                 template_id=template_id,
             )
+
+            if template is None:
+                return None
+
+            return (await self._with_recurrences(connection, scope, [template]))[0]
+
+    async def _with_recurrences(
+        self,
+        connection: asyncpg.Connection,
+        scope: WorkspaceScope,
+        templates: list[IssueTemplateEntity],
+    ) -> list[IssueTemplateEntity]:
+        """Attach each template's schedule, in ONE extra statement.
+
+        Declared above `list`, and that is load-bearing rather than tidy: inside
+        this class the annotation `list[IssueTemplateEntity]` resolves to
+        `TemplateService.list` once that method exists, and mypy reports it.
+        The same hazard `IssueService.get_many_by_ids` documents, met the same
+        way.
+
+        Batched over the whole page rather than resolved per template, which is
+        the N+1 that would make a twenty-entry menu cost twenty-one queries.
+        `TeamService.list_workflows` batches its states for the same reason and
+        in the same shape.
+
+        `dataclasses.replace` rather than mutation, because
+        `IssueTemplateEntity` is frozen -- and it is frozen for the reason every
+        entity here is: an object read out of the database is a value, and a
+        caller that could edit one could hand a modified copy to something that
+        trusted it as a row.
+
+        A template with no schedule gets None, which is the ordinary state of
+        nearly all of them and not a missing value.
+        """
+        if not templates:
+            return []
+
+        schedules = await self._recurrences.find_many_for_templates(
+            connection,
+            scope=scope,
+            template_ids=[template.id for template in templates],
+        )
+
+        return [
+            replace(template, recurrence=schedules.get(template.id))
+            for template in templates
+        ]
 
     async def list(
         self,
@@ -297,12 +414,200 @@ class TemplateService:
         reporting that another tenant's team is real.
         """
         async with self._pool.acquire() as connection:
-            return await self._repository.list_for_team(
+            templates = await self._repository.list_for_team(
                 connection,
                 scope=scope,
                 team_id=team_id,
                 limit=TEMPLATES_MAX,
             )
+
+            return await self._with_recurrences(connection, scope, templates)
+
+    async def set_recurrence(
+        self,
+        *,
+        scope: WorkspaceScope,
+        template_id: UUID,
+        team_id: UUID,
+        rule: RecurrenceRule,
+    ) -> RecurrenceEntity:
+        """Make this template file itself on a schedule, replacing any it had.
+
+        `team_id` is required, exactly as it is for `apply`, and for the same
+        reason plus one. The same reason: an issue belongs to a team and a
+        service that picked would be choosing where work lands by a rule
+        invisible at the call site. The extra one: the sweep that files these
+        issues runs on no request and has no caller to ask, so the answer has to
+        be written down when the schedule is -- which is why
+        `issue_recurrences.team_id` is NOT NULL even though a template's may not
+        be.
+
+        A TEAM-SCOPED template scheduled into a DIFFERENT team is refused here
+        rather than left to `apply` to refuse at 3am, because both values are
+        already in hand: it is a property of the arguments and a stored row, and
+        the alternative is a schedule that looks saved and produces an error
+        into a log nobody reads. The same check `apply` makes, moved to the
+        moment it can still be corrected.
+
+        `next_run_on` is computed from the rule by
+        `app.domain.recurrence.first_occurrence` and never supplied by the
+        caller. A client able to name it could file an issue immediately by
+        backdating it, and -- more mundanely -- could name a day the schedule
+        does not fall on, which every later advance would then walk away from.
+
+        The upsert RESETS `next_run_on` on an edit, which is right: the next
+        occurrence is the first one the new rule names, so a monthly recurrence
+        changed to weekly does not wait out the month.
+        """
+        self._validate_rule(rule)
+
+        template = await self.get(scope=scope, template_id=template_id)
+
+        if template is None:
+            raise ValidationError([TEMPLATE_NOT_FOUND])
+
+        if template.team_id is not None and template.team_id != team_id:
+            raise ValidationError(
+                [
+                    ValidationIssue(
+                        field="teamId",
+                        code="TEAM_MISMATCH",
+                        message="This template belongs to a different team",
+                    )
+                ]
+            )
+
+        async with self._pool.acquire() as connection:
+            try:
+                async with connection.transaction():
+                    entity = await self._recurrences.upsert(
+                        connection,
+                        scope=scope,
+                        template_id=template_id,
+                        team_id=team_id,
+                        rule=rule,
+                        next_run_on=first_occurrence(rule),
+                    )
+            except asyncpg.ForeignKeyViolationError as exc:
+                # Caught outside the transaction block so the rollback has
+                # already happened by the time this runs.
+                error = _validation_error_for(exc.constraint_name)
+
+                if error is None:
+                    raise
+
+                raise error from None
+
+        # The upsert either inserts or updates, so a None here would mean the
+        # statement matched nothing -- which it cannot. Asserting rather than
+        # widening this method's return type keeps the impossible case off
+        # every caller.
+        assert entity is not None, "an upsert always returns its row"
+
+        return entity
+
+    async def clear_recurrence(
+        self,
+        *,
+        scope: WorkspaceScope,
+        template_id: UUID,
+    ) -> bool:
+        """Stop this template recurring; True if a schedule went.
+
+        Clearing a schedule that was never set is a successful no-op rather
+        than an error, and so is clearing one on a template in another
+        workspace: the caller asked for a state, the state holds, and reporting
+        a failure would make a retry after a dropped response look like a
+        different outcome from the first attempt. It also keeps existence
+        unobservable, which the save path cannot. The same judgement
+        `ActivityService.unsubscribe` makes.
+
+        The issues the schedule already filed are ordinary issues and are
+        untouched.
+        """
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                return await self._recurrences.delete(
+                    connection,
+                    scope=scope,
+                    template_id=template_id,
+                )
+
+    @staticmethod
+    def _validate_rule(rule: RecurrenceRule) -> None:
+        """The rule's own shape, before a connection is taken.
+
+        Every check here has a CHECK constraint behind it in migration 029, and
+        both exist for the reason `TeamService._validate` gives: a CHECK
+        violation reaches a client as a masked internal error, which a form
+        cannot render and a person cannot act on, while the constraint remains
+        the backstop for every write that does not come through here.
+
+        `is_consistent` covers the two equivalences -- weekly carries weekdays,
+        monthly carries a day of the month, neither carries the other's -- and
+        it is one property rather than four branches because the constraints
+        are written as equalities too, so the two read alike.
+
+        Field order is deterministic and matches the input type's, so clients
+        can rely on it; the codes and messages are a public contract.
+        """
+        issues: list[ValidationIssue] = []
+
+        if not INTERVAL_MIN <= rule.interval_count <= INTERVAL_MAX:
+            issues.append(
+                ValidationIssue(
+                    field="intervalCount",
+                    code="OUT_OF_RANGE",
+                    message=(
+                        f"Interval must be between {INTERVAL_MIN} and {INTERVAL_MAX}"
+                    ),
+                )
+            )
+
+        if not rule.is_consistent:
+            issues.append(
+                ValidationIssue(
+                    field="frequency",
+                    code="INVALID",
+                    message=(
+                        "A weekly schedule needs weekdays, a monthly one needs a "
+                        "day of the month, and neither takes the other's"
+                    ),
+                )
+            )
+
+        if any(day < 1 or day > 7 for day in rule.weekdays):
+            issues.append(
+                ValidationIssue(
+                    field="weekdays",
+                    code="OUT_OF_RANGE",
+                    message="Weekdays are 1 (Monday) through 7 (Sunday)",
+                )
+            )
+
+        if rule.day_of_month is not None and not 1 <= rule.day_of_month <= 31:
+            issues.append(
+                ValidationIssue(
+                    field="dayOfMonth",
+                    code="OUT_OF_RANGE",
+                    message="Day of month must be between 1 and 31",
+                )
+            )
+
+        if (
+            rule.due_in_days is not None
+            and not 0 <= rule.due_in_days <= DUE_IN_DAYS_MAX
+        ):
+            issues.append(
+                ValidationIssue(
+                    field="dueInDays",
+                    code="OUT_OF_RANGE",
+                    message=f"Due in days must be between 0 and {DUE_IN_DAYS_MAX}",
+                )
+            )
+
+        if issues:
+            raise ValidationError(issues)
 
     async def apply(
         self,
@@ -311,6 +616,7 @@ class TemplateService:
         template_id: UUID,
         team_id: UUID,
         title: str | None = None,
+        due_date: date | None = None,
         actor_id: UUID | None = None,
     ) -> IssueEntity:
         """File one issue from a template, into a team of this workspace.
@@ -327,6 +633,15 @@ class TemplateService:
         `title` overrides the template's. A template with neither is refused by
         `IssueService`'s own title rule rather than by a copy of it here, which
         is what keeps one answer to "what is a valid title".
+
+        `due_date` is supplied by the caller and is NOT a template field, which
+        is deliberate: a template is a shape filed many times, and a stored due
+        date would be one date on every issue it ever produced. The one caller
+        that passes one is `ScheduleWorker`, which computes it from the
+        recurrence's `dueInDays` offset counted from the day the issue is
+        actually filed -- see `app.domain.recurrence.due_date_for`. A person
+        applying a template by hand passes nothing and sets the date on the
+        issue afterwards, which is where they were going to look anyway.
 
         NOT ONE TRANSACTION
         -------------------
@@ -374,6 +689,7 @@ class TemplateService:
             assignee_id=template.assignee_id,
             creator_id=actor_id,
             estimate=template.estimate,
+            due_date=due_date,
         )
 
         if template.project_id is not None:

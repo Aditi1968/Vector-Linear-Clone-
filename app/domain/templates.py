@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
+from app.domain.recurrence import RecurrenceEntity
+
 
 @dataclass(frozen=True, slots=True)
 class IssueTemplateDraft:
@@ -72,5 +74,18 @@ class IssueTemplateEntity:
     project_id: UUID | None
     cycle_id: UUID | None
     label_ids: tuple[UUID, ...]
+
+    # The schedule that files this template by itself, or None for a template
+    # somebody applies by hand -- which is nearly all of them.
+    #
+    # On the ENTITY and deliberately not on `IssueTemplateDraft`. A save
+    # REPLACES the record, so a recurrence carried in the draft would be
+    # cleared by every edit of the template's title -- and the two are edited
+    # in different places for different reasons: the shape in a form, the
+    # schedule in a switch beside it. `issueTemplateRecurrenceSet` and its
+    # clear are their own mutations for that reason, and `TemplateRepository`
+    # writes the row from its own statement.
+    recurrence: RecurrenceEntity | None
+
     created_at: datetime
     updated_at: datetime

@@ -166,6 +166,50 @@ class IssuePatch:
         )
 
 
+class DueWindow(StrEnum):
+    """A relative window of due dates, resolved against the server's today.
+
+    Four windows and not a pair of dates, and the difference is where "today"
+    is decided. A client sending `dueBefore: 2026-09-08` has had to work out
+    what today is, in whatever zone its browser is in -- and two colleagues in
+    different zones then ask for different lists from the same screen. These
+    resolve against `CURRENT_DATE` in the statement, so "overdue" is one set for
+    everybody in the workspace.
+
+    Which today that is, is UTC, and migrations/029_estimates_dates.sql argues
+    it: a due date is a calendar day with no zone (006 refuses TIMESTAMPTZ
+    precisely so "due Friday" is the same promise in Berlin and Los Angeles),
+    and comparing it against a viewer's local today would make the same issue
+    overdue for one of them and not the other. The reminder sweep answers the
+    same way, so nothing in the product contradicts anything else in it.
+
+    THIS_WEEK is today and the six days after it, NOT the calendar week. A
+    Monday-to-Sunday window is nearly empty by Friday afternoon, which is not
+    the list somebody planning their week asked for; a rolling seven days
+    answers the same question on every day of the week.
+
+    NONE is the issues with no due date, which is most of them -- an ordinary
+    state and not missing data, exactly as 006 says. It is a filter people
+    genuinely want: "what have we committed to nothing about".
+
+    A StrEnum for the reason every other vocabulary here is one: the member is
+    the spelling, so a value read out of a stored saved-view filter becomes a
+    member without a lookup table.
+    """
+
+    OVERDUE = "overdue"
+    TODAY = "today"
+    THIS_WEEK = "this_week"
+    NONE = "none"
+
+
+# How many days THIS_WEEK reaches forward, today included.
+#
+# Named rather than spelled as a 7 inside a SQL fragment, because a bare
+# `+ 7` in a date predicate reads as a count of something.
+THIS_WEEK_DAYS: Final = 7
+
+
 @dataclass(frozen=True, slots=True)
 class IssueFilter:
     """What narrows a list of issues, with everything unnamed left wide.
@@ -197,6 +241,27 @@ class IssueFilter:
     priority: int | Unset = UNSET
     project_id: UUID | None | Unset = UNSET
     cycle_id: UUID | None | Unset = UNSET
+
+    # The three due-date filters, and they are three rather than one because
+    # they answer two different kinds of question. `due_window` is relative and
+    # is resolved by the SERVER against its own today, which is the whole
+    # reason it exists -- see `DueWindow`. The two dates are absolute and are
+    # exactly what a client already knows how to send: "the sprint", "next
+    # month", a range somebody dragged on a calendar.
+    #
+    # All three narrow and all three may be combined, because they are ANDed
+    # like every other predicate here. `due_window: OVERDUE` with
+    # `due_after: <a date>` is a coherent request and needs no special case;
+    # `due_after` later than `due_before` selects nothing, which is the same
+    # empty page an id from another workspace gets rather than an error, for
+    # the same reason.
+    #
+    # None is not admitted on any of them: "no due date" is `DueWindow.NONE`
+    # and not a null date, so there is one spelling of that set instead of two
+    # that could be sent together and contradict each other.
+    due_window: DueWindow | Unset = UNSET
+    due_after: date | Unset = UNSET
+    due_before: date | Unset = UNSET
 
 
 class IssueOrderField(StrEnum):
