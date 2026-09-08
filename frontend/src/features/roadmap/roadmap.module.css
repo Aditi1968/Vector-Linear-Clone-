@@ -1,0 +1,204 @@
+/*
+ * Styles for the roadmap feature.
+ *
+ * Every value comes from `src/styles/tokens.css`; there is no literal hex or
+ * pixel measurement below. Badges, buttons, empty and error states are
+ * `components/`.
+ *
+ * The one structural decision worth stating: the months are laid out as
+ * horizontally scrolling lanes rather than as a vertical stack of sections.
+ * A calendar reads left to right, and side-by-side months make "March is
+ * crowded and April is empty" visible at a glance, which a stack cannot show.
+ * The lanes scroll inside their own container, never the page.
+ */
+
+/* The sentence explaining that these are markers and not bars. */
+.axisNote {
+  max-width: var(--layout-content-max-width);
+  margin: 0 0 var(--space-7);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+/* ----------------------------------------------------------------- lanes */
+
+.lanes {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(16rem, 1fr);
+  gap: var(--space-5);
+  overflow-x: auto;
+  padding-block-end: var(--space-5);
+
+  /* Momentum-free horizontal scrolling that stops on a whole month rather
+   * than halfway through one. */
+  scroll-snap-type: x proximity;
+}
+
+.lane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background-color: var(--color-surface);
+  scroll-snap-align: start;
+}
+
+.laneTitle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0;
+  color: var(--color-text-heading);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.laneCount {
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+  font-variant-numeric: var(--numeric-tabular);
+  font-weight: var(--weight-regular);
+}
+
+/* ----------------------------------------------------------------- items */
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-raised);
+}
+
+.itemHead {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+/*
+ * Whether this row is an initiative or a project.
+ *
+ * On every row rather than only where the two differ: the roadmap is the one
+ * screen where both appear together, and a reader who cannot tell them apart
+ * cannot tell a launch from one of the projects inside it.
+ */
+.itemKind {
+  color: var(--color-text-faint);
+  font-size: var(--text-3xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.itemDate {
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+  font-variant-numeric: var(--numeric-tabular);
+  white-space: nowrap;
+}
+
+.itemName,
+.itemLink {
+  overflow: hidden;
+  color: var(--color-text-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+}
+
+.itemLink {
+  text-decoration: none;
+}
+
+.itemLink:hover {
+  color: var(--color-text-accent);
+}
+
+.itemBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/* ---------------------------------------------------------- unscheduled */
+
+/*
+ * Below the lanes and outside them, because these items are not on the axis.
+ * Putting them in a lane would give them a position on a calendar they have
+ * not earned.
+ */
+.undated {
+  margin-block-start: var(--space-8);
+  padding-block-start: var(--space-6);
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
+}
+
+.undated .items {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+}
+
+.undated .laneTitle {
+  margin-block-end: var(--space-5);
+}
+
+/* --------------------------------------------------------------- states */
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.actionError {
+  margin-block-start: var(--space-6);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.loadMore {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: space-between;
+  margin-block-start: var(--space-7);
+}
+
+.countLine {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.count {
+  font-variant-numeric: var(--numeric-tabular);
+}

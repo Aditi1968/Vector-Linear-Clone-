@@ -1,0 +1,390 @@
+/*
+ * Styles for the initiatives feature.
+ *
+ * Every value comes from `src/styles/tokens.css`; there is no literal hex or
+ * pixel measurement below. Resets, list semantics and the focus ring belong
+ * to `src/styles/base.css` and are not restated -- restating a focus ring is
+ * how a codebase ends up with four subtly different ones.
+ *
+ * Rows, buttons, badges, menus, panels, empty and error states are
+ * `components/`. What is here is only the screen's own furniture: the split
+ * layout, the tree indentation, the fact list and the update feed.
+ */
+
+/* ---------------------------------------------------------------- layout */
+
+/*
+ * List beside panel above 62rem, stacked below.
+ *
+ * The same breakpoint the issues screen uses for its inspector, chosen for
+ * the same reason: two columns of this content below it leave a panel too
+ * narrow to hold a sentence. `minmax(0, ...)` on both tracks, because a grid
+ * track's default `min-width: auto` refuses to shrink below its content and a
+ * long initiative name would push the panel off screen.
+ */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-7);
+}
+
+@media (min-width: 62rem) {
+  .split {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 24rem);
+    align-items: start;
+  }
+}
+
+.column {
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ rows */
+
+/*
+ * The whole row's selecting control.
+ *
+ * A button and not a link: there is no `initiatives/:id` route, so there is
+ * nowhere for an `<a>` to point. See ./pages/InitiativesPage.tsx.
+ */
+.rowButton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+
+  /* Depth arrives as `--initiative-depth` from the row, so the indentation
+   * step stays a token here rather than a number in the JSX. */
+  padding-inline-start: calc(var(--space-6) * var(--initiative-depth, 0));
+}
+
+.rowName {
+  overflow: hidden;
+  color: var(--color-text-body);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+  font-variant-numeric: var(--numeric-tabular);
+}
+
+.rowActions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+/*
+ * A value the screen has but cannot name, or a value that is genuinely
+ * absent. Muted and italic rather than hidden: the thing is really there, and
+ * a row that quietly dropped it would misstate what the initiative contains.
+ */
+.unresolved {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* --------------------------------------------------------------- panel */
+
+.panelHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.panelTitle {
+  margin: 0;
+  color: var(--color-text-heading);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.panelBadges {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.panelProse {
+  margin: 0 0 var(--space-6);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+}
+
+/* The key/value pairs: owner, target date. A real `<dl>`. */
+.facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-5);
+  margin: 0 0 var(--space-7);
+}
+
+.fact dt {
+  margin-block-end: var(--space-2);
+  color: var(--color-text-faint);
+  font-size: var(--text-3xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.fact dd {
+  margin: 0;
+  color: var(--color-text-body);
+  font-size: var(--text-body-sm);
+}
+
+/* ------------------------------------------------------------- sections */
+
+.section {
+  padding-block-start: var(--space-6);
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
+}
+
+.section + .section {
+  margin-block-start: var(--space-6);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--text-3xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.sectionNote {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+/* A picker and its button on one line, wrapping when the panel is narrow. */
+.inlineForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: end;
+}
+
+.inlineForm > label {
+  flex-basis: 100%;
+}
+
+/* ------------------------------------------------------------ project chips */
+
+.chips {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-raised);
+  font-size: var(--text-body-sm);
+}
+
+.chipLink {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-body);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipLink:hover {
+  color: var(--color-text-accent);
+}
+
+.chipMeta {
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+/* -------------------------------------------------------------- updates */
+
+.updateForm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin-block-end: var(--space-6);
+}
+
+.updates {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.update {
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-raised);
+}
+
+.updateHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  margin-block-end: var(--space-3);
+}
+
+.updateMeta {
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+.updateBody {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+}
+
+/* --------------------------------------------------------------- states */
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/*
+ * A failure of one action, which leaves the rest of the screen intact. Shown
+ * above the list rather than inside the row it came from: that row may have
+ * moved by the time the message is read.
+ */
+.actionError {
+  margin-block-end: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.loadMore {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: space-between;
+  margin-block-start: var(--space-6);
+}
+
+/*
+ * The sentence that says how much of the list is on screen.
+ *
+ * Not decoration. `InitiativeConnection` has no `totalCount`, so this screen
+ * cannot say "25 of 84" -- it can only say that there is more, which is what
+ * it says. The nesting note matters as much: a child whose parent has not
+ * been fetched is drawn at the top level, and that only stops being confusing
+ * if the reader knows the list is partial.
+ */
+.countLine {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.count {
+  font-variant-numeric: var(--numeric-tabular);
+}
+
+/* --------------------------------------------------------------- forms */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--space-5);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.formActions {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: flex-end;
+}
+
+.formError {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.fieldError {
+  margin: 0;
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}

@@ -16,17 +16,14 @@ import { paths } from './paths'
  * that -- `paths.test.ts` proves the two *forms* of a builder agree with each
  * other, not that the router has heard of either.
  *
- * Four of the original twelve are gone from this list because their screens
- * are built: `triage`, `savedViews`, `favorites` and `templates` now render
- * real pages, and each is covered by its own feature test. A row removed here
- * has to be a row that graduated -- deleting one whose screen does not exist
- * would leave a rail link pointing at the not-found page with nothing
- * watching.
+ * Seven of the original twelve are gone from this list because their screens
+ * are built: `triage`, `savedViews`, `favorites` and `templates` first, then
+ * `initiatives`, `roadmap` and `documents`. Each now renders a real page and
+ * is covered by its own feature test. A row removed here has to be a row that
+ * graduated -- deleting one whose screen does not exist would leave a rail
+ * link pointing at the not-found page with nothing watching.
  */
 const SECOND_WAVE = [
-  [paths.initiatives, 'Initiatives'],
-  [paths.roadmap, 'Roadmap'],
-  [paths.documents, 'Documents'],
   [paths.releases, 'Releases'],
   [paths.environments, 'Environments'],
   [paths.labelGroups, 'Label groups'],

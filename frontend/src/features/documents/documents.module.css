@@ -1,0 +1,434 @@
+/*
+ * Styles for the documents feature.
+ *
+ * Every value comes from `src/styles/tokens.css`; there is no literal hex or
+ * pixel measurement below. Resets, list semantics and the focus ring belong
+ * to `src/styles/base.css` and are not restated.
+ *
+ * The `.prose` block is the one place in this codebase that styles arbitrary
+ * document content. It is a rendering of a closed vocabulary -- see
+ * ./components/DocumentBody.tsx -- so the selectors below are a complete list
+ * rather than a defensive net over unknown markup.
+ */
+
+/* ---------------------------------------------------------------- layout */
+
+/*
+ * The list is the narrow column here, opposite the initiatives screen.
+ *
+ * A document is prose and needs the width; a document *list* is a column of
+ * titles and needs very little. Below 62rem the two stack, list first, for
+ * the same reason every other split in this product does.
+ */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-7);
+}
+
+@media (min-width: 62rem) {
+  .split {
+    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.column {
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ rows */
+
+.rowButton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.rowName {
+  overflow: hidden;
+  color: var(--color-text-body);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+/* A value that is genuinely absent, or one this screen holds and cannot
+ * name. Muted and italic rather than hidden. */
+.unresolved {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------- panel */
+
+.panelHeader {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.panelTitle {
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-text-heading);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  text-overflow: ellipsis;
+}
+
+.panelMeta {
+  margin: 0;
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+.titleRow {
+  display: flex;
+  gap: var(--space-4);
+  align-items: end;
+  margin-block-end: var(--space-6);
+}
+
+.titleRow .field {
+  flex: 1;
+  min-width: 0;
+}
+
+/* A hairline that says a write is in flight without moving anything. */
+.savingRow {
+  margin-block-end: var(--space-5);
+}
+
+/* ----------------------------------------------------------------- prose */
+
+/*
+ * The document itself.
+ *
+ * A reading measure rather than the panel's full width: a line of prose past
+ * about 75 characters costs the reader the return sweep, and this is the one
+ * surface in the product that is genuinely read rather than scanned.
+ */
+.prose {
+  max-width: 42rem;
+  color: var(--color-text-body);
+  font-size: var(--text-md);
+  line-height: var(--leading-relaxed);
+}
+
+.prose p {
+  margin: 0 0 var(--space-5);
+}
+
+.proseHeading {
+  margin: var(--space-7) 0 var(--space-4);
+  color: var(--color-text-heading);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.proseHeading:first-child {
+  margin-block-start: 0;
+}
+
+.proseList {
+  margin: 0 0 var(--space-5);
+  padding-inline-start: var(--space-7);
+}
+
+.proseList li {
+  margin-block-end: var(--space-3);
+}
+
+.taskList {
+  margin: 0 0 var(--space-5);
+  padding: 0;
+  list-style: none;
+}
+
+.taskItem {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  margin-block-end: var(--space-3);
+}
+
+.quote {
+  margin: 0 0 var(--space-5);
+  padding-inline-start: var(--space-5);
+  border-inline-start: var(--space-1) solid var(--color-accent-border);
+  color: var(--color-text-secondary);
+}
+
+.code {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-5);
+  overflow-x: auto;
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-raised);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.inlineCode {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-surface-active);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.rule {
+  margin: var(--space-7) 0;
+  border: none;
+  border-block-start: var(--border-width) solid var(--color-border);
+}
+
+.proseLink {
+  color: var(--color-text-accent);
+  text-decoration: underline;
+}
+
+/*
+ * A link this client refused to render. Underlined like a link, in the
+ * danger colour, so it reads as "this was meant to be a link and is not"
+ * rather than as ordinary text.
+ */
+.blockedLink {
+  color: var(--color-text-danger);
+  text-decoration: underline dotted;
+}
+
+/* A node type this build does not know. Shown, never dropped. */
+.unknownNode {
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  font-style: italic;
+}
+
+/* ---------------------------------------------------------------- editor */
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.bodyInput {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+.bodyActions {
+  display: flex;
+  gap: var(--space-4);
+  margin-block-start: var(--space-6);
+}
+
+.checkboxRow {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.checkboxLabel {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+/* ------------------------------------------------------------- revisions */
+
+.revisions,
+.comments {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin: var(--space-6) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.revision,
+.comment {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-surface-raised);
+}
+
+.revisionHead,
+.commentHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.revisionTitle,
+.commentAuthor {
+  color: var(--color-text-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.revisionMeta,
+.commentMeta {
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+.revisionPreview {
+  width: 100%;
+}
+
+.revisionPreview summary {
+  color: var(--color-text-accent);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+
+.revisionPreview > .prose {
+  margin-block-start: var(--space-5);
+  padding-block-start: var(--space-5);
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
+}
+
+.commentBody {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+}
+
+/* --------------------------------------------------------------- states */
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/*
+ * The panel's own explanations: why the editor is closed, what a version is,
+ * how much of a list is on screen.
+ */
+.note {
+  margin: 0 0 var(--space-5);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+.actionError {
+  margin-block-end: var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.loadMore {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: space-between;
+  margin-block-start: var(--space-6);
+}
+
+.countLine {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.count {
+  font-variant-numeric: var(--numeric-tabular);
+}
+
+/* --------------------------------------------------------------- forms */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+}
+
+.hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.formActions {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: flex-end;
+}
+
+.formError {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-danger-subtle);
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
+
+.fieldError {
+  margin: 0;
+  color: var(--color-text-danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+}
