@@ -27,7 +27,23 @@ export default tseslint.config(
   {
     // eslint.config.js itself is deliberately absent: it is plain JavaScript,
     // belongs to no tsconfig, and type-checked rules cannot be applied to it.
-    files: ['src/**/*.{ts,tsx}', '*.config.ts'],
+    //
+    // The two build configs are named rather than matched with `*.config.ts`,
+    // and the list is exactly tsconfig.node.json's `include`. That is not a
+    // coincidence to be tidied away: `projectService` resolves every linted
+    // file to a TypeScript project, and a file that belongs to none is a hard
+    // parsing error rather than a skipped file. A glob is therefore a promise
+    // that every root config is in a tsconfig -- and playwright.config.ts is
+    // deliberately in none of them, along with the e2e/ suite it configures.
+    // Neither is compiled by `tsc -b` or bundled by vite; Playwright
+    // transpiles them itself, and the `e2e` job in .github/workflows/ci.yml
+    // is what proves they are correct, by running them.
+    //
+    // ponytail: the e2e suite is unlinted and untyped as a result. Giving it
+    // a tsconfig of its own means `@types/node` as a real devDependency and a
+    // project reference for the one `src/` module it imports; worth doing the
+    // day a spec is big enough that a type error in it is not obvious.
+    files: ['src/**/*.{ts,tsx}', 'vite.config.ts', 'vitest.config.ts'],
     extends: [...tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {
