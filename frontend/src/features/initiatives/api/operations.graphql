@@ -1,0 +1,235 @@
+# Every GraphQL document the initiatives feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`. Edit here, never there.
+#
+# The conventions are set out at length in
+# `src/features/issues/api/operations.graphql`. The one that is easy to get
+# wrong and expensive to discover is repeated here because it bites in this
+# file too:
+#
+#   **`first` is a literal, never a variable.** `app/graphql/limits.py` prices
+#   a list field at `page size x fields below it` during *validation*, and a
+#   variable has no value then, so `first: $first` is charged at
+#   `ASSUMED_PAGE_SIZE = 100` however small a page was meant. The failure is
+#   the whole document being refused. The `25` below must equal
+#   `DEFAULT_PAGE_SIZE` in `src/lib/graphql/pagination.ts`.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`,
+# because codegen emits one module.
+
+# The row selection: what a list row draws, and the base every write returns.
+#
+# `projectIds` and `childInitiativeIds` are lists of raw UUIDs, not objects --
+# the schema exposes no `Initiative.projects` and no `Initiative.children`.
+# They are selected in the *row* rather than only in the detail because both
+# are part of what an initiative IS: a row that showed no project count would
+# make a grouping of eleven projects look identical to an empty one.
+#
+# `description` is selected on 25 rows although only the panel renders it in
+# full. That is the projects feature's argument at ProjectRowFields: every
+# mutation below returns this fragment, so a row written into the cache by a
+# write can satisfy a later read of the list without a second request.
+fragment InitiativeFields on Initiative {
+  id
+  name
+  description
+  status
+  health
+  targetDate
+  ownerId
+  parentInitiativeId
+  projectIds
+  childInitiativeIds
+  updatedAt
+}
+
+# One posted update: what the health was said to be, and why.
+#
+# `initiativeId` is selected although the panel already knows which initiative
+# it asked about: it is what lets Apollo normalise the update against the
+# right parent when a write returns one on its own.
+fragment InitiativeUpdateFields on InitiativeUpdate {
+  id
+  initiativeId
+  health
+  body
+  authorId
+  createdAt
+}
+
+# Everything the panel shows. A strict superset of the row fields.
+#
+# `updates` is a plain list with no page-size argument, so the server returns
+# all of them and there is no cursor to follow. That is the schema's shape:
+# an initiative accumulates one update a week, not a feed.
+fragment InitiativeDetailFields on Initiative {
+  ...InitiativeFields
+  createdAt
+  updates {
+    ...InitiativeUpdateFields
+  }
+}
+
+# One page of initiatives, newest first.
+#
+# Cursor pagination. `src/lib/graphql/cache.ts` carries the field policy that
+# merges pages; without it `fetchMore` writes page two under a cache key no
+# mounted query watches and "Load more" becomes a button that sends a request
+# and changes nothing. Cost: 25 x (11 + 2) = 325 of 1000.
+query InitiativeList($workspaceSlug: String!, $after: String) {
+  initiatives(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+    nodes {
+      ...InitiativeFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# One initiative, with its updates.
+#
+# A null answer is "no such initiative" -- which is also what the server
+# answers for one the caller may not see, deliberately, so that a hidden
+# initiative and an absent one cannot be told apart.
+query InitiativeDetail($workspaceSlug: String!, $id: UUID!) {
+  initiative(workspaceSlug: $workspaceSlug, id: $id) {
+    ...InitiativeDetailFields
+  }
+}
+
+# Create an initiative.
+#
+# Refetches the list: `initiatives` is a connection this payload is not part
+# of, so a created row cannot arrive by normalisation.
+mutation InitiativeCreate($input: InitiativeCreateInput!) {
+  initiativeCreate(input: $input) {
+    initiative {
+      ...InitiativeDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Edit an initiative.
+#
+# `InitiativeUpdateInput` leaves a field alone when it is absent -- it is a
+# patch, unlike `IssueTemplateUpdateInput`, which is a whole-row replace. So a
+# form that renders four of the six fields may send four, and the other two
+# keep their stored values. Nothing here has to re-send what it did not edit.
+#
+# No refetch: the payload returns the same fragment over the same
+# `Initiative:<id>` entity the list holds, so the row corrects itself.
+mutation InitiativeUpdate($input: InitiativeUpdateInput!) {
+  initiativeUpdate(input: $input) {
+    initiative {
+      ...InitiativeDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation InitiativeDelete($input: InitiativeDeleteInput!) {
+  initiativeDelete(input: $input) {
+    deletedInitiativeId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Put a project into an initiative, or take it out.
+#
+# Both return the initiative whose `projectIds` changed, and only that one, so
+# both correct the cache by normalisation with no refetch.
+mutation InitiativeProjectAdd($input: InitiativeProjectInput!) {
+  initiativeProjectAdd(input: $input) {
+    initiative {
+      ...InitiativeDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation InitiativeProjectRemove($input: InitiativeProjectInput!) {
+  initiativeProjectRemove(input: $input) {
+    initiative {
+      ...InitiativeDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Nest an initiative under another, or lift it back to the top.
+#
+# These two DO refetch the list, unlike the project mutations above, and the
+# reason is which entities the write touched. Re-parenting changes
+# `parentInitiativeId` on the child -- returned here -- and
+# `childInitiativeIds` on the old and new parents, which are not returned by
+# anything. Without the refetch the tree on screen would show the moved
+# initiative in its new place AND still under its old one.
+mutation InitiativeSetParent($input: InitiativeSetParentInput!) {
+  initiativeSetParent(input: $input) {
+    initiative {
+      ...InitiativeDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation InitiativeClearParent($input: InitiativeClearParentInput!) {
+  initiativeClearParent(input: $input) {
+    initiative {
+      ...InitiativeDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Post an update on an initiative: a health, and the sentence explaining it.
+#
+# The payload carries the `InitiativeUpdate` and nothing else, but the write
+# changes two things this screen renders that are not in it: the initiative's
+# `health` column (migration 022 keeps the current health denormalised onto
+# the row) and its `updates` list. So this one refetches both the detail and
+# the list -- the list because health is drawn on every row.
+mutation InitiativeUpdatePost($input: InitiativeUpdatePostInput!) {
+  initiativeUpdatePost(input: $input) {
+    update {
+      ...InitiativeUpdateFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

@@ -2,6 +2,8 @@ import { useCallback } from 'react'
 import { useMutation } from '@apollo/client/react'
 
 import { useWorkspaceSlug } from '../../../app/routes'
+import { readPayload } from '../../../lib/graphql'
+import type { PayloadOutcome } from '../../../lib/graphql'
 import { describeError } from '../../issues/lib/errors'
 import {
   IssueCreateFromTemplateDocument,
@@ -16,40 +18,12 @@ import type {
   TemplateValidationError,
 } from './types'
 
-const UNEXPECTED_RESPONSE = 'That did not save. Please try again.'
-
-/** What a template write can do, as three cases that cannot be confused. */
-export type TemplateOutcome<T> =
-  | { status: 'ok'; value: T }
-  | { status: 'rejected'; errors: readonly TemplateValidationError[] }
-  | { status: 'failed'; message: string }
-
 /**
- * Read one payload the same way every time.
+ * What a template write can do, as three cases that cannot be confused.
  *
- * ponytail: see the note in `features/triage/api/mutations.ts` -- one of four
- * copies in this wave, awaiting a home in `src/lib`.
+ * See `src/lib/graphql/payload.ts` for the reader.
  */
-function readPayload<T>(
-  payload: { errors: readonly TemplateValidationError[] } | undefined,
-  value: T | null | undefined,
-): TemplateOutcome<T> {
-  if (payload === undefined) {
-    return { status: 'failed', message: UNEXPECTED_RESPONSE }
-  }
-
-  // Checked first: the backend's contract is that exactly one of the two is
-  // populated, and the errors are the more specific answer.
-  if (payload.errors.length > 0) {
-    return { status: 'rejected', errors: payload.errors }
-  }
-
-  if (value === null || value === undefined) {
-    return { status: 'failed', message: UNEXPECTED_RESPONSE }
-  }
-
-  return { status: 'ok', value }
-}
+export type TemplateOutcome<T> = PayloadOutcome<T, TemplateValidationError>
 
 export interface UseTemplateActionsResult {
   createTemplate: (draft: IssueTemplateDraft) => Promise<TemplateOutcome<IssueTemplate>>

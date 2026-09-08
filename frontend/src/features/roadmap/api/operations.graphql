@@ -1,0 +1,81 @@
+# Every GraphQL document the roadmap feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it.
+#
+# ## There is no roadmap query
+#
+# The schema has no `roadmap` field and nothing that returns a scheduled item.
+# A roadmap here is a *view* over two lists the API does expose --
+# `initiatives` and `projects` -- read together and laid against a calendar by
+# the client.
+#
+# ## What the calendar can honestly be
+#
+# One date, not two. `Initiative.targetDate` and `Project.targetDate` are the
+# only scheduling fields either type carries; migrations 009 and 022 store a
+# single `target_date DATE` on each table and there is no start date, no
+# duration and no percent-complete anywhere in the schema.
+#
+# So every item on this roadmap is a POINT and never a bar. A Gantt chart
+# would need a start, and the only candidate is `createdAt` -- the moment the
+# row was inserted, which is not when the work began and is frequently months
+# off. Drawing a bar from `createdAt` to `targetDate` would be a chart of an
+# invented number, so this feature does not draw one. See
+# ../pages/RoadmapPage.tsx for what it draws instead.
+#
+# ## Why two operations and not one document selecting both
+#
+# One request would be fewer round trips and is the wrong shape here, because
+# the two connections page independently. `fetchMore` on a document holding
+# both would have to send a cursor for each, and the moment one list is
+# exhausted its cursor argument would go out as `null` -- which the merge
+# policy in `src/lib/graphql/cache.ts` reads as "start this list over" and
+# which would silently drop every page of it already loaded. Two operations,
+# two cursors, no coupling.
+#
+# Own fragments rather than a spread of `ProjectRowFields`: this screen needs
+# `health`, which the projects list does not select, and does not need
+# `leadId` or `teamIds`, which it does. Codegen puts every fragment in one
+# module, so reaching across would work -- and would make one feature's
+# selection a thing another feature must not change.
+
+fragment RoadmapInitiativeFields on Initiative {
+  id
+  name
+  status
+  health
+  targetDate
+}
+
+fragment RoadmapProjectFields on Project {
+  id
+  name
+  state
+  health
+  targetDate
+}
+
+# Cost: 25 x (5 + 2) = 175 of 1000, each.
+query RoadmapInitiatives($workspaceSlug: String!, $after: String) {
+  initiatives(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+    nodes {
+      ...RoadmapInitiativeFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+query RoadmapProjects($workspaceSlug: String!, $after: String) {
+  projects(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+    nodes {
+      ...RoadmapProjectFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}

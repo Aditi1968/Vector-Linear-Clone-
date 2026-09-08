@@ -179,6 +179,29 @@ export function createCache(): InMemoryCache {
            * one list a page sits, not which list is being read.
            */
           notifications: cursorConnectionPolicy(['workspaceSlug', 'unreadOnly']),
+
+          /*
+           * `initiatives` is `projects` again in every respect that matters
+           * here: a connection of entities carrying an `id`, keyset-paged,
+           * whose only list-selecting argument is the workspace. Both the
+           * initiatives screen and the roadmap read it, and both want page
+           * two to arrive rather than vanish.
+           */
+          initiatives: cursorConnectionPolicy(['workspaceSlug']),
+
+          /*
+           * `documents` takes two optional narrowings beyond the workspace,
+           * and both are in the key list because both genuinely select a
+           * DIFFERENT list: the documents of one project are not a page of
+           * the documents of the workspace. Left out, opening a project's
+           * documents would append them to the workspace list and they would
+           * never leave it again.
+           */
+          documents: cursorConnectionPolicy([
+            'workspaceSlug',
+            'projectId',
+            'initiativeId',
+          ]),
         },
       },
       Issue: {
@@ -186,6 +209,25 @@ export function createCache(): InMemoryCache {
           comments: cursorConnectionPolicy(false),
           children: cursorConnectionPolicy(false),
           relations: cursorConnectionPolicy(false),
+        },
+      },
+      Document: {
+        fields: {
+          /*
+           * `false` for the reason the `Issue` connections use it: these hang
+           * off `Document:<uuid>` and are already scoped by it, so the only
+           * arguments they take are positional.
+           *
+           * Neither is paginated by the screen today -- one page of each is
+           * what the detail document asks for. The policy is still needed,
+           * because `documentEdit`, `documentRestore` and the two comment
+           * mutations all write a fresh `Document` into the cache, and
+           * without a merge for these two fields Apollo replaces the stored
+           * connection object wholesale and warns that cache data may be
+           * lost. The merge below makes that write a merge instead.
+           */
+          revisions: cursorConnectionPolicy(false),
+          comments: cursorConnectionPolicy(false),
         },
       },
     },

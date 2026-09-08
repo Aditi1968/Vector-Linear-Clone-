@@ -3,13 +3,16 @@ import type { RouteObject } from 'react-router-dom'
 import { RequireAuth, authRoutes } from '../../features/auth'
 import { BoardScreen } from '../../features/board'
 import { CycleDetailPage, CycleListPage } from '../../features/cycles'
+import { DocumentsPage } from '../../features/documents'
 import { FavoritesPage } from '../../features/favorites'
 import { InboxPage } from '../../features/inbox'
+import { InitiativesPage } from '../../features/initiatives'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
 import { MembersPage } from '../../features/members'
 import { MyIssuesPage } from '../../features/myIssues'
 import { onboardingRoutes } from '../../features/onboarding'
 import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
+import { RoadmapPage } from '../../features/roadmap'
 import { SavedViewsPage } from '../../features/savedViews'
 import { SearchPage } from '../../features/search'
 import { SettingsPage } from '../../features/settings'
@@ -25,32 +28,18 @@ import { RouteError } from './RouteError'
 /**
  * The routes whose screens are still to come.
  *
- * A table rather than eight near-identical entries, because every one of
- * them differs in exactly three strings and nothing else. The description is
- * what the page says it will be -- a sentence about the screen, never a
- * promise about when.
+ * A table rather than five near-identical entries, because every one of them
+ * differs in exactly three strings and nothing else. The description is what
+ * the page says it will be -- a sentence about the screen, never a promise
+ * about when.
  *
- * Four of the original twelve have landed and left this table: triage, saved
- * views, favorites and templates are real screens now, mounted individually
- * below. Removing an entry from here and adding a route object there is the
- * whole of what replacing a placeholder involves.
+ * Seven of the original twelve have landed and left this table: triage, saved
+ * views, favorites and templates first, then initiatives, roadmap and
+ * documents. Each is a real screen now, mounted individually below. Removing
+ * an entry from here and adding a route object there is the whole of what
+ * replacing a placeholder involves.
  */
 const SECOND_WAVE = [
-  {
-    segment: ROUTE_SEGMENTS.initiatives,
-    title: 'Initiatives',
-    description: 'Projects grouped into the larger thing they are part of.',
-  },
-  {
-    segment: ROUTE_SEGMENTS.roadmap,
-    title: 'Roadmap',
-    description: 'Projects and initiatives laid against a calendar.',
-  },
-  {
-    segment: ROUTE_SEGMENTS.documents,
-    title: 'Documents',
-    description: 'Long-form writing that belongs to the workspace rather than to an issue.',
-  },
   {
     segment: ROUTE_SEGMENTS.releases,
     title: 'Releases',
@@ -104,7 +93,7 @@ const SECOND_WAVE = [
  *
  * ## Screens that are not built yet
  *
- * The eight second-wave routes at the foot of the table. Each mounts
+ * The five second-wave routes at the foot of the table. Each mounts
  * `./Placeholder.tsx`, which is the right thing for a route whose screen is
  * somebody else's to write: the route is real, the URL is the one `paths`
  * builds, and the page says outright that it does not exist yet rather than
@@ -225,6 +214,22 @@ export const routes: RouteObject[] = [
       {
         path: ROUTE_SEGMENTS.templates,
         element: <TemplatesPage />,
+      },
+      {
+        // List and panel on one screen, for the reason saved views are:
+        // there is no `initiatives/:id` segment to navigate to.
+        path: ROUTE_SEGMENTS.initiatives,
+        element: <InitiativesPage />,
+      },
+      {
+        // A view over `initiatives` and `projects` rather than a screen with
+        // a query of its own -- the schema has no roadmap field.
+        path: ROUTE_SEGMENTS.roadmap,
+        element: <RoadmapPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.documents,
+        element: <DocumentsPage />,
       },
       ...SECOND_WAVE.map(({ segment, title, description }) => ({
         path: segment,

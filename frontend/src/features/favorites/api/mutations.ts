@@ -2,6 +2,8 @@ import { useCallback } from 'react'
 import { useMutation } from '@apollo/client/react'
 
 import { useWorkspaceSlug } from '../../../app/routes'
+import { readPayload } from '../../../lib/graphql'
+import type { PayloadOutcome } from '../../../lib/graphql'
 import { describeError } from '../../issues/lib/errors'
 import {
   FavoriteAddDocument,
@@ -10,40 +12,14 @@ import {
 } from './documents'
 import type { FavoriteTarget, FavoriteValidationError } from './types'
 
-const UNEXPECTED_RESPONSE = 'That did not save. Please try again.'
-
-/** What a favorites write can do, as three cases that cannot be confused. */
-export type FavoriteOutcome =
-  | { status: 'ok' }
-  | { status: 'rejected'; errors: readonly FavoriteValidationError[] }
-  | { status: 'failed'; message: string }
-
 /**
- * Read one payload the same way every time.
+ * What a favorites write can do, as three cases that cannot be confused.
  *
- * ponytail: see the note in `features/triage/api/mutations.ts` -- this is one
- * of four copies in this wave, awaiting a home in `src/lib`.
+ * The value each payload carries is unused here -- a star either landed or it
+ * did not -- so it is left as `unknown` rather than named. See
+ * `src/lib/graphql/payload.ts` for the reader.
  */
-function readPayload(
-  payload: { errors: readonly FavoriteValidationError[] } | undefined,
-  value: unknown,
-): FavoriteOutcome {
-  if (payload === undefined) {
-    return { status: 'failed', message: UNEXPECTED_RESPONSE }
-  }
-
-  // Checked first: the backend's contract is that exactly one of the two is
-  // populated, and the errors are the more specific answer.
-  if (payload.errors.length > 0) {
-    return { status: 'rejected', errors: payload.errors }
-  }
-
-  if (value === null || value === undefined) {
-    return { status: 'failed', message: UNEXPECTED_RESPONSE }
-  }
-
-  return { status: 'ok' }
-}
+export type FavoriteOutcome = PayloadOutcome<unknown, FavoriteValidationError>
 
 export interface UseFavoriteActionsResult {
   /** Star a team, a project or a saved view. */
@@ -149,7 +125,10 @@ export function useFavoriteActions(): UseFavoriteActionsResult {
           }
         }
 
-        return { status: 'ok' as const }
+        // An empty plan is a successful no-op. `null` is the value, because
+        // there is no single favorite a whole reorder produced -- the shared
+        // outcome type carries one and nothing here reads it.
+        return { status: 'ok' as const, value: null }
       } catch (reason) {
         return { status: 'failed' as const, message: describeError(reason) }
       }

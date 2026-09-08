@@ -1,0 +1,211 @@
+# Every GraphQL document the documents feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it. The `first` literal rule
+# and the globally-unique-operation-name rule are stated in
+# `src/features/initiatives/api/operations.graphql` and hold here too.
+
+# The row selection.
+#
+# `content` is deliberately absent: it is the whole document body, a JSONB
+# tree that may run to 200,000 characters, and a list of 25 rows renders none
+# of it. It arrives only with `DocumentDetailFields`, for the one document
+# somebody opened.
+fragment DocumentRowFields on Document {
+  id
+  title
+  projectId
+  initiativeId
+  creatorId
+  lastEditedBy
+  createdAt
+  updatedAt
+}
+
+# One stored version.
+#
+# `content` IS selected here, unlike on the list, and it is what makes the
+# restore honest: a version picker that showed only "3 days ago, by Ana" would
+# ask somebody to overwrite the current text with a version they have not
+# read. Five of them rather than the field's default twenty, because that is
+# five whole document trees on the wire and the fifth is already historical.
+fragment DocumentRevisionFields on DocumentRevision {
+  id
+  documentId
+  title
+  authorId
+  createdAt
+  content
+}
+
+fragment DocumentCommentFields on DocumentComment {
+  id
+  documentId
+  authorId
+  body
+  editedAt
+  createdAt
+}
+
+# One whole document: its text, its recent versions, its discussion.
+#
+# Cost: 8 + 1 + 5 x (6 + 2) + 20 x (6 + 2) = 209 of 1000.
+fragment DocumentDetailFields on Document {
+  ...DocumentRowFields
+  content
+  revisions(first: 5) {
+    nodes {
+      ...DocumentRevisionFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+  comments(first: 20) {
+    nodes {
+      ...DocumentCommentFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# One page of documents in the workspace.
+#
+# `projectId` and `initiativeId` are optional narrowings and are not sent: a
+# document attached to neither is a workspace document, and filtering by
+# either would hide exactly those. The screen shows what a document is
+# attached to on the row instead, from the ids already selected.
+#
+# Cursor pagination; see `src/lib/graphql/cache.ts` for the field policy that
+# merges the pages. Cost: 25 x (8 + 2) = 250 of 1000.
+query DocumentList($workspaceSlug: String!, $after: String) {
+  documents(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+    nodes {
+      ...DocumentRowFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# One document, whole.
+#
+# A null answer is "no such document", which is also the answer for one the
+# caller may not see -- the server gives one answer to both on purpose.
+query DocumentDetail($workspaceSlug: String!, $id: UUID!) {
+  document(workspaceSlug: $workspaceSlug, id: $id) {
+    ...DocumentDetailFields
+  }
+}
+
+# Create a document.
+#
+# `content` is omitted rather than sent as an empty tree. `DocumentCreateInput`
+# declares it `JSON` with a null default and the service turns that into
+# `empty_content()` -- `{"type":"doc","content":[]}` -- so omitting it is how
+# you say "started, not yet written in", and it says it in the server's own
+# words rather than in a client's guess at them.
+#
+# Refetches the list: `documents` is a connection this payload is not part of.
+mutation DocumentCreate($input: DocumentCreateInput!) {
+  documentCreate(input: $input) {
+    document {
+      ...DocumentDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Edit a document's title, its content, or both.
+#
+# `DocumentEditInput` is a patch: a field that is absent is left alone. So the
+# title bar can rename without sending the body, and the editor can save the
+# body without restating the title.
+#
+# `snapshot: true` forces the previous text into `document_revisions` before
+# the new text lands. The server also snapshots on its own -- a different
+# author, or a gap of ten minutes (`REVISION_GAP` in `app/domain/documents.py`)
+# -- so this flag is for the case the server cannot see: the author deciding
+# that what they have now is worth being able to come back to.
+mutation DocumentEdit($input: DocumentEditInput!) {
+  documentEdit(input: $input) {
+    document {
+      ...DocumentDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Put an old version back.
+#
+# Not a rewind: the service applies it as an ordinary edit, so the text being
+# replaced becomes a revision of its own and a restore can itself be undone.
+# The payload returns the whole document, revisions included, so the history
+# list corrects itself without a refetch.
+mutation DocumentRestore($input: DocumentRestoreInput!) {
+  documentRestore(input: $input) {
+    document {
+      ...DocumentDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation DocumentDelete($input: DocumentDeleteInput!) {
+  documentDelete(input: $input) {
+    deletedDocumentId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Add a comment, or remove one.
+#
+# Both refetch the open document rather than editing the cache by hand. The
+# create payload holds the new comment but not the connection it belongs to,
+# and the delete payload holds only an id; writing either into
+# `Document.comments` from here would be this feature reimplementing the merge
+# that `src/lib/graphql/cache.ts` already owns.
+mutation DocumentCommentCreate($input: DocumentCommentCreateInput!) {
+  documentCommentCreate(input: $input) {
+    comment {
+      ...DocumentCommentFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation DocumentCommentDelete($input: DocumentCommentDeleteInput!) {
+  documentCommentDelete(input: $input) {
+    deletedCommentId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

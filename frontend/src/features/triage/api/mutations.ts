@@ -2,6 +2,8 @@ import { useCallback } from 'react'
 import { useMutation } from '@apollo/client/react'
 
 import { useWorkspaceSlug } from '../../../app/routes'
+import { readPayload } from '../../../lib/graphql'
+import type { PayloadOutcome } from '../../../lib/graphql'
 import { describeError } from '../../issues/lib/errors'
 import {
   TriageAcceptDocument,
@@ -12,8 +14,6 @@ import {
 } from './documents'
 import type { TriageValidationError } from './types'
 
-const UNEXPECTED_RESPONSE = 'That did not save. Please try again.'
-
 /**
  * What a triage write can do, as three cases that cannot be confused.
  *
@@ -21,41 +21,13 @@ const UNEXPECTED_RESPONSE = 'That did not save. Please try again.'
  * arriving inside `data` over a 200 with a `field` naming what to fix --
  * accepting into a state that is not that team's, marking an issue a
  * duplicate of itself. `failed` is a rejected promise, which no field owns.
- */
-export type TriageOutcome =
-  | { status: 'ok' }
-  | { status: 'rejected'; errors: readonly TriageValidationError[] }
-  | { status: 'failed'; message: string }
-
-/**
- * Read one payload the same way every time.
  *
- * ponytail: a small generic that four features in this wave each hold a copy
- * of, beside the three copies of `describeError` that
- * `features/screens.tsx` already documents. Folding them into `src/lib`
- * is the right fix and belongs to whoever owns that directory; four copies
- * that agree beat one import reaching across a feature boundary for a
- * stranger's helper.
+ * The issue each payload carries rides along in `value` and nothing here
+ * reads it; what this screen needs to know is that the write landed. See
+ * `src/lib/graphql/payload.ts` for the reader, which four features in this
+ * wave used to hold a copy of each.
  */
-function readPayload(
-  payload: { issue: { id: string } | null; errors: readonly TriageValidationError[] } | undefined,
-): TriageOutcome {
-  if (payload === undefined) {
-    return { status: 'failed', message: UNEXPECTED_RESPONSE }
-  }
-
-  // Checked first: the backend's contract is that exactly one of the two is
-  // populated, and the errors are the more specific answer.
-  if (payload.errors.length > 0) {
-    return { status: 'rejected', errors: payload.errors }
-  }
-
-  if (payload.issue === null) {
-    return { status: 'failed', message: UNEXPECTED_RESPONSE }
-  }
-
-  return { status: 'ok' }
-}
+export type TriageOutcome = PayloadOutcome<{ id: string }, TriageValidationError>
 
 export interface UseTriageActionsResult {
   /** Accept an issue onto the board, in the state the caller chose. */
@@ -121,7 +93,7 @@ export function useTriageActions(): UseTriageActionsResult {
           variables: { input: { workspaceSlug, issueId, workflowStateId } },
         })
 
-        return readPayload(result.data?.triageAccept)
+        return readPayload(result.data?.triageAccept, result.data?.triageAccept.issue)
       } catch (reason) {
         // The default `errorPolicy` of `none` makes `mutate` reject on a
         // top-level GraphQL error as well as on a transport failure, so this
@@ -140,7 +112,7 @@ export function useTriageActions(): UseTriageActionsResult {
           variables: { input: { workspaceSlug, issueId } },
         })
 
-        return readPayload(result.data?.triageDecline)
+        return readPayload(result.data?.triageDecline, result.data?.triageDecline.issue)
       } catch (reason) {
         return { status: 'failed' as const, message: describeError(reason) }
       }
@@ -155,7 +127,7 @@ export function useTriageActions(): UseTriageActionsResult {
           variables: { input: { workspaceSlug, issueId, duplicateOfId } },
         })
 
-        return readPayload(result.data?.triageMarkDuplicate)
+        return readPayload(result.data?.triageMarkDuplicate, result.data?.triageMarkDuplicate.issue)
       } catch (reason) {
         return { status: 'failed' as const, message: describeError(reason) }
       }
@@ -170,7 +142,7 @@ export function useTriageActions(): UseTriageActionsResult {
           variables: { input: { workspaceSlug, issueId, teamId } },
         })
 
-        return readPayload(result.data?.triageChangeTeam)
+        return readPayload(result.data?.triageChangeTeam, result.data?.triageChangeTeam.issue)
       } catch (reason) {
         return { status: 'failed' as const, message: describeError(reason) }
       }
@@ -190,7 +162,7 @@ export function useTriageActions(): UseTriageActionsResult {
           variables: { id: issueId, input: { workspaceSlug, ...patch } },
         })
 
-        return readPayload(result.data?.issueUpdate)
+        return readPayload(result.data?.issueUpdate, result.data?.issueUpdate.issue)
       } catch (reason) {
         return { status: 'failed' as const, message: describeError(reason) }
       }

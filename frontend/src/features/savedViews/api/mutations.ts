@@ -2,6 +2,8 @@ import { useCallback } from 'react'
 import { useMutation } from '@apollo/client/react'
 
 import { useWorkspaceSlug } from '../../../app/routes'
+import { readPayload } from '../../../lib/graphql'
+import type { PayloadOutcome } from '../../../lib/graphql'
 import { describeError } from '../../issues/lib/errors'
 import {
   SavedViewCreateDocument,
@@ -10,47 +12,16 @@ import {
 } from './documents'
 import type { SavedViewDraft, SavedViewFields, SavedViewValidationError } from './types'
 
-const UNEXPECTED_RESPONSE = 'That did not save. Please try again.'
-
 /**
  * What a write can do, as three cases that cannot be confused.
  *
  * `rejected` is the payload's `errors`: expected input being refused,
  * arriving inside `data` over a 200 with a `field` naming what to fix.
  * `failed` is a rejected promise -- an outage, a bug -- which no field owns.
- */
-export type SavedViewOutcome<T> =
-  | { status: 'ok'; value: T }
-  | { status: 'rejected'; errors: readonly SavedViewValidationError[] }
-  | { status: 'failed'; message: string }
-
-/**
- * Read one payload the same way every time.
  *
- * ponytail: the fourth copy of a small generic in this wave -- see the note
- * in `features/triage/api/mutations.ts`. Folding them into `src/lib` is the
- * right fix and belongs to whoever owns that directory.
+ * See `src/lib/graphql/payload.ts` for the reader.
  */
-function readPayload<T>(
-  payload: { errors: readonly SavedViewValidationError[] } | undefined,
-  value: T | null | undefined,
-): SavedViewOutcome<T> {
-  if (payload === undefined) {
-    return { status: 'failed', message: UNEXPECTED_RESPONSE }
-  }
-
-  // Checked first: the backend's contract is that exactly one of the two is
-  // populated, and the errors are the more specific answer.
-  if (payload.errors.length > 0) {
-    return { status: 'rejected', errors: payload.errors }
-  }
-
-  if (value === null || value === undefined) {
-    return { status: 'failed', message: UNEXPECTED_RESPONSE }
-  }
-
-  return { status: 'ok', value }
-}
+export type SavedViewOutcome<T> = PayloadOutcome<T, SavedViewValidationError>
 
 /**
  * A patch for `savedViewUpdate`.
