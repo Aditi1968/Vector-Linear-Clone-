@@ -103,11 +103,17 @@ async def record(
     kind: ActivityKind,
     from_value: str | None = None,
     to_value: str | None = None,
+    caused_by: str | None = None,
 ) -> None:
     """Append one event to one issue's history, on the caller's connection.
 
     Call this INSIDE the transaction that performs the change, never after
     it. The whole guarantee is that the two commit together.
+
+    `caused_by` is for the writes that have no actor and are still not
+    nobody's doing -- the GitHub status automation is the first. A row with an
+    `actor_id` leaves it None: the person IS the cause, and a second column
+    saying so is a second thing that can disagree with the first.
     """
     await _activity.record(
         connection,
@@ -117,6 +123,7 @@ async def record(
         kind=kind,
         from_value=from_value,
         to_value=to_value,
+        caused_by=caused_by,
     )
 
 

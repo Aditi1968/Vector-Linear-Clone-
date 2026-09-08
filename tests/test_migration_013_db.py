@@ -245,7 +245,18 @@ async def test_the_repository_table_holds_no_credential(connection):
         for row in await connection.fetch(COLUMNS_SQL, "github_repositories")
     ]
 
-    assert columns == ["created_at", "full_name", "repository_id", "workspace_id"]
+    assert columns == [
+        "created_at",
+        "full_name",
+        "repository_id",
+        # Added by migration 030: whether this workspace applies deliveries
+        # about the repository. A boolean an admin ticks, and the point of
+        # this test is unchanged -- there is still no token, no key and no
+        # signing material here, and adding one would take a migration rather
+        # than a typo.
+        "tracked",
+        "workspace_id",
+    ]
 
 
 # --- what the shape refuses -------------------------------------------

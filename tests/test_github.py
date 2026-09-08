@@ -19,6 +19,7 @@ Four questions are asked:
 tests/test_github_rest.py covers the same rules over real HTTP.
 """
 
+from dataclasses import replace
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID
@@ -33,6 +34,7 @@ from app.domain.errors import (
 )
 from app.domain.github import (
     GITHUB_STATUSES,
+    GithubAutomationEntity,
     GithubCommitEntity,
     GithubInstallationEntity,
     GithubPullRequestEntity,
@@ -200,6 +202,27 @@ class FakeGithubRepository:
         self.commits: dict[tuple, dict] = {}
         self.commit_links: set[tuple] = set()
 
+        # --- automations, from migration 030 ------------------------------
+        #
+        # (workspace_id, team_id) -> GithubAutomationEntity. Keyed by team
+        # because the configuration is, and empty because the absence of a row
+        # is how an automation is off -- which is every team until one is
+        # turned on.
+        self.automations: dict[tuple, GithubAutomationEntity] = {}
+
+        # state id -> (workspace_id, team_id, category, position). One flat
+        # table standing in for `workflow_states`, so that a state belonging to
+        # another team resolves to nothing here exactly as it does against the
+        # real statement.
+        self.states: dict[UUID, tuple] = {}
+
+        # issue id -> (workspace_id, team_id, state id). What the automation
+        # moves, and what it reads the current category from.
+        self.issue_states: dict[UUID, tuple] = {}
+
+        # Repository ids a release names, which untracking must refuse.
+        self.released: set[int] = set()
+
     def _holds(self, installation_id) -> bool:
         return self.workspace_id is not None and installation_id == self.installation_id
 
@@ -314,6 +337,123 @@ class FakeGithubRepository:
                 one for one in self.repositories if one.repository_id not in removed
             ]
 
+    async def set_tracked_repositories(self, connection, *, scope, repository_ids):
+        self.calls.append(
+            ("set_tracked_repositories", scope.workspace_id, tuple(repository_ids))
+        )
+
+        wanted = set(repository_ids)
+
+        self.repositories = [
+            replace(one, tracked=one.repository_id in wanted)
+            for one in self.repositories
+        ]
+
+    async def repositories_with_releases(self, connection, *, scope, repository_ids):
+        self.calls.append(
+            ("repositories_with_releases", scope.workspace_id, tuple(repository_ids))
+        )
+
+        return bool(self.released & set(repository_ids))
+
+    # --- automations --------------------------------------------------------
+
+    async def list_automations(self, connection, *, scope):
+        self.calls.append(("list_automations", scope.workspace_id))
+
+        return [
+            automation
+            for (workspace_id, _), automation in sorted(self.automations.items())
+            if workspace_id == scope.workspace_id
+        ]
+
+    async def find_states(self, connection, *, scope, team_id, state_ids):
+        self.calls.append(("find_states", scope.workspace_id, team_id))
+
+        return {
+            state_id: self.states[state_id][2]
+            for state_id in state_ids
+            if state_id in self.states
+            and self.states[state_id][:2] == (scope.workspace_id, team_id)
+        }
+
+    async def default_state_id(self, connection, *, scope, team_id, category):
+        self.calls.append(("default_state_id", scope.workspace_id, team_id, category))
+
+        matching = sorted(
+            (position, state_id)
+            for state_id, (
+                workspace_id,
+                owning_team,
+                state_category,
+                position,
+            ) in self.states.items()
+            if (workspace_id, owning_team, state_category)
+            == (scope.workspace_id, team_id, category)
+        )
+
+        return matching[0][1] if matching else None
+
+    async def upsert_automation(
+        self, connection, *, scope, team_id, started_state_id, completed_state_id
+    ):
+        self.calls.append(("upsert_automation", scope.workspace_id, team_id))
+
+        self.automations[(scope.workspace_id, team_id)] = GithubAutomationEntity(
+            team_id=team_id,
+            started_state_id=started_state_id,
+            completed_state_id=completed_state_id,
+        )
+
+    async def delete_automation(self, connection, *, scope, team_id):
+        self.calls.append(("delete_automation", scope.workspace_id, team_id))
+
+        self.automations.pop((scope.workspace_id, team_id), None)
+
+    async def move_issues_for_automation(
+        self, connection, *, scope, issue_ids, category, from_categories
+    ):
+        self.calls.append(
+            (
+                "move_issues_for_automation",
+                scope.workspace_id,
+                tuple(issue_ids),
+                category,
+            )
+        )
+
+        allowed = set(from_categories)
+        moved = []
+
+        for issue_id in issue_ids:
+            placed = self.issue_states.get(issue_id)
+
+            if placed is None or placed[0] != scope.workspace_id:
+                continue
+
+            _, team_id, state_id = placed
+            automation = self.automations.get((scope.workspace_id, team_id))
+
+            if automation is None:
+                continue
+
+            target = (
+                automation.started_state_id
+                if category == "started"
+                else automation.completed_state_id
+            )
+
+            if target is None or target == state_id:
+                continue
+
+            if self.states.get(state_id, (None, None, None, 0))[2] not in allowed:
+                continue
+
+            self.issue_states[issue_id] = (scope.workspace_id, team_id, target)
+            moved.append((issue_id, state_id, target))
+
+        return moved
+
     # --- development activity ---------------------------------------------
 
     async def record_delivery(self, connection, *, delivery_id, event):
@@ -330,7 +470,7 @@ class FakeGithubRepository:
         self.calls.append(("repository_exists", scope.workspace_id, repository_id))
 
         return any(
-            one.repository_id == repository_id
+            one.repository_id == repository_id and one.tracked
             for one in self.repositories
             # The real predicate leads with the workspace. This fake holds one
             # workspace's repositories, so the check is that the scope asking
@@ -1611,6 +1751,10 @@ def test_the_integration_type_exposes_only_facts_about_the_connection():
 
     assert fields == [
         "accountLogin",
+        # Per-team status automations (migration 030). A fact about what a
+        # pull request DOES here, and still not a credential: the field
+        # carries two workflow-state ids belonging to this workspace.
+        "automations",
         "connectedAt",
         "connectedById",
         "repositories",

@@ -6,11 +6,13 @@ import strawberry
 
 from app.domain.github import (
     DEVELOPMENT_LIMIT,
+    GithubAutomationEntity,
     GithubCommitEntity,
     GithubDevelopmentEntity,
     GithubIntegrationEntity,
     GithubPullRequestEntity,
 )
+from app.graphql.types.errors import ValidationErrorType
 
 
 # What a Development panel shows without asking for more. Ten of each is what
@@ -71,6 +73,66 @@ class GithubRepositoryType:
 
     repository_id: strawberry.ID
     full_name: str
+    tracked: bool = strawberry.field(
+        description=(
+            "Whether this workspace applies GitHub deliveries about this "
+            "repository. False is a choice an admin made here, not something "
+            "GitHub said: the installation still covers it, and Vector is "
+            "declining the pull requests and pushes. Development history "
+            "already collected is kept and still shown."
+        )
+    )
+
+
+@strawberry.type(
+    name="GithubIssueAutomation",
+    description=(
+        "What a pull request does to one team's issues. Present only for "
+        "teams that have turned it on; an absent team is a team with no "
+        "automation, which is the default."
+    ),
+)
+class GithubIssueAutomationType:
+    """One team's status automation.
+
+    Both state fields are nullable and null means that half does nothing --
+    a team may automate the merge and leave starting to whoever is doing the
+    work. There is no `enabled` field, because there is no such column: an
+    automation that is off has no row and therefore no entry in this list.
+    See migration 030.
+
+    The states are returned as ids rather than as `WorkflowState` objects.
+    A client rendering this screen is already reading `teams { workflowStates
+    { id name category } }` to offer the choice, so an embedded copy would be
+    the same rows fetched twice and two places for the name to be stale.
+    """
+
+    team_id: UUID
+    started_state_id: UUID | None = strawberry.field(
+        description=(
+            "Where an issue goes when a pull request naming it opens, "
+            "reopens, or is marked ready for review. A pull request opened "
+            "as a DRAFT moves nothing -- a draft says the work is not ready."
+        )
+    )
+    completed_state_id: UUID | None = strawberry.field(
+        description=(
+            "Where an issue goes when a pull request naming it MERGES. A "
+            "pull request closed without merging moves nothing: an abandoned "
+            "attempt is not shipped work."
+        )
+    )
+
+    @classmethod
+    def from_entity(
+        cls,
+        entity: GithubAutomationEntity,
+    ) -> "GithubIssueAutomationType":
+        return cls(
+            team_id=entity.team_id,
+            started_state_id=entity.started_state_id,
+            completed_state_id=entity.completed_state_id,
+        )
 
 
 @strawberry.type(name="GithubIntegration")
@@ -95,6 +157,17 @@ class GithubIntegrationType:
     connected_by_id: UUID | None
     repositories: list[GithubRepositoryType]
 
+    # The per-team status automations, for the teams that have one. Empty means
+    # no team in this workspace has turned one on, which is every workspace
+    # until somebody does. Unlike `repositories` this survives disconnecting:
+    # an automation is configuration a team wrote about its own board.
+    #
+    # Documented in a comment rather than a `description=`, because
+    # `tests/test_github.py` pins this type's field list by parsing the printed
+    # SDL a line at a time -- a docblock above a field would read as three more
+    # fields. The type's own description carries what a client needs.
+    automations: list[GithubIssueAutomationType]
+
     @classmethod
     def from_entity(cls, entity: GithubIntegrationEntity) -> "GithubIntegrationType":
         """Build the transport type, raising on a status this schema cannot say.
@@ -118,10 +191,33 @@ class GithubIntegrationType:
                 GithubRepositoryType(
                     repository_id=strawberry.ID(str(repository.repository_id)),
                     full_name=repository.full_name,
+                    tracked=repository.tracked,
                 )
                 for repository in entity.repositories
             ],
+            automations=[
+                GithubIssueAutomationType.from_entity(automation)
+                for automation in entity.automations
+            ],
         )
+
+
+@strawberry.type(name="GithubIntegrationPayload")
+class GithubIntegrationPayload:
+    """The result of a settings write, with the field errors it can produce.
+
+    A payload where `githubDisconnect` answers the integration bare, and the
+    difference is what can go wrong. Disconnecting has no correctable input --
+    there is no field a client could fix to be allowed -- so an errors list
+    there would always be empty. These two take input an admin can get wrong:
+    a state belonging to another team, a team with no state to derive a
+    default from, a repository a release still names. Each of those has a
+    field to point at, and pointing at it is the difference between a form
+    that highlights a select and a toast saying something failed.
+    """
+
+    integration: GithubIntegrationType | None
+    errors: list[ValidationErrorType]
 
 
 @strawberry.enum(name="GithubPullRequestState")

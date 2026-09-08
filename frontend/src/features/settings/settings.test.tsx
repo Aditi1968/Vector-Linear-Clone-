@@ -19,6 +19,13 @@ import type { WorkspaceIntegrationsQuery } from '../../generated/operations'
 
 const PATH = `/${WORKSPACE_SLUG}/settings`
 
+// A team and two of its states, for the pull-request automation controls.
+// Ids rather than names everywhere they are compared, because the automation
+// stores ids -- a team owns its state NAMES and may change them.
+const TEAM_ID = '00000000-0000-7000-8000-0000000000d1'
+const IN_PROGRESS_STATE_ID = '00000000-0000-7000-8000-0000000000f2'
+const DONE_STATE_ID = '00000000-0000-7000-8000-0000000000f4'
+
 function integrations(
   github: WorkspaceIntegrationsQuery['githubIntegration']['status'],
   slack: WorkspaceIntegrationsQuery['slackIntegration']['status'],
@@ -36,9 +43,20 @@ function integrations(
                 __typename: 'GithubRepository',
                 repositoryId: '1',
                 fullName: 'acme-inc/vector',
+                tracked: true,
+              },
+              {
+                __typename: 'GithubRepository',
+                repositoryId: '2',
+                fullName: 'acme-inc/docs',
+                // Untracked: the installation covers it and this workspace has
+                // declined its deliveries. A second repository exists here so
+                // the checkbox list has both states to render.
+                tracked: false,
               },
             ]
           : [],
+      automations: [],
     },
     slackIntegration: {
       __typename: 'SlackIntegration',
@@ -46,6 +64,31 @@ function integrations(
       teamName: slack === 'CONNECTED' ? 'Acme HQ' : null,
       scopes: slack === 'CONNECTED' ? ['chat:write'] : [],
     },
+    teams:
+      github === 'CONNECTED'
+        ? [
+            {
+              __typename: 'Team',
+              id: TEAM_ID,
+              key: 'ENG',
+              name: 'Engineering',
+              workflowStates: [
+                {
+                  __typename: 'WorkflowState',
+                  id: IN_PROGRESS_STATE_ID,
+                  name: 'In Progress',
+                  category: 'STARTED',
+                },
+                {
+                  __typename: 'WorkflowState',
+                  id: DONE_STATE_ID,
+                  name: 'Done',
+                  category: 'COMPLETED',
+                },
+              ],
+            },
+          ]
+        : [],
   }
 }
 
@@ -182,5 +225,114 @@ describe('a connected integration', () => {
     await expect(
       view.link.waitForRequest('WorkspaceGithubDisconnect'),
     ).resolves.toMatchObject({ input: { workspaceSlug: WORKSPACE_SLUG } })
+  })
+})
+
+describe('choosing which repositories are tracked', () => {
+  it('shows a box per repository, ticked for the ones being applied', async () => {
+    await open('CONNECTED', 'DISCONNECTED')
+
+    expect(screen.getByRole('checkbox', { name: 'acme-inc/vector' })).toBeChecked()
+    // Covered by the installation, declined here. The distinction is the whole
+    // point of the setting: GitHub still grants it and Vector is not applying
+    // its deliveries.
+    expect(screen.getByRole('checkbox', { name: 'acme-inc/docs' })).not.toBeChecked()
+  })
+
+  it('sends the WHOLE set, not the one that changed', async () => {
+    const view = await open('CONNECTED', 'DISCONNECTED')
+
+    await view.user.click(screen.getByRole('checkbox', { name: 'acme-inc/docs' }))
+
+    // Both ids, because two admins sending only their own change would
+    // interleave into a selection neither of them chose.
+    await expect(
+      view.link.waitForRequest('WorkspaceGithubRepositoriesSet'),
+    ).resolves.toMatchObject({
+      input: { workspaceSlug: WORKSPACE_SLUG, repositoryIds: ['1', '2'] },
+    })
+  })
+
+  it('untracking the last one sends an empty list rather than nothing', async () => {
+    const view = await open('CONNECTED', 'DISCONNECTED')
+
+    await view.user.click(screen.getByRole('checkbox', { name: 'acme-inc/vector' }))
+
+    // A connected workspace that wants no development activity yet is a real
+    // state; an omitted field would read as "the client forgot".
+    await expect(
+      view.link.waitForRequest('WorkspaceGithubRepositoriesSet'),
+    ).resolves.toMatchObject({ input: { repositoryIds: [] } })
+  })
+})
+
+describe('the pull request automation', () => {
+  const AUTOMATION = 'Move ENG issues when a pull request that names them opens or merges'
+
+  it('is off until somebody turns it on', async () => {
+    await open('CONNECTED', 'DISCONNECTED')
+
+    // The opt-in. An issue that changed status because somebody opened a pull
+    // request, in a workspace that never asked for it, is a bug report.
+    expect(screen.getByRole('checkbox', { name: AUTOMATION })).not.toBeChecked()
+    expect(screen.queryByLabelText('Pull request merged')).not.toBeInTheDocument()
+  })
+
+  it('asks the server for the default rather than naming a state itself', async () => {
+    const view = await open('CONNECTED', 'DISCONNECTED')
+
+    await view.user.click(screen.getByRole('checkbox', { name: AUTOMATION }))
+
+    // No state ids. There is no global "In Progress" for this screen to pick,
+    // and the team here has states the server has to choose between by board
+    // order -- so turning it on asks, and the answer comes back stored.
+    await expect(
+      view.link.waitForRequest('WorkspaceGithubAutomationSet'),
+    ).resolves.toMatchObject({
+      input: { workspaceSlug: WORKSPACE_SLUG, teamId: TEAM_ID, enabled: true },
+    })
+  })
+
+  it('offers the configured states once a team has one, and sends ids', async () => {
+    const view = renderApp({ initialPath: PATH })
+    const data = integrations('CONNECTED', 'DISCONNECTED')
+
+    await view.link.resolve('WorkspaceIntegrations', {
+      data: {
+        ...data,
+        githubIntegration: {
+          ...data.githubIntegration,
+          automations: [
+            {
+              __typename: 'GithubIssueAutomation',
+              teamId: TEAM_ID,
+              startedStateId: IN_PROGRESS_STATE_ID,
+              completedStateId: DONE_STATE_ID,
+            },
+          ],
+        },
+      },
+    })
+
+    expect(screen.getByRole('checkbox', { name: AUTOMATION })).toBeChecked()
+    expect(screen.getByLabelText('Pull request merged')).toHaveValue(DONE_STATE_ID)
+
+    // "Do nothing" is a real configuration: a team may automate the merge and
+    // leave starting to whoever is doing the work.
+    await view.user.selectOptions(
+      screen.getByLabelText('Pull request opened'),
+      '',
+    )
+
+    await expect(
+      view.link.waitForRequest('WorkspaceGithubAutomationSet'),
+    ).resolves.toMatchObject({
+      input: {
+        teamId: TEAM_ID,
+        enabled: true,
+        startedStateId: null,
+        completedStateId: DONE_STATE_ID,
+      },
+    })
   })
 })

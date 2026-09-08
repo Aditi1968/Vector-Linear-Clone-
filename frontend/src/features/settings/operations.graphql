@@ -24,6 +24,17 @@ fragment GithubIntegrationFields on GithubIntegration {
   repositories {
     repositoryId
     fullName
+    # False is a choice an admin made here, not something GitHub said: the
+    # installation still covers it and Vector is declining its deliveries.
+    tracked
+  }
+  # Only the teams that have turned an automation on. A team with no entry is
+  # a team with no automation, which is the default -- absence is the off
+  # switch, so there is no `enabled` field to read.
+  automations {
+    teamId
+    startedStateId
+    completedStateId
   }
 }
 
@@ -46,6 +57,22 @@ query WorkspaceIntegrations($workspaceSlug: String!) {
   }
   slackIntegration(workspaceSlug: $workspaceSlug) {
     ...SlackIntegrationFields
+  }
+  # The boards the GitHub automation moves issues on. Selected here rather
+  # than embedded in `GithubIssueAutomation` because the automation stores
+  # state IDS: the screen has to offer every state a team could be configured
+  # with, not only the two it currently is, and that list is the team's.
+  teams(workspaceSlug: $workspaceSlug) {
+    id
+    key
+    name
+    workflowStates {
+      id
+      name
+      # Branch on this, never on the name: the team owns the name and may
+      # change it. `started` and `completed` are what the automation means.
+      category
+    }
   }
 }
 
@@ -70,6 +97,43 @@ mutation WorkspaceSlackDisconnect($input: SlackDisconnectInput!) {
   slackDisconnect(input: $input) {
     integration {
       ...SlackIntegrationFields
+    }
+  }
+}
+
+# Choose which repositories this workspace tracks.
+#
+# The WHOLE set every time, because that is what a page of checkboxes submits.
+# Untracking one a release names is refused as a field error on
+# `repositoryIds` rather than as a rejected promise -- this payload has an
+# errors list where `githubDisconnect` does not.
+mutation WorkspaceGithubRepositoriesSet($input: GithubRepositoriesSetInput!) {
+  githubRepositoriesSet(input: $input) {
+    integration {
+      ...GithubIntegrationFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Say what a pull request does to one team's issues.
+#
+# `enabled: true` with neither state named asks the server for the default
+# derived from category, which it then stores explicitly -- so the response
+# comes back naming two states rather than describing a rule.
+mutation WorkspaceGithubAutomationSet($input: GithubAutomationSetInput!) {
+  githubAutomationSet(input: $input) {
+    integration {
+      ...GithubIntegrationFields
+    }
+    errors {
+      field
+      code
+      message
     }
   }
 }

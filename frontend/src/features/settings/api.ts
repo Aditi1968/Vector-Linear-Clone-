@@ -4,13 +4,16 @@ import { useMutation, useQuery } from '@apollo/client/react'
 import { useWorkspaceSlug } from '../../app/routes'
 import { describeError } from '../screens'
 import {
+  WorkspaceGithubAutomationSetDocument,
   WorkspaceGithubDisconnectDocument,
+  WorkspaceGithubRepositoriesSetDocument,
   WorkspaceIntegrationsDocument,
   WorkspaceSlackDisconnectDocument,
 } from '../../generated/operations'
 import type {
   GithubIntegrationFieldsFragment,
   SlackIntegrationFieldsFragment,
+  WorkspaceIntegrationsQuery,
 } from '../../generated/operations'
 
 /**
@@ -24,13 +27,19 @@ import type {
  */
 
 export {
+  WorkspaceGithubAutomationSetDocument,
   WorkspaceGithubDisconnectDocument,
+  WorkspaceGithubRepositoriesSetDocument,
   WorkspaceIntegrationsDocument,
   WorkspaceSlackDisconnectDocument,
 } from '../../generated/operations'
 
 export type GithubIntegration = GithubIntegrationFieldsFragment
 export type SlackIntegration = SlackIntegrationFieldsFragment
+
+/** One team and its board, which is what the automation controls offer. */
+export type SettingsTeam = WorkspaceIntegrationsQuery['teams'][number]
+export type GithubAutomation = GithubIntegration['automations'][number]
 
 /**
  * The states both providers report, taken from the wider of the two enums.
@@ -57,14 +66,25 @@ export type IntegrationStatus = GithubIntegration['status']
 export interface UseIntegrationsResult {
   github: GithubIntegration | null
   slack: SlackIntegration | null
+  teams: SettingsTeam[]
   isLoading: boolean
   errorMessage: string | null
   /** A failure of a disconnect, which belongs to neither panel's own state. */
   actionErrorMessage: string | null
   isDisconnecting: boolean
+  /** True while a repository or automation write is in flight. */
+  isSaving: boolean
   retry: () => void
   disconnectGithub: () => void
   disconnectSlack: () => void
+  /** The WHOLE tracked set, because that is what the checkbox list means. */
+  setTrackedRepositories: (repositoryIds: string[]) => void
+  setAutomation: (input: {
+    teamId: string
+    enabled: boolean
+    startedStateId?: string | null
+    completedStateId?: string | null
+  }) => void
 }
 
 /**
@@ -106,6 +126,21 @@ export function useIntegrations(): UseIntegrationsResult {
     refetchQueries: [integrations],
   })
 
+  // Neither of these refetches. Both return `GithubIntegrationFields` -- the
+  // same selection the query reads -- so Apollo would still not normalise it
+  // (there is no id on `GithubIntegration`), but unlike the disconnects these
+  // two carry an `errors` list that has to be read from the RESULT rather than
+  // from a rejected promise. The screen renders from the result and the next
+  // read comes from the cache write below.
+  const [repositories, repositoriesState] = useMutation(
+    WorkspaceGithubRepositoriesSetDocument,
+    { refetchQueries: [integrations] },
+  )
+  const [automation, automationState] = useMutation(
+    WorkspaceGithubAutomationSetDocument,
+    { refetchQueries: [integrations] },
+  )
+
   const retry = useCallback(() => {
     // Swallowed on purpose: `refetch` rejects *and* sets `error` on the hook
     // result, and `error` is what the screen renders.
@@ -130,15 +165,68 @@ export function useIntegrations(): UseIntegrationsResult {
     })
   }, [slack, workspaceSlug])
 
+  const setTrackedRepositories = useCallback(
+    (repositoryIds: string[]) => {
+      setActionErrorMessage(null)
+
+      void repositories({ variables: { input: { workspaceSlug, repositoryIds } } })
+        .then((result) => {
+          // The refusal that matters: untracking a repository a release still
+          // names. It arrives as a field error rather than a rejection, so a
+          // handler that only had `.catch` would silently show the checkbox
+          // ticking back on with no explanation.
+          setActionErrorMessage(
+            firstError(result.data?.githubRepositoriesSet.errors),
+          )
+        })
+        .catch((reason: unknown) => {
+          setActionErrorMessage(describeError(reason))
+        })
+    },
+    [repositories, workspaceSlug],
+  )
+
+  const setAutomation = useCallback<UseIntegrationsResult['setAutomation']>(
+    (input) => {
+      setActionErrorMessage(null)
+
+      void automation({ variables: { input: { workspaceSlug, ...input } } })
+        .then((result) => {
+          setActionErrorMessage(firstError(result.data?.githubAutomationSet.errors))
+        })
+        .catch((reason: unknown) => {
+          setActionErrorMessage(describeError(reason))
+        })
+    },
+    [automation, workspaceSlug],
+  )
+
   return {
     github: data?.githubIntegration ?? null,
     slack: data?.slackIntegration ?? null,
+    teams: data?.teams ?? [],
     isLoading: loading,
     errorMessage: error === undefined ? null : describeError(error),
     actionErrorMessage,
     isDisconnecting: githubState.loading || slackState.loading,
+    isSaving: repositoriesState.loading || automationState.loading,
     retry,
     disconnectGithub,
     disconnectSlack,
+    setTrackedRepositories,
+    setAutomation,
   }
+}
+
+/**
+ * The first field error a payload carried, or null for a clean write.
+ *
+ * Only the first: both of these mutations validate one thing at a time in
+ * practice, and a screen that stacked messages would be pushing the panel
+ * around for a case that does not arise. `?? null` rather than an index
+ * assertion, because `noUncheckedIndexedAccess` is right that a length check
+ * and an index are two statements the compiler cannot tie together.
+ */
+function firstError(errors: { message: string }[] | undefined): string | null {
+  return errors?.[0]?.message ?? null
 }
