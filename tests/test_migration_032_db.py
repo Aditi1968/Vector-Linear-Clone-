@@ -41,6 +41,7 @@ from app.services.auth import (
     LOGIN_EMAIL_SCOPE,
     LOGIN_IP_SCOPE,
     RATE_LIMIT_WINDOW,
+    REGISTER_IP_SCOPE,
     AuthService,
     _subject_for_email,
 )
@@ -640,7 +641,14 @@ async def test_the_budget_refuses_a_correct_password_once_it_is_spent(pool, serv
 
     assert signed_in.user.email == EMAIL
 
-    # And that success cleared what it spent, so the next fumble starts from
-    # one rather than from the edge.
+    # And that success cleared what the LOG-IN spent, so the next fumble starts
+    # from one rather than from the edge.
+    #
+    # The registration bucket survives, and must: a successful log-in says
+    # nothing about how many accounts this address has been opening, and a
+    # `clear` that took every scope would let anyone reset their enumeration
+    # budget by signing in to an account they already have.
     async with pool.acquire() as connection:
-        assert await connection.fetchval("SELECT count(*) FROM auth_rate_limits") == 0
+        remaining = await connection.fetch("SELECT scope FROM auth_rate_limits")
+
+    assert [row["scope"] for row in remaining] == [REGISTER_IP_SCOPE]

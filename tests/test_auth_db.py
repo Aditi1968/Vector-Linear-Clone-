@@ -114,13 +114,6 @@ async def prepared(postgres_dsn):
     try:
         await reset_schema(connection)
         await apply_auth_migration(connection)
-
-        async with connection.transaction():
-            await apply_migration(
-                connection,
-                RATE_LIMIT_MIGRATION,
-                migrations_dir=MIGRATIONS_DIR,
-            )
     finally:
         await connection.close()
 
@@ -133,13 +126,27 @@ async def prepared(postgres_dsn):
 
 
 @pytest.fixture
-def service(prepared) -> AuthService:
+async def service(prepared) -> AuthService:
     """The real service over the real repositories over the real database.
 
     Real argon2 too. Every registration in this file costs one hash and
     every log-in costs one verification, which is the price of testing the
     thing that ships.
+
+    032 is applied HERE and not in `prepared`, and the placement is the whole
+    point. The service writes `auth_rate_limits` on every register and every
+    log-in, so it needs that table -- but the tests above about the migration
+    itself are about what 003 builds and nothing else, and applying a second
+    file underneath them would change their answer rather than their subject.
     """
+    async with prepared.acquire() as connection:
+        async with connection.transaction():
+            await apply_migration(
+                connection,
+                RATE_LIMIT_MIGRATION,
+                migrations_dir=MIGRATIONS_DIR,
+            )
+
     return AuthService(
         pool=prepared,
         users=UserRepository(),
