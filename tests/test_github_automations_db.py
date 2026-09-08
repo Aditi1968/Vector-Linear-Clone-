@@ -519,6 +519,33 @@ async def test_the_history_records_the_pull_request_and_no_actor(pool):
     assert row["from_value"] != row["to_value"]
 
 
+async def test_the_watchers_are_notified_by_a_move_with_no_actor(pool):
+    """An automated move files an inbox item exactly as a person's move does.
+
+    The constraint this is really about is
+    `notifications_actor_is_not_recipient`. The statement excludes the actor
+    with `IS DISTINCT FROM`, and a NULL actor is distinct from everybody -- so
+    nobody is spared, which is right, because nobody in this workspace did it.
+    A CHECK violation here would abort the delivery's transaction and reach
+    GitHub as a 500, which is an unbounded redelivery loop.
+    """
+    await pool.execute(
+        "UPDATE issues SET assignee_id = $2 WHERE id = $1", ISSUE_ID, MEMBER_ID
+    )
+    await automate(pool)
+
+    await deliver(pool, pull_payload())
+
+    row = await pool.fetchrow(
+        "SELECT user_id, actor_id, kind FROM notifications WHERE issue_id = $1",
+        ISSUE_ID,
+    )
+
+    assert row["user_id"] == MEMBER_ID
+    assert row["actor_id"] is None
+    assert row["kind"] == "status_changed"
+
+
 async def test_a_second_open_delivery_writes_no_second_history_row(pool):
     """Idempotency where it is visible: not "the state is still right", but
     "the timeline does not say it happened twice"."""
