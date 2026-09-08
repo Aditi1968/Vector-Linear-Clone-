@@ -25,6 +25,7 @@ from app.graphql.loaders.projects import (
 )
 from app.http_cookies import read_session_token
 from app.repositories.activity import ActivityRepository
+from app.repositories.analytics import AnalyticsRepository
 from app.repositories.bulk import BulkRepository
 from app.repositories.comments import CommentRepository
 from app.repositories.cycles import CycleRepository
@@ -55,6 +56,7 @@ from app.repositories.triage import TriageRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
 from app.services.activity import ActivityService
+from app.services.analytics import AnalyticsService
 from app.services.auth import AuthService
 from app.services.bulk import BulkService
 from app.services.comments import CommentService
@@ -104,6 +106,7 @@ class VectorContext(BaseContext):
         template_service: TemplateService,
         triage_service: TriageService,
         bulk_service: BulkService,
+        analytics_service: AnalyticsService,
         environment: Environment,
     ):
         super().__init__()
@@ -188,6 +191,14 @@ class VectorContext(BaseContext):
         # method, exactly as `IssueService` does, and the ids it is handed are
         # checked against that scope and against nothing else.
         self.bulk_service = bulk_service
+
+        # Six aggregates over `issues`, behind one authorized scope. Read-only
+        # -- there is no write on this object at all -- and it is deliberately
+        # NOT reachable from `issue_service`: an aggregate that could be
+        # obtained from the same object that creates issues would be an
+        # aggregate a mutation path could compute mid-transaction, over rows it
+        # had written and not yet committed.
+        self.analytics_service = analytics_service
 
         # Built here rather than in `get_context` so that a context assembled
         # by hand -- a test, a worker -- gets working loaders from the service
@@ -585,6 +596,18 @@ async def get_context() -> VectorContext:
             # across to the repository that owns that table rather than
             # BulkRepository growing statements about it.
             issue_labels=IssueLabelRepository(),
+        ),
+        # One repository, even though the aggregates read `issues`,
+        # `workflow_states`, `teams` and `users`. Those four are joined by one
+        # statement each in service of one screen, and the SQL for a screen's
+        # aggregates has nowhere better to live than with the rest of it --
+        # spreading six read-only GROUP BYs across four repositories would put
+        # statements about analytics in `IssueRepository`, which is already the
+        # largest file in this layer. `ReleaseRepository` is here on the same
+        # terms.
+        analytics_service=AnalyticsService(
+            pool=pool,
+            repository=AnalyticsRepository(),
         ),
         environment=environment,
     )

@@ -1,0 +1,107 @@
+-- One index, so that "what did this workspace finish recently" costs the
+-- recent part rather than the whole history.
+--
+-- Apply this ONLY through `python -m scripts.apply_migration
+-- migrations/031_analytics.sql`, for the reasons 002 sets out at length: a
+-- hand-run gets no ledger row, no advisory lock, no recorded checksum, and
+-- runs statement-at-a-time in autocommit instead of inside the single
+-- transaction the runner wraps the file in.
+--
+-- Depends on 002 for `workspace_id` and on 001 for `completed_at`.
+--
+--
+-- WHAT THIS FILE DELIBERATELY DOES NOT DO
+-- ---------------------------------------
+-- It adds no table. The obvious shape for an analytics feature is a
+-- denormalised roll-up -- daily counters per workspace, per team, per
+-- assignee, written on every issue write -- and it is the wrong shape here
+-- for a reason that is not about effort:
+--
+--   * a counter is a second copy of a number `issues` already holds, and the
+--     two disagree the first time anything writes the table without going
+--     through the path that increments it. This schema has four such paths
+--     today (`IssueRepository`, `BulkRepository`, `TriageRepository`, and the
+--     template apply), and a migration is a fifth;
+--   * `completed_at` is not append-only. Moving an issue out of a terminal
+--     state clears it -- see `IssueService`'s completed_at rule -- so a
+--     roll-up would have to decrement a bucket for a day that may be outside
+--     any window it still keeps;
+--   * the numbers this feature reports are aggregates over at most half a
+--     year of one tenant's rows. That is a query, not a data warehouse.
+--
+-- So the product queries the truth, and this index is what makes querying the
+-- truth affordable.
+--
+--
+-- THE INDEX
+-- ---------
+-- Every metric in `app/repositories/analytics.py` that has a time dimension --
+-- completion throughput and cycle time -- is the same range scan:
+-- `workspace_id = $1 AND completed_at >= $2 AND completed_at < $3`.
+--
+-- Nothing in 001-029 leads on `completed_at`. Without this index that
+-- predicate is served by `issues_workspace_team_idx` (002) or by a sequential
+-- scan, either of which reads every issue the workspace has ever created and
+-- discards the ones outside the window -- so the cost of asking about the last
+-- thirty days grows with the workspace's whole history. That is the same
+-- defect 002 describes when it drops 001's index and 006 describes when it
+-- makes the live-issue index partial: a cost proportional to rows the query is
+-- being changed to stop wanting.
+--
+-- PARTIAL, and the predicate is the point rather than a saving. An issue that
+-- is still open has `completed_at IS NULL` and can never satisfy the range, so
+-- its entry would be dead weight in every scan and write amplification on
+-- every insert. Entries arrive when work stops and leave if it restarts, so
+-- the index stays proportional to the work that has actually finished.
+--
+-- No `archived_at IS NULL` predicate, unlike 006's and 015's live-issue
+-- indexes, and that is a product decision rather than an omission. Archiving
+-- is a filing action; it does not un-finish work. An issue completed in March
+-- and archived in April was still completed in March, and a throughput chart
+-- that quietly dropped it would report a team getting slower every time
+-- somebody tidied up.
+--
+-- `completed_at` ASC rather than DESC. A btree is scanned in either direction,
+-- so the order buys nothing here -- the read is a bounded range and not a
+-- top-N -- and ascending is the direction the buckets are built in.
+--
+-- Not widened to (workspace_id, completed_at, team_id) for the per-team
+-- breakdown, on 006's terms: that read already has to reach the heap for
+-- `estimate`, so a third key column would be write amplification on every
+-- completion paid for an index-only scan the query cannot have anyway.
+--
+-- 'canceled' issues carry a `completed_at` too -- the column means "when work
+-- stopped", not "when work succeeded" -- so they are in this index, and every
+-- query over it that means *finished* joins `workflow_states` and says
+-- `type = 'completed'`. See app/repositories/analytics.py.
+--
+--
+-- WHY THERE IS ONLY ONE INDEX HERE
+-- --------------------------------
+-- `AnalyticsRepository.creation_series` runs the mirror-image range scan on
+-- `created_at`, and gets no index in this file because it already has one:
+-- 002's `issues_workspace_created_at_id_idx` is (workspace_id, created_at
+-- DESC, id DESC), which serves a workspace-scoped range on `created_at`
+-- whichever direction it is read in. The completion half needed a new index
+-- precisely because nothing in 001-029 leads on `completed_at`; the creation
+-- half was covered before this feature existed.
+--
+-- The seven snapshot aggregates -- state mix, priority mix, workload, issue
+-- age, overdue, project progress, cycle progress -- get nothing either, and
+-- that is the more interesting refusal. Every one of them is deliberately
+-- unbounded in time: they are questions about the board as it stands, so their
+-- predicate is `workspace_id` plus `archived_at IS NULL` and their answer
+-- genuinely depends on every live row the workspace has. No index makes a
+-- count of everything cheaper than reading everything. An index per GROUP BY
+-- key would be write amplification on every issue write, bought to accelerate
+-- scans that would still be scans.
+--
+-- Which sets the real ceiling on this screen, and it is worth naming: the cost
+-- of the page is proportional to the workspace's LIVE issue count, not to the
+-- window. Narrowing the range picker does not make it cheaper. The upgrade
+-- path, if a workspace ever gets large enough to feel it, is a materialised
+-- snapshot refreshed on a schedule -- which is the roll-up this file argues
+-- against building SPECULATIVELY, not one it argues against forever.
+CREATE INDEX issues_workspace_completed_at_idx
+    ON issues (workspace_id, completed_at)
+    WHERE completed_at IS NOT NULL;

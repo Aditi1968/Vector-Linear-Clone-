@@ -1,0 +1,126 @@
+# Every GraphQL document the analytics feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it.
+#
+# ## One query, not eleven
+#
+# `workspaceAnalytics` returns every figure on the screen in one object,
+# because every figure shares a window and a tenant and they are rendered
+# together. Eleven root fields would let one document ask for eleven different
+# windows at once, and would make a screen whose headline and whose chart could
+# disagree.
+#
+# ## Why `days` is a variable and the ceiling is not here
+#
+# The server refuses a window wider than 180 days rather than clamping it, and
+# that bound cannot be enforced by `src/lib/graphql` or by the operation
+# limits: `app/graphql/limits.py` prices a document during validation, where a
+# variable has no value, and this field declares no `first` for it to read. So
+# the ceiling lives in `AnalyticsService.overview`, the picker below only
+# offers values inside it, and a hand-written 365 comes back as BAD_USER_INPUT
+# rather than as half a year of data under a heading that says a year.
+#
+# ## Cost
+#
+# The field declares no page-size argument, so the complexity budget charges it
+# once: roughly 60 of 1000 for the whole selection. The real bound on this
+# query is server-side and is the one above.
+#
+# ## What is deliberately not selected
+#
+# There is no field to select. Metrics this schema cannot compute honestly --
+# a cycle burndown, open counts over time -- are absent from the type rather
+# than present and empty, so there is nothing here to leave out.
+
+query WorkspaceAnalytics($workspaceSlug: String!, $days: Int!) {
+  workspaceAnalytics(workspaceSlug: $workspaceSlug, days: $days) {
+    rangeStart
+    rangeEnd
+    days
+
+    throughput {
+      day
+      created
+      completed
+      canceled
+    }
+    totals {
+      created
+      completed
+      canceled
+      completionRate
+    }
+
+    # Both durations, always both. `leadTime` is complete and `cycleTime` is
+    # partial, and the screen shows the coverage beside the second one.
+    leadTime {
+      count
+      medianHours
+      p90Hours
+    }
+    cycleTime {
+      measured
+      completedTotal
+      medianHours
+      p90Hours
+    }
+    issueAge {
+      count
+      medianHours
+      p90Hours
+    }
+
+    stateMix {
+      category
+      issues
+    }
+    priorityMix {
+      priority
+      issues
+    }
+
+    workload {
+      assigneeId
+      name
+      openIssues
+    }
+    assigneeTotal
+
+    teams {
+      teamId
+      key
+      name
+      estimateScale
+      completed
+      estimated
+      estimateTotal
+    }
+    teamTotal
+
+    projects {
+      projectId
+      name
+      state
+      issues
+      completed
+    }
+    projectTotal
+
+    cycles {
+      cycleId
+      number
+      name
+      startsAt
+      endsAt
+      teamKey
+      estimateScale
+      issues
+      completed
+      estimated
+      completedEstimate
+    }
+    cycleTotal
+
+    overdue
+  }
+}

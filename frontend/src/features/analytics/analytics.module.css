@@ -1,0 +1,269 @@
+/*
+ * Styles for the analytics feature.
+ *
+ * Every value comes from `src/styles/tokens.css`; there is no literal hex or
+ * pixel measurement below. Selects, skeletons, empty and error states, and the
+ * progress ring are `components/`.
+ *
+ * ## The charts are styled here, not in the components
+ *
+ * The SVG in ../components carries class names and no colours at all. Keeping
+ * the palette in the stylesheet is what makes the charts theme-aware without
+ * either component knowing a theme exists: the status tokens below are the
+ * same ones the board and the status glyphs use, so a delivered issue is the
+ * same colour on the chart as it is on the row it came from.
+ */
+
+/* ------------------------------------------------------------------ shell */
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+/*
+ * A wider window is in flight and the previous one is still drawn. Dimmed
+ * rather than replaced by a skeleton: the reader asked to compare two ranges,
+ * and blanking the first one is what stops them being able to.
+ */
+.stale {
+  opacity: 0.6;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+
+.note {
+  max-width: var(--layout-content-max-width);
+  margin: 0 0 var(--space-6);
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+}
+
+/* --------------------------------------------------------------- sections */
+
+.section {
+  margin-block-end: var(--space-9);
+}
+
+.sectionTitle {
+  margin: 0 0 var(--space-5);
+  color: var(--color-text-heading);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: var(--space-6);
+  margin-block-end: var(--space-6);
+}
+
+/* ------------------------------------------------------------------ tiles */
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: var(--space-5);
+  margin: 0 0 var(--space-6);
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background-color: var(--color-surface);
+}
+
+.tileLabel {
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.tileValue {
+  margin: 0;
+  color: var(--color-text-bright);
+  font-size: var(--text-2xl);
+  font-weight: var(--weight-semibold);
+
+  /* Tabular figures, so a column of numbers lines up and a value changing
+   * from 9 to 10 does not shift everything beside it. */
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-none);
+}
+
+/*
+ * The caveat under a figure. Every one of these is load-bearing rather than
+ * decoration -- it is where "measured over 41 of 96" and "this is not a rate
+ * of zero" live -- so it is styled to be read, not to be ignorable.
+ */
+.tileNote {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-3xs);
+  line-height: var(--leading-relaxed);
+}
+
+/* ------------------------------------------------------------------ chart */
+
+.chart {
+  display: block;
+  width: 100%;
+  height: 11rem;
+  margin-block-end: var(--space-4);
+  padding: var(--space-4);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background-color: var(--color-surface);
+}
+
+.chartAxis {
+  stroke: var(--color-border-strong);
+  stroke-width: 1;
+}
+
+.chartCompleted {
+  fill: var(--color-status-completed);
+}
+
+.chartCanceled {
+  fill: var(--color-status-canceled);
+}
+
+.chartCreated {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  margin: 0 0 var(--space-4);
+  color: var(--color-text-secondary);
+  font-size: var(--text-xs);
+}
+
+.swatchCompleted,
+.swatchCanceled,
+.swatchCreated {
+  width: var(--space-4);
+  height: var(--space-3);
+  margin-inline-start: var(--space-4);
+  border-radius: var(--radius-sm);
+}
+
+.swatchCompleted:first-child,
+.swatchCanceled:first-child,
+.swatchCreated:first-child {
+  margin-inline-start: 0;
+}
+
+.swatchCompleted {
+  background-color: var(--color-status-completed);
+}
+
+.swatchCanceled {
+  background-color: var(--color-status-canceled);
+}
+
+.swatchCreated {
+  background-color: var(--color-accent);
+}
+
+/* ----------------------------------------------------------------- tables */
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-block-end: var(--space-5);
+  font-size: var(--text-sm);
+}
+
+.tableCaption {
+  margin-block-end: var(--space-4);
+  color: var(--color-text-heading);
+  font-size: var(--text-body-sm);
+  font-weight: var(--weight-medium);
+  text-align: start;
+}
+
+.table th,
+.table td {
+  padding: var(--space-3) var(--space-4);
+  border-block-end: var(--border-width) solid var(--color-border-subtle);
+  text-align: start;
+}
+
+.table thead th {
+  color: var(--color-text-muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.rowLabel {
+  color: var(--color-text-body);
+  font-weight: var(--weight-regular);
+}
+
+.rowValue {
+  color: var(--color-text-bright);
+  font-variant-numeric: var(--numeric-tabular);
+  white-space: nowrap;
+}
+
+.key {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+/* The bar column takes whatever is left; the two before it size to content. */
+.rowBar {
+  width: 40%;
+}
+
+.bar {
+  display: block;
+  width: 100%;
+  height: var(--space-3);
+}
+
+.barTrack {
+  fill: var(--color-bg-sunken);
+}
+
+.barValue {
+  fill: var(--color-accent);
+}
+
+/*
+ * The header over the bar column. Present for the table's structure and not
+ * announced as a word before every cell -- the value is already in the row
+ * beside it, and "Relative size: (nothing)" read five times is noise.
+ */
+.visuallyHiddenHeader {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

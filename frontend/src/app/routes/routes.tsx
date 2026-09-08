@@ -1,5 +1,6 @@
 import type { RouteObject } from 'react-router-dom'
 
+import { AnalyticsPage } from '../../features/analytics'
 import { RequireAuth, authRoutes } from '../../features/auth'
 import { BoardScreen } from '../../features/board'
 import { CycleDetailPage, CycleListPage } from '../../features/cycles'
@@ -32,32 +33,34 @@ import { RouteError } from './RouteError'
 /**
  * The routes whose screens are still to come.
  *
- * A table rather than five near-identical entries, because every one of them
+ * A table rather than near-identical entries, because every one of them
  * differs in exactly three strings and nothing else. The description is what
  * the page says it will be -- a sentence about the screen, never a promise
  * about when.
  *
- * Eleven of the original twelve have landed and left this table: triage, saved
- * views, favorites and templates first, then initiatives, roadmap and
- * documents, then releases, environments, label groups and semantic search.
- * Each is a real screen now, mounted individually below. Removing an entry
- * from here and adding a route object there is the whole of what replacing a
- * placeholder involves.
+ * ALL TWELVE have now landed and left this table: triage, saved views,
+ * favorites and templates first, then initiatives, roadmap and documents, then
+ * releases, environments, label groups and semantic search, and finally
+ * analytics. Each is a real screen, mounted individually below. Removing an
+ * entry from here and adding a route object there is the whole of what
+ * replacing a placeholder involves.
  *
- * ONE is left, and it is left deliberately: analytics has no backend. There is
- * no throughput field, no cycle-time field and no aggregate of any kind in
- * `schema.graphql`, so a screen here could only be built out of numbers
- * invented on the client -- which is the one thing a metrics page must never
- * do. The placeholder is the honest rendering until the API has something to
- * report.
+ * Analytics was last and was held back longest for a reason worth keeping:
+ * `schema.graphql` had no throughput field, no cycle-time field and no
+ * aggregate of any kind, so a screen could only have been built out of numbers
+ * computed on the client from one page of issues and presented as the
+ * workspace's. `workspaceAnalytics` answers from GROUP BY over the whole
+ * tenant, which is what made the screen buildable rather than merely overdue.
+ *
+ * The table stays, empty, rather than being deleted with its last row. It is
+ * the seam a thirteenth placeholder is added at, and `Placeholder` is still
+ * mounted through it -- so a new one is three strings and no wiring.
  */
-const SECOND_WAVE = [
-  {
-    segment: ROUTE_SEGMENTS.analytics,
-    title: 'Analytics',
-    description: 'Throughput, cycle time, and how the workspace is actually moving.',
-  },
-] as const
+const SECOND_WAVE: readonly {
+  segment: string
+  title: string
+  description: string
+}[] = []
 
 /**
  * The route table, composed from three sources.
@@ -243,6 +246,12 @@ export const routes: RouteObject[] = [
         // field, where `/search` sends the hybrid `search`.
         path: ROUTE_SEGMENTS.semanticSearch,
         element: <SemanticSearchPage />,
+      },
+      {
+        // One query, not a screen assembling metrics from a page of issues:
+        // `workspaceAnalytics` aggregates over the whole tenant server-side.
+        path: ROUTE_SEGMENTS.analytics,
+        element: <AnalyticsPage />,
       },
       ...SECOND_WAVE.map(({ segment, title, description }) => ({
         path: segment,
