@@ -1,0 +1,253 @@
+/*
+ * Styles for the label-groups feature.
+ *
+ * Every value comes from `src/styles/tokens.css`; there is no literal hex or
+ * pixel measurement below. Resets, list semantics and the focus ring belong to
+ * `src/styles/base.css` and are not restated.
+ *
+ * The one colour not from a token is a label's own swatch, which arrives from
+ * the server as `Label.color` and reaches CSS through the `--label-color`
+ * custom property set inline. That is data, not design: the stylesheet still
+ * owns the swatch's size, shape and border.
+ */
+
+/* ---------------------------------------------------------------- layout */
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-7);
+}
+
+@media (min-width: 62rem) {
+  .split {
+    grid-template-columns: minmax(0, 18rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  min-width: 0;
+}
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ------------------------------------------------------------------ rows */
+
+.rowButton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.rowName {
+  overflow: hidden;
+  color: var(--color-text-body);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+/* ----------------------------------------------------------------- panel */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-6-5);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-xl);
+  background: var(--gradient-panel);
+}
+
+.panelHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  min-width: 0;
+}
+
+.panelTitle {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-heading);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  text-overflow: ellipsis;
+}
+
+.panelActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+.sectionTitle {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  margin: var(--space-4) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+/* ---------------------------------------------------------------- labels */
+
+.labelList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.labelItem {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  min-width: 0;
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+}
+
+/*
+ * The label's own colour.
+ *
+ * A ring rather than a filled disc, so a label whose colour is close to the
+ * panel's ground is still visible as a shape. `--label-color` arrives inline
+ * from the server; the fallback keeps the swatch drawn if it ever does not.
+ */
+.swatch {
+  flex: none;
+  width: var(--glyph-size);
+  height: var(--glyph-size);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background: var(--label-color, var(--color-surface-active));
+}
+
+.labelName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-body);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addRow {
+  display: flex;
+  gap: var(--space-4);
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.addRow .field {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------ small type */
+
+.count {
+  color: var(--color-text-body);
+  font-variant-numeric: var(--numeric-tabular);
+}
+
+.hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+  line-height: var(--leading-normal);
+}
+
+.actionError {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-text);
+  font-size: var(--text-body-sm);
+}
+
+/* ------------------------------------------------------------------ form */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.checkboxRow {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm);
+  font-weight: var(--weight-medium);
+}
+
+.fieldError {
+  margin: 0;
+  color: var(--color-danger-text);
+  font-size: var(--text-meta);
+}
+
+.formError {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-text);
+  font-size: var(--text-body-sm);
+}
+
+.formActions {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: flex-end;
+}

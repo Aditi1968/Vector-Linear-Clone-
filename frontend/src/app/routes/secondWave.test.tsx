@@ -16,19 +16,25 @@ import { paths } from './paths'
  * that -- `paths.test.ts` proves the two *forms* of a builder agree with each
  * other, not that the router has heard of either.
  *
- * Seven of the original twelve are gone from this list because their screens
+ * Eleven of the original twelve are gone from this list because their screens
  * are built: `triage`, `savedViews`, `favorites` and `templates` first, then
- * `initiatives`, `roadmap` and `documents`. Each now renders a real page and
- * is covered by its own feature test. A row removed here has to be a row that
+ * `initiatives`, `roadmap` and `documents`, then `releases`, `environments`,
+ * `labelGroups` and `semanticSearch`. Each now renders a real page and is
+ * covered by its own feature test. A row removed here has to be a row that
  * graduated -- deleting one whose screen does not exist would leave a rail
  * link pointing at the not-found page with nothing watching.
+ *
+ * `analytics` is the last one and is not about to graduate. `schema.graphql`
+ * exposes no throughput, no cycle time and no aggregate of any kind, so the
+ * screen has nothing to read; building it would mean computing metrics on the
+ * client out of one page of issues and presenting them as the workspace's,
+ * which is worse than a placeholder. This file is what keeps the route
+ * honest -- and it must not be deleted when the last row goes, because the
+ * assertion it makes (that a `paths` builder and the route table agree) has no
+ * other home.
  */
 const SECOND_WAVE = [
-  [paths.releases, 'Releases'],
-  [paths.environments, 'Environments'],
-  [paths.labelGroups, 'Label groups'],
   [paths.analytics, 'Analytics'],
-  [paths.semanticSearch, 'Semantic search'],
 ] as const satisfies readonly (readonly [(slug: string) => string, string])[]
 
 describe('the routes whose screens are not built yet', () => {

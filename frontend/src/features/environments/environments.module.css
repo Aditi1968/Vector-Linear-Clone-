@@ -1,0 +1,101 @@
+/*
+ * Styles for the environments feature.
+ *
+ * Every value comes from `src/styles/tokens.css`; there is no literal hex or
+ * pixel measurement below. Resets, list semantics and the focus ring belong to
+ * `src/styles/base.css` and are not restated.
+ *
+ * There is no `.split` here, unlike releases and initiatives, because there is
+ * no panel: an environment is a name and a kind, and everything else this
+ * screen knows about one fits on its row. A detail pane holding two fields
+ * would be a column of whitespace.
+ */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ------------------------------------------------------------------ rows */
+
+.rowName {
+  display: block;
+  overflow: hidden;
+  color: var(--color-text-body);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+/* A value that is genuinely absent, or one this screen holds and cannot name.
+ * Muted and italic rather than hidden. */
+.unresolved {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+  line-height: var(--leading-normal);
+}
+
+/* ------------------------------------------------------------------ form */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm);
+  font-weight: var(--weight-medium);
+}
+
+.fieldError {
+  margin: 0;
+  color: var(--color-danger-text);
+  font-size: var(--text-meta);
+}
+
+.formError {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-text);
+  font-size: var(--text-body-sm);
+}
+
+.formActions {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: flex-end;
+}
