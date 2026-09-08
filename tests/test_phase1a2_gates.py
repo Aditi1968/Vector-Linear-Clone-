@@ -35,6 +35,7 @@ One test in this file is an expected failure and says so: see
 """
 
 import hashlib
+import json
 import re
 import subprocess
 import sys
@@ -764,6 +765,49 @@ def test_every_local_stack_starts_the_same_postgres():
     # anywhere in either file is the drift this test exists to catch.
     assert "postgres:18'" not in launcher
     assert "image: postgres:18" not in compose
+
+
+def test_the_frontend_typecheck_builds_the_project_references():
+    """`tsc --noEmit` checks NOTHING in this repository, and exits 0 doing it.
+
+    `frontend/tsconfig.json` is a solution-style config: `"files": []` plus
+    references to `tsconfig.app.json` and `tsconfig.node.json`. A bare
+    `tsc --noEmit` against it therefore type-checks an empty file list and
+    reports success, which is the most dangerous shape a gate can have --
+    green, fast, and blind. `tsc -b` is what walks the references and checks
+    the application.
+
+    This is not hypothetical. `NotificationKind` gained a fifth member in
+    migration 029 and `InboxPage.tsx` was never given the case, so `tsc -b`
+    failed and `npm run build` -- and therefore `docker build` of the web
+    image, and therefore `docker compose up --build` -- failed with it. It
+    reached main because the verification everyone ran was `tsc --noEmit`,
+    which cannot fail. CI was right the whole time and had simply not run.
+
+    So both halves are pinned: the script stays `tsc -b`, and the workflow
+    keeps invoking it through the script rather than calling `tsc` its own
+    way. Substituting `--noEmit` into either is how this gate is made
+    permanently green without checking anything.
+    """
+    package = json.loads(
+        (REPO_ROOT / "frontend" / "package.json").read_text(encoding="utf-8")
+    )
+    scripts = package["scripts"]
+
+    assert scripts["typecheck"] == "tsc -b", (
+        "frontend typecheck must be `tsc -b`; `tsc --noEmit` checks no files "
+        "because tsconfig.json is references-only"
+    )
+    assert scripts["build"].startswith("tsc -b &&"), (
+        "the build must type-check the project references before bundling"
+    )
+    assert "--noEmit" not in scripts["typecheck"]
+    assert "--noEmit" not in scripts["build"]
+
+    workflow = _workflow_text()
+
+    assert "run: npm run typecheck" in workflow
+    assert "run: npm run build" in workflow
 
 
 def _skip_guard_source() -> str:

@@ -40,9 +40,15 @@ const FILTERS = [
  *
  * `NotificationKind` is a closed enum, so this is exhaustive by construction
  * -- a kind added to the schema stops compiling here rather than rendering as
- * a blank row. The actor is a name where we have one and is left out of the
- * sentence entirely where we do not; "Someone commented" and "null commented"
- * are both worse than a passive sentence that is simply true.
+ * a blank row. That claim is enforced by the `assertNever` in the default
+ * arm; it was untrue for as long as this switch relied on the compiler
+ * noticing a missing return, which is a weaker check that reports a worse
+ * error. See the comment on that arm.
+ *
+ * The actor is a name where we have one and is left out of the sentence
+ * entirely where we do not; "Someone commented" and "null commented" are both
+ * worse than a passive sentence that is simply true. One kind -- DUE_SOON --
+ * has no actor by construction rather than by accident.
  */
 function describeNotification(
   notification: InboxNotification,
@@ -69,7 +75,39 @@ function describeNotification(
       return who === null
         ? 'An issue you follow changed status'
         : `${who} changed the status of an issue you follow`
+    case 'DUE_SOON':
+      // Arrived with migration 029, and it is the only one of the five that
+      // nobody performed -- `ScheduleWorker` writes it with `actor_id=None`
+      // because a date arrived rather than a person acting. So `who` is
+      // ignored here rather than branched on: an actor name would be either
+      // absent or, if one ever appeared, wrong.
+      //
+      // The sentence does not name the date. The row carries the kind and
+      // the issue and not the due date, so "due Friday" would be inventing
+      // the half it does not have -- the same reason STATUS_CHANGED above
+      // does not name the state it moved to.
+      return 'An issue you follow is due soon'
+    default:
+      // Not dead code, and not defensive programming either. This is what
+      // makes the docstring's exhaustiveness claim true rather than merely
+      // asserted: a sixth member added to `NotificationKind` fails to widen
+      // to `never` here and names the offending type in the error.
+      //
+      // Without it the compiler's complaint is TS2366 -- "function lacks
+      // ending return statement" -- reported against the function's opening
+      // line and mentioning neither the enum nor the missing member. That is
+      // exactly how DUE_SOON reached main: the error was real but it read
+      // like a return-type mistake, and `npx tsc --noEmit` never surfaced it
+      // at all (tsconfig.json is `files: []` plus references, so that command
+      // checks nothing and exits 0 -- `npm run typecheck`, which is `tsc -b`,
+      // is the gate).
+      return assertNever(notification.kind)
   }
+}
+
+/** Refuses to compile when `value` is not `never`. See the switch above. */
+function assertNever(value: never): never {
+  throw new Error(`Unhandled notification kind: ${String(value)}`)
 }
 
 /**
