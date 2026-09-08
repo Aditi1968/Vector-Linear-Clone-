@@ -52,6 +52,12 @@ const NO_ERRORS: readonly EnvironmentValidationError[] = []
  * answer is drawn from the recent releases rather than from all of them. A
  * "Load more" here would be a control whose only effect is on a footnote.
  *
+ * ponytail: one page of releases answers "what is running here" for any
+ * workspace deploying more often than it adds environments, which is all of
+ * them. The upgrade path is a server-side `Environment.latestRelease` -- not
+ * a client that walks the connection until every target has been seen, which
+ * is an unbounded number of requests to fill a column.
+ *
  * ## What this screen deliberately cannot do
  *
  * Rename or remove a target. `environmentCreate` is the whole of the schema's

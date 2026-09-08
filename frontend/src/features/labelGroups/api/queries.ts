@@ -47,6 +47,12 @@ export interface UseLabelGroupsResult {
  * label's own row. So "which labels are in this group" is a question only the
  * label list can answer, which is why this hook returns both and ../lib
  * assembles them.
+ *
+ * ponytail: one page of 50 labels, and `hasMoreLabels` is what keeps that from
+ * being a lie -- every claim the screen makes about membership is qualified by
+ * it. The upgrade path is a `LabelGroup.labels` field, not a client that pages
+ * `labels` to exhaustion: a taxonomy screen should not have to read every
+ * label in a workspace to draw six groups.
  */
 export function useLabelGroups(): UseLabelGroupsResult {
   const workspaceSlug = useWorkspaceSlug()
