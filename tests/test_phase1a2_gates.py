@@ -726,6 +726,44 @@ def test_the_integration_job_pins_postgres_18():
     assert f"docker pull {POSTGRES_IMAGE}" in _workflow_text()
 
 
+def test_every_local_stack_starts_the_same_postgres():
+    """The launcher and compose must serve what the test fixture serves.
+
+    This gate is here because the absence of it cost a developer a broken
+    start. `run-vector-local.ps1` pinned `postgres:18` and nothing checked
+    it, so when 025 landed the launcher kept creating a server without
+    pgvector -- and the only symptom was the migration runner stopping at
+    025 on `extension "vector" is not available`, which names the extension
+    but not the reason, and reads as a broken migration rather than as a
+    container built from the wrong image.
+
+    The test above pins the fixture and CI. This one pins the two paths a
+    person actually starts the product with, so "the tests pass but the app
+    will not start" cannot happen again from this cause.
+
+    Substring assertions rather than parsing PowerShell or YAML: the point
+    is that the literal tag appears and the stock one does not, and a parser
+    for either format would be a lot of machinery guarding one string.
+    """
+    from tests.conftest import POSTGRES_IMAGE
+
+    launcher = (REPO_ROOT / "run-vector-local.ps1").read_text(encoding="utf-8")
+    compose = (REPO_ROOT / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert f"'{POSTGRES_IMAGE}'" in launcher, (
+        "run-vector-local.ps1 no longer creates its container from "
+        f"{POSTGRES_IMAGE}; migrations/025_semantic_search.sql needs pgvector"
+    )
+    assert f"image: {POSTGRES_IMAGE}" in compose, (
+        f"docker-compose.yml no longer starts {POSTGRES_IMAGE}"
+    )
+
+    # The stock image is what both of these used to name, and naming it
+    # anywhere in either file is the drift this test exists to catch.
+    assert "postgres:18'" not in launcher
+    assert "image: postgres:18" not in compose
+
+
 def _skip_guard_source() -> str:
     """The guard script as it is actually written in ci.yml.
 

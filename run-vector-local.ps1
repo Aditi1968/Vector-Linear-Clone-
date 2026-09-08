@@ -104,7 +104,20 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = $PSScriptRoot
 
 $ContainerName = 'vector-ui-dev'
-$PostgresImage = 'postgres:18'
+
+# The official postgres:18 with pgvector compiled in, and the pin is two pins
+# in one. `uuidv7()` in migrations/001_issues.sql is native to PostgreSQL 18
+# and rejected by 16 and 17; the `vector` extension that
+# migrations/025_semantic_search.sql creates is not in stock postgres:18.
+#
+# This was `postgres:18` until 025 landed, and the failure it produced is the
+# reason the check further down exists: the migration runner got as far as 024
+# and then stopped on `extension "vector" is not available`, which reads as a
+# broken migration rather than as a server missing an extension. Every other
+# path in this repository already pins this image -- tests/conftest.py,
+# docker-compose.yml and the CI workflow -- so the launcher was the only place
+# a developer could get a server the test suite never sees.
+$PostgresImage = 'pgvector/pgvector:pg18'
 $DbName        = 'vector_ui'
 $DbUser        = 'vector'
 $DbPassword    = 'vector'
@@ -484,6 +497,19 @@ function Get-ContainerState {
 
     if ($result.ExitCode -ne 0) {
         return 'absent'
+    }
+
+    return $result.Output.Trim()
+}
+
+<# The image the container was CREATED from, or '' if it cannot be read. #>
+function Get-ContainerImage {
+    $result = Invoke-Native -FilePath 'docker' -Arguments @(
+        'inspect', '--format', '{{.Config.Image}}', $ContainerName
+    )
+
+    if ($result.ExitCode -ne 0) {
+        return ''
     }
 
     return $result.Output.Trim()
@@ -1273,6 +1299,28 @@ function Start-DedicatedContainer {
         }
 
         Write-Good ('Started ' + $ContainerName + '.')
+    }
+
+    # A container reused from an older run could have been created from the
+    # image this launcher used BEFORE migration 025 needed pgvector. Changing
+    # the constant above does not recreate an existing container, so without
+    # this check the only symptom is the migration runner stopping at 025 on
+    # `extension "vector" is not available` -- an error that names the
+    # extension but not the reason the server lacks it, and that reads as a
+    # broken migration rather than as a container built from the wrong image.
+    #
+    # Checked before the port mapping because it is the one a developer who
+    # has run this launcher before will actually hit.
+    $image = Get-ContainerImage
+
+    if ($image -ne $PostgresImage) {
+        Stop-Launcher -Reason ($ContainerName + ' was created from a different PostgreSQL image.') -Details @(
+            ('Expected: ' + $PostgresImage),
+            ('Actual:   ' + $image),
+            'migrations/025_semantic_search.sql needs the pgvector extension,',
+            'which stock postgres:18 does not ship. Recreate the container:',
+            '  .\run-vector-local.ps1 -Fresh'
+        )
     }
 
     # A container reused from an older run could have been created with a
