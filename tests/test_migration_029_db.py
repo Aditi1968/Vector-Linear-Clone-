@@ -38,8 +38,10 @@ from app.domain.issues import DEFAULT_ORDER, DueWindow, IssueFilter
 from app.domain.recurrence import RecurrenceFrequency, RecurrenceRule
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
+from app.repositories.notifications import NotificationRepository
 from app.repositories.recurrences import RecurrenceRepository
 from app.repositories.reminders import DueReminderRepository
+from app.services.schedule import ScheduleWorker
 
 from tests.conftest import apply_all_migrations, reset_schema, seed_workflow_states
 
@@ -59,6 +61,7 @@ SCOPE_A = WorkspaceScope(workspace_id=WORKSPACE_A)
 SCOPE_B = WorkspaceScope(workspace_id=WORKSPACE_B)
 
 TEMPLATE_ID = UUID("00000000-0000-7000-8000-0000000000c1")
+ASSIGNEE_ID = UUID("00000000-0000-7000-8000-0000000000d1")
 
 # The lead time the sweep runs with here. One, matching
 # `app.services.schedule.REMINDER_LEAD_DAYS`, so the window under test is the
@@ -120,6 +123,25 @@ async def _seed(connection) -> None:
     await reset_schema(connection)
     await apply_all_migrations(connection)
 
+    # One account, a member of A, assigned the issue that is due tomorrow --
+    # so the fan-out has somebody to reach. Every other issue stays unassigned,
+    # which is the ordinary state and is what makes `include_creator` matter.
+    await connection.execute(
+        "INSERT INTO users (id, email, password_hash) VALUES ($1, $2, $3)",
+        ASSIGNEE_ID,
+        "dana@example.com",
+        # Enough of a hash to satisfy `users_password_hash_argon2id`, which
+        # cares about the prefix rather than about the digest -- nothing here
+        # ever verifies a password.
+        "$argon2id$not-a-real-hash",
+    )
+    await connection.execute(
+        "INSERT INTO workspace_members (workspace_id, user_id, role) "
+        "VALUES ($1, $2, 'member')",
+        WORKSPACE_A,
+        ASSIGNEE_ID,
+    )
+
     await connection.execute(
         "INSERT INTO workspaces (id, slug, name) VALUES ($1, $2, $3)",
         WORKSPACE_B,
@@ -157,6 +179,12 @@ async def _seed(connection) -> None:
         TEMPLATE_ID,
         WORKSPACE_A,
         TEAM_A,
+    )
+
+    await connection.execute(
+        "UPDATE issues SET assignee_id = $2 WHERE id = $1",
+        issue_id(1),
+        ASSIGNEE_ID,
     )
 
 
@@ -204,6 +232,13 @@ async def claim(connection, reminders, limit: int = BATCH):
             lead_days=LEAD_DAYS,
             limit=limit,
         )
+
+
+class UnusedTemplates:
+    """The apply path, wired to fail if the reminder half ever reaches it."""
+
+    async def apply(self, **kwargs):
+        raise AssertionError("the reminder sweep must not file issues")
 
 
 def weekly_rule(starts_on: date, **kwargs) -> RecurrenceRule:
@@ -275,6 +310,64 @@ async def test_a_completed_issue_is_never_claimed_even_on_its_due_date(
     )
 
     assert issue_id(5) in {due.issue_id for due in await claim(connection, reminders)}
+
+
+async def test_a_real_sweep_puts_a_due_soon_item_in_the_assignees_inbox(
+    postgres_dsn, connection
+):
+    """END TO END, because the two halves are separately unfalsifiable.
+
+    `claim_due` returning rows says nothing about whether a notification can be
+    WRITTEN for them, and the vocabulary is the part that would fail silently:
+    'due_soon' is a fifth value in `notifications_kind_known`, and a widening
+    that did not take would make every reminder a CheckViolationError inside a
+    background task -- logged, retried on the next pass, and invisible to
+    anybody not reading the logs. So this runs the real worker over the real
+    repositories and reads the inbox back.
+
+    A pool rather than the fixture's connection, because `ScheduleWorker` owns
+    its own transaction boundaries and takes one.
+    """
+    pool = await asyncpg.create_pool(dsn=postgres_dsn, min_size=1, max_size=2)
+
+    try:
+        reminded = await ScheduleWorker(
+            pool=pool,
+            reminders=DueReminderRepository(),
+            notifications=NotificationRepository(),
+            recurrences=RecurrenceRepository(),
+            # Never reached -- `_remind` files nothing -- and it raises rather
+            # than recording, so a change that made the reminder half apply a
+            # template would fail here loudly instead of quietly filing issues.
+            templates=UnusedTemplates(),
+        )._remind()
+    finally:
+        await pool.close()
+
+    assert reminded == 3
+
+    rows = await connection.fetch(
+        """
+        SELECT workspace_id, user_id, actor_id, issue_id, kind
+        FROM notifications
+        """
+    )
+
+    # One row: the only recipient any of the three claimed issues has. The
+    # other two are unassigned with no creator, which produces no rows at all
+    # -- an ordinary outcome and not a failure of the sweep that caused it.
+    assert [dict(row) for row in rows] == [
+        {
+            "workspace_id": WORKSPACE_A,
+            "user_id": ASSIGNEE_ID,
+            # No actor, because nobody did this -- a date arrived. That is also
+            # what keeps the assignee in the list: `notify_about_issue` excludes
+            # the actor, and excluding nobody is what NULL means there.
+            "actor_id": None,
+            "issue_id": issue_id(1),
+            "kind": "due_soon",
+        }
+    ]
 
 
 # --- exactly once -----------------------------------------------------

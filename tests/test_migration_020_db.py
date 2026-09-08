@@ -1042,6 +1042,7 @@ async def templates(postgres_dsn, connection):
     from app.repositories.issues import IssueRepository
     from app.repositories.label_groups import LabelGroupRepository
     from app.repositories.labels import LabelRepository
+    from app.repositories.recurrences import RecurrenceRepository
     from app.repositories.teams import TeamRepository
     from app.repositories.templates import TemplateRepository
     from app.services.issues import IssueService
@@ -1055,6 +1056,11 @@ async def templates(postgres_dsn, connection):
         yield TemplateService(
             pool=pool,
             repository=TemplateRepository(),
+            # The schedule half, from migration 029. Required rather than
+            # defaulted for the reason every other collaborator here is: a
+            # service built without one fails on the first read of a template
+            # rather than at construction.
+            recurrences=RecurrenceRepository(),
             issues=IssueService(
                 pool=pool,
                 repository=IssueRepository(),
