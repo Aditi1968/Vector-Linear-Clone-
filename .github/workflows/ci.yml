@@ -852,3 +852,124 @@ jobs:
         # which. Building proves the application still compiles and bundles
         # against the dependency tree the lockfile pins.
         run: npm run build
+
+  e2e:
+    name: End-to-end journeys in a browser
+    runs-on: ubuntu-24.04
+
+    # The last job in the file, and the only one that puts every other one's
+    # subject in the same process tree at once.
+    #
+    # Every gate above tests a layer. `integration` drives services against a
+    # real PostgreSQL with nothing above them; `frontend`'s vitest run renders
+    # components against a mocked Apollo link with nothing below them;
+    # `docker-build` proves both images build and then throws them away. None
+    # of them can see the seam this job exists for -- a browser holding a
+    # session cookie, talking to FastAPI through nginx on one origin, against
+    # a database that every migration has been applied to -- and that seam is
+    # where authentication and tenant isolation actually live.
+    #
+    # It is also the one job that runs `docker compose up`. `docker-build`
+    # deliberately stops at `docker compose config`, on the grounds that
+    # starting the stack there would be a slower, vaguer version of the
+    # `integration` and `migrations` jobs. That reasoning holds for a job with
+    # no browser in it. Here the stack is not a redundant way to test the
+    # backend, it is the only way to have a page to point Chromium at.
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          # The same major frontend/Dockerfile pins and the `frontend` job
+          # uses, so the suite runs under the Node that built the bundle it is
+          # driving.
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked dependencies
+        working-directory: frontend
+        env:
+          # The same variable frontend/Dockerfile sets, for a related reason.
+          # `npm ci` runs @playwright/test's install script, which downloads
+          # Chromium, Firefox and WebKit -- roughly 400 MB, two thirds of it
+          # for engines nothing here opens. The next step fetches the one
+          # browser this suite actually uses.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: frontend
+        # Chromium alone: playwright.config.ts declares one project, and
+        # `playwright test` fails outright on a browser it cannot find, so a
+        # future engine added there fails here rather than being skipped.
+        #
+        # --with-deps installs the shared libraries the browser needs. The
+        # runner image usually already has them; when it does not, the failure
+        # without this flag is a browser that will not launch, reported as
+        # every test timing out.
+        run: npx playwright install --with-deps chromium
+
+      - name: Bring the whole stack up
+        # --wait is the gate, and it is why this is one step rather than an
+        # `up -d` followed by a hand-rolled polling loop. It blocks until
+        # every service is healthy by its own healthcheck -- PostgreSQL over
+        # TCP, the API on /readyz, nginx on the SPA's index -- and exits
+        # non-zero if any of them never gets there or exits non-zero on the
+        # way. The `migrate` job is included in that: it runs every migration
+        # through the repository's own runner and `depends_on:
+        # service_completed_successfully` means a failed migration stops the
+        # API from starting at all, so a schema this branch broke fails here
+        # rather than as four confusing browser timeouts.
+        #
+        # No port overrides. docker-compose.yml publishes 5173 and 8000 by
+        # default and a fresh runner has nothing on either, so the default in
+        # playwright.config.ts is exercised as written -- which is the value
+        # a developer gets when they run the suite with no environment set.
+        run: docker compose up --build --wait
+
+      - name: Playwright
+        working-directory: frontend
+        # No `--reporter` override: the config already writes both the list
+        # output this log wants and the HTML report the failure path below
+        # uploads.
+        run: npx playwright test
+
+      - name: Collect the stack's logs from a failed run
+        if: failure()
+        # `if: failure()` runs this only when a step above already failed, and
+        # does not change that the job fails. It is not `if: always()`, which
+        # tests/test_phase1a2_gates.py refuses precisely because it is the
+        # usual way a fail-open construct gets introduced onto a gate step.
+        #
+        # Written into the report directory so it rides along in the single
+        # artefact below rather than being a second one to go and find. A
+        # browser test that fails only in CI, with the server's own logs
+        # missing, is the worst debugging position there is.
+        run: |
+          mkdir -p frontend/playwright-report
+          docker compose logs --no-color --timestamps \
+            > frontend/playwright-report/compose.log
+          docker compose ps --all \
+            >> frontend/playwright-report/compose.log
+
+      - name: Keep the report of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-report
+          # Two directories. playwright-report is the HTML report and now the
+          # stack's logs; test-results is where `trace: 'retain-on-failure'`
+          # and `screenshot: 'only-on-failure'` put the trace and the
+          # screenshot of the exact moment an assertion gave up. The trace is
+          # the one worth opening: `npx playwright show-trace` replays the
+          # run with the DOM at every step.
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          # Long enough to look at on the following working day, short enough
+          # that a flaky week does not accumulate gigabytes.
+          retention-days: 7
