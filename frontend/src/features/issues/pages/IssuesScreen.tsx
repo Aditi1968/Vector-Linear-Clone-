@@ -5,11 +5,22 @@ import { useNavigate, useParams } from 'react-router-dom'
 import {
   PageContent,
   PageHeader,
+  ViewControls,
+  useGroupMode,
   useRegisterCreateIssueAction,
 } from '../../../app/layout'
 import { ISSUE_ID_PARAM, useAppPaths } from '../../../app/routes'
-import { Button, Kbd, List, Spinner } from '../../../components'
+import { useWorkspace } from '../../../app/workspace'
+import {
+  Button,
+  GroupHeader,
+  Kbd,
+  List,
+  Spinner,
+  StatusIndicator,
+} from '../../../components'
 import { useIssueList, useWorkspaceContext } from '../api'
+import type { IssueRowFields } from '../api'
 import { IssueComposer } from '../components/IssueComposer'
 import { IssueInspector } from '../components/IssueInspector'
 import { IssueRow } from '../components/IssueRow'
@@ -19,6 +30,7 @@ import {
   IssueLoadError,
 } from '../components/ListStates'
 import styles from '../issues.module.css'
+import { groupIssuesByState } from '../lib/grouping'
 import { isTypingTarget } from '../lib/keyboard'
 
 /** Today as `YYYY-MM-DD` in the viewer's own timezone, for overdue comparisons. */
@@ -75,11 +87,21 @@ function localToday(): string {
  * list for arrow navigation. That is the whole keyboard implementation: no
  * registry, no provider, no key-sequence machinery. Rows are links, so Enter
  * and middle-click already work and are not handled here.
+ *
+ * ## Flat or grouped
+ *
+ * The header's two view controls are the design's, and this screen is the one
+ * that honours both. Density is free -- it is an attribute on the document and
+ * every row measures itself against `--row-height` -- but grouping changes
+ * what is rendered, so it is read here and applied below. See
+ * ../lib/grouping.ts for why a workspace-wide list groups by state *name*.
  */
 export function IssuesScreen() {
   const openIssueId = useParams()[ISSUE_ID_PARAM]
   const navigate = useNavigate()
   const paths = useAppPaths()
+  const { workspace } = useWorkspace()
+  const [groupMode] = useGroupMode()
 
   const {
     issues,
@@ -219,14 +241,41 @@ export function IssuesScreen() {
   const isEmpty = !isLoadingFirstPage && errorMessage === null && !hasIssues
   const today = localToday()
 
+  // Null whenever the list is flat, and also whenever it *cannot* honestly be
+  // grouped -- a state the workspace context has not resolved yet. Either way
+  // the flat list is what renders, so the grouped view never appears half
+  // built.
+  const groups =
+    groupMode === 'grouped' ? groupIssuesByState(issues, stateById) : null
+
+  const renderRow = (issue: IssueRowFields) => (
+    <IssueRow
+      assignee={
+        issue.assigneeId === null ? undefined : memberById.get(issue.assigneeId)
+      }
+      issue={issue}
+      key={issue.id}
+      selected={issue.id === openIssueId}
+      state={stateById.get(issue.workflowStateId)}
+      today={today}
+    />
+  )
+
   return (
     <>
       <PageHeader
         title="Issues"
+        // The workspace's real name, from the shell's own membership record.
+        // The design's subtitle names the workspace, and a hardcoded one here
+        // would be a tenant identifier invented by the frontend.
+        description={`Every issue in ${workspace.name}, newest first.`}
         actions={
-          <span className={styles.fieldHint}>
-            Press <Kbd>C</Kbd> to create
-          </span>
+          <>
+            <ViewControls grouping />
+            <span className={styles.fieldHint}>
+              Press <Kbd>C</Kbd> to create
+            </span>
+          </>
         }
       />
 
@@ -256,22 +305,36 @@ export function IssuesScreen() {
 
           {hasIssues && (
             <div onKeyDown={handleListKeys}>
-              <List label="Issues">
-                {issues.map((issue) => (
-                  <IssueRow
-                    assignee={
-                      issue.assigneeId === null
-                        ? undefined
-                        : memberById.get(issue.assigneeId)
-                    }
-                    issue={issue}
-                    key={issue.id}
-                    selected={issue.id === openIssueId}
-                    state={stateById.get(issue.workflowStateId)}
-                    today={today}
-                  />
-                ))}
-              </List>
+              {groups === null ? (
+                <List label="Issues">{issues.map(renderRow)}</List>
+              ) : (
+                /*
+                  A header and then a `List` carrying the same name, which is
+                  the contract GroupHeader documents: a screen reader hears
+                  "In progress, list, 6 items" and can skip the run. The
+                  header's glyph is decorative -- GroupHeader hides it -- since
+                  the name beside it already says what the group is.
+
+                  Up and down still cross group boundaries, because the key
+                  handler above collects every `[data-issue-row]` under this
+                  one wrapper rather than per list.
+                */
+                groups.map((group) => (
+                  <section className={styles.group} key={group.key}>
+                    <GroupHeader
+                      count={group.issues.length}
+                      icon={
+                        <StatusIndicator
+                          category={group.category}
+                          name={group.name}
+                        />
+                      }
+                      name={group.name}
+                    />
+                    <List label={group.name}>{group.issues.map(renderRow)}</List>
+                  </section>
+                ))
+              )}
 
               <div className={styles.listFooter}>
                 {isLoadingMore ? (

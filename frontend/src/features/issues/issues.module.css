@@ -109,28 +109,53 @@
 }
 
 /*
+ * One run of rows under its state's header, in the grouped list mode.
+ *
+ * The gap is the whole separation between the header and the rows it heads:
+ * `List` already draws its own top rule, so a border here would put two lines
+ * a pixel apart. Runs are spaced from each other rather than each carrying a
+ * bottom margin, so the last one does not leave a gap above the footer.
+ */
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.group + .group {
+  margin-block-start: var(--space-6);
+}
+
+/*
  * ENG-42. Monospaced and tabular so the hyphen lines up down the column, which
  * is what lets the eye use it as a ruler rather than reading each one.
  */
 .identifier {
-  color: var(--color-text-muted);
+  color: var(--color-text-faint);
   font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
+  font-size: var(--text-meta);
+  font-variant-numeric: var(--numeric-tabular);
   white-space: nowrap;
 }
 
+/*
+ * A step below the app's body colour, which is the design's own hierarchy: the
+ * title is the brightest thing in the row but the row is not the brightest
+ * thing on the page.
+ */
 .rowTitle {
   min-width: 0;
   overflow: hidden;
+  color: var(--color-text-body);
   font-size: var(--text-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* The label pills and the project chip, in the design's own order and gap. */
 .rowLabels {
   display: flex;
-  gap: var(--space-2);
+  gap: var(--space-3);
   align-items: center;
   min-width: 0;
 }
@@ -145,20 +170,32 @@
   display: flex;
   gap: var(--space-5);
   align-items: center;
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
+  /* The `auto` track is already at the row's trailing edge, but the cell is
+   * as wide as its widest row's contents; this keeps a sparse row's meta
+   * against the same edge as a full one's. */
+  justify-content: flex-end;
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
   white-space: nowrap;
 }
 
 /* Project and cycle. A glyph plus a name, truncated rather than wrapped: a row
  * that grows to fit a long project name breaks the fixed row height the whole
- * list is measured in. */
+ * list is measured in.
+ *
+ * The colour is stated rather than inherited: the project chip sits in the
+ * labels cell and the cycle chip in the meta cell, and the two must not read
+ * as different kinds of thing because of which parent they landed in. */
 .chip {
   display: inline-flex;
+  flex: none;
   gap: var(--space-2);
   align-items: center;
   max-width: 12ch;
   overflow: hidden;
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+  white-space: nowrap;
   text-overflow: ellipsis;
 }
 
@@ -188,16 +225,22 @@
 }
 
 /*
- * Unassigned is a dashed circle the size of an avatar, not an empty cell.
+ * Unassigned is an empty dashed slot the size of an avatar, not an empty cell.
  * Holding the column's width is what keeps the avatars down the list on one
- * axis, and a dotted outline reads as "nobody yet" rather than as a bug.
+ * axis, and a dashed outline reads as "nobody yet" rather than as a bug.
+ *
+ * Sized and shaped to match `Avatar size="sm"` exactly -- 1.25rem, and the
+ * same rounded square rather than a circle. It was 1rem and round, so the two
+ * states of one column were a different size AND a different silhouette, and
+ * a list of mixed rows had its trailing edge visibly wobble.
  */
 .unassigned {
   display: inline-block;
-  border: var(--border-width) dashed var(--color-border-strong);
-  border-radius: var(--radius-full);
-  width: var(--space-6);
-  height: var(--space-6);
+  flex: none;
+  width: var(--avatar-size-sm);
+  height: var(--avatar-size-sm);
+  border: var(--avatar-empty-border);
+  border-radius: var(--radius-md);
 }
 
 /* ---------------------------------------------------------------- states */

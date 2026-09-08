@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react'
 
 /**
  * The shell preferences that survive a reload: the theme, whether the rail is
@@ -253,13 +253,67 @@ export function storedGroupMode(): GroupMode {
   return isGroupMode(stored) ? stored : 'flat'
 }
 
+/**
+ * Everyone currently reading the grouping, so a change reaches all of them.
+ *
+ * Two components read this hook and they are in different subtrees: the
+ * control lives in the page header's actions and the list that honours it is
+ * further down the screen. With `useState` those were two independent copies
+ * -- the control moved its own and the list never heard, so the segment
+ * flipped and not one pixel of the list changed, which is precisely the
+ * failure ViewControls' own documentation warns about.
+ *
+ * `useSyncExternalStore` over a module-level listener set rather than a
+ * context provider: there is nothing to provide. The value already lives
+ * outside React, in storage, and a provider would only be a second place to
+ * mount before the preference works.
+ */
+const groupModeListeners = new Set<() => void>()
+
+/**
+ * Set only when `localStorage` refused the write.
+ *
+ * Storage is the store in every ordinary case, which is what keeps the value
+ * honest across a reload with nothing to invalidate. A browser set to block
+ * site data throws on write, and a control that then did nothing at all would
+ * be a broken control rather than an unremembered preference -- so the choice
+ * falls back to memory for the life of the page.
+ */
+let volatileGroupMode: GroupMode | null = null
+
+function currentGroupMode(): GroupMode {
+  return volatileGroupMode ?? storedGroupMode()
+}
+
+function subscribeGroupMode(listener: () => void): () => void {
+  groupModeListeners.add(listener)
+
+  return () => {
+    groupModeListeners.delete(listener)
+  }
+}
+
 /** The grouping control's state, remembered across reloads. */
 export function useGroupMode(): [GroupMode, (next: GroupMode) => void] {
-  const [mode, setMode] = useState<GroupMode>(storedGroupMode)
+  // Same function for the server snapshot: this renders on the client only,
+  // and a `flat` server snapshot would guarantee a hydration mismatch for
+  // anyone who had chosen `grouped`.
+  const mode = useSyncExternalStore(
+    subscribeGroupMode,
+    currentGroupMode,
+    currentGroupMode,
+  )
 
   const choose = useCallback((next: GroupMode) => {
-    setMode(next)
     write(GROUP_MODE_KEY, next === 'flat' ? null : next)
+    // Only when the write did not take. Leaving this null in the ordinary
+    // case is what stops a stale in-memory value from outliving the storage
+    // it was meant to mirror.
+    volatileGroupMode = storedGroupMode() === next ? null : next
+
+    for (const listener of groupModeListeners) {
+      listener()
+    }
   }, [])
 
   return [mode, choose]
