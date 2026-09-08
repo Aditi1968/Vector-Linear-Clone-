@@ -238,6 +238,13 @@ export type DocumentRevisionConnection = {
   pageInfo: PageInfo;
 };
 
+/** A slice of the calendar, resolved by the SERVER against its own today. OVERDUE is strictly before today and never includes the undated -- an issue with no due date has missed nothing. TODAY is that day. THIS_WEEK is today and the six days after it, a rolling seven rather than a Monday-to-Sunday week, which would be nearly empty by Friday afternoon. NO_DUE_DATE is the issues that have committed to no day, which is most of them and is an ordinary state rather than missing data. Today is UTC and is the same day for everyone in the workspace: a due date is a calendar day with no timezone, so resolving it against each viewer's local today would make one issue overdue for one colleague and not another. */
+export type DueWindow =
+  | 'NO_DUE_DATE'
+  | 'OVERDUE'
+  | 'THIS_WEEK'
+  | 'TODAY';
+
 export type DuplicateSuggestion = {
   __typename?: 'DuplicateSuggestion';
   issue: Issue;
@@ -277,6 +284,13 @@ export type EnvironmentPayload = {
   environment?: Maybe<Environment>;
   errors: Array<ValidationErrorType>;
 };
+
+/** What a team's estimates count. NONE is a whole number with no unit named, which is what every estimate written before this setting existed means. POINTS and HOURS are units and put no ceiling on the value. TSHIRT is a LADDER rather than a quantity: the stored integer is a position, 1 through 5, rendered XS, S, M, L, XL -- so a team on that scale can only write those five numbers. */
+export type EstimateScale =
+  | 'HOURS'
+  | 'NONE'
+  | 'POINTS'
+  | 'TSHIRT';
 
 /** One shortcut in one person's sidebar. Exactly one of `teamId`, `projectId` and `savedViewId` is set. */
 export type Favorite = {
@@ -727,6 +741,9 @@ export type IssueCreatePayload = {
 export type IssueFilterInput = {
   assigneeId?: InputMaybe<Scalars['UUID']['input']>;
   cycleId?: InputMaybe<Scalars['UUID']['input']>;
+  due?: InputMaybe<DueWindow>;
+  dueAfter?: InputMaybe<Scalars['Date']['input']>;
+  dueBefore?: InputMaybe<Scalars['Date']['input']>;
   labelId?: InputMaybe<Scalars['UUID']['input']>;
   priority?: InputMaybe<Scalars['Int']['input']>;
   projectId?: InputMaybe<Scalars['UUID']['input']>;
@@ -764,6 +781,55 @@ export type IssueParentPayload = {
   __typename?: 'IssueParentPayload';
   errors: Array<ValidationErrorType>;
   issue?: Maybe<Issue>;
+};
+
+/** The schedule on which a template files itself. */
+export type IssueRecurrence = {
+  __typename?: 'IssueRecurrence';
+  /** 1-31 for MONTHLY, null otherwise. The 31st is CLAMPED to the last day of a shorter month rather than skipping it -- and the clamp is applied to this number every month rather than to the previous instance, so February lands on the 28th and March returns to the 31st. */
+  dayOfMonth?: Maybe<Scalars['Int']['output']>;
+  /** The generated issue's due date, as days after the day it is filed. Null for a recurring issue with no due date. Counted from the filing day and not from the scheduled one, so an issue filed late by a sweep that was down is not born overdue. */
+  dueInDays?: Maybe<Scalars['Int']['output']>;
+  frequency: RecurrenceFrequency;
+  /** The N in 'every N days / weeks / months'. At least 1. */
+  intervalCount: Scalars['Int']['output'];
+  /** The day the next issue will be filed. */
+  nextRunOn: Scalars['Date']['output'];
+  /** The day the schedule is anchored to and the first it may fire. Load-bearing above an interval of 1: 'every two weeks on Tuesday' does not say which Tuesdays without a week to count from. */
+  startsOn: Scalars['Date']['output'];
+  /** Which team the generated issue lands in. Required even for a workspace-wide template, because an issue belongs to a team and the sweep that files it has no caller to ask. */
+  teamId: Scalars['UUID']['output'];
+  /** ISO weekday numbers, 1 = Monday through 7 = Sunday. Non-empty for WEEKLY and empty for the other two. */
+  weekdays: Array<Scalars['Int']['output']>;
+};
+
+export type IssueRecurrenceClearInput = {
+  templateId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type IssueRecurrenceClearPayload = {
+  __typename?: 'IssueRecurrenceClearPayload';
+  cleared: Scalars['Boolean']['output'];
+  errors: Array<ValidationErrorType>;
+};
+
+export type IssueRecurrenceSetInput = {
+  dayOfMonth?: InputMaybe<Scalars['Int']['input']>;
+  dueInDays?: InputMaybe<Scalars['Int']['input']>;
+  frequency: RecurrenceFrequency;
+  intervalCount?: Scalars['Int']['input'];
+  startsOn: Scalars['Date']['input'];
+  teamId: Scalars['UUID']['input'];
+  templateId: Scalars['UUID']['input'];
+  weekdays?: Array<Scalars['Int']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type IssueRecurrenceSetPayload = {
+  __typename?: 'IssueRecurrenceSetPayload';
+  errors: Array<ValidationErrorType>;
+  recurrence?: Maybe<IssueRecurrence>;
 };
 
 export type IssueRelation = {
@@ -899,6 +965,8 @@ export type IssueTemplate = {
   name: Scalars['String']['output'];
   priority?: Maybe<Scalars['Int']['output']>;
   projectId?: Maybe<Scalars['UUID']['output']>;
+  /** The schedule this template files itself on, or null for one somebody applies by hand -- which is nearly all of them. Set and cleared by their own mutations rather than by the save above: a save REPLACES the template, so a schedule carried in that input would be cleared every time somebody fixed a typo in the title. */
+  recurrence?: Maybe<IssueRecurrence>;
   teamId?: Maybe<Scalars['UUID']['output']>;
   title?: Maybe<Scalars['String']['output']>;
   updatedAt: Scalars['DateTime']['output'];
@@ -1138,6 +1206,8 @@ export type Mutation = {
   issueSubscribe: IssueSubscriptionPayload;
   issueTemplateCreate: IssueTemplateSavePayload;
   issueTemplateDelete: IssueTemplateDeletePayload;
+  issueTemplateRecurrenceClear: IssueRecurrenceClearPayload;
+  issueTemplateRecurrenceSet: IssueRecurrenceSetPayload;
   issueTemplateUpdate: IssueTemplateSavePayload;
   issueUnsubscribe: IssueSubscriptionPayload;
   issueUpdate: IssueUpdatePayload;
@@ -1181,6 +1251,8 @@ export type Mutation = {
   slackTestNotification: SlackTestNotificationPayload;
   /** Create a team, seeded with the default workflow states. Requires the admin or owner role. */
   teamCreate: TeamPayload;
+  /** Choose what a team's estimates count -- points, hours, t-shirt sizes, or nothing named. Requires the admin or owner role. Issues already estimated keep their numbers; the scale bounds what may be written from now on. */
+  teamEstimateScaleSet: TeamPayload;
   triageAccept: TriagePayload;
   triageChangeTeam: TriagePayload;
   triageDecline: TriagePayload;
@@ -1414,6 +1486,16 @@ export type MutationIssueTemplateDeleteArgs = {
 };
 
 
+export type MutationIssueTemplateRecurrenceClearArgs = {
+  input: IssueRecurrenceClearInput;
+};
+
+
+export type MutationIssueTemplateRecurrenceSetArgs = {
+  input: IssueRecurrenceSetInput;
+};
+
+
 export type MutationIssueTemplateUpdateArgs = {
   input: IssueTemplateUpdateInput;
 };
@@ -1610,6 +1692,11 @@ export type MutationTeamCreateArgs = {
 };
 
 
+export type MutationTeamEstimateScaleSetArgs = {
+  input: TeamEstimateScaleSetInput;
+};
+
+
 export type MutationTriageAcceptArgs = {
   input: TriageAcceptInput;
 };
@@ -1661,6 +1748,7 @@ export type NotificationKind =
   | 'ASSIGNED'
   | 'BLOCKED'
   | 'COMMENTED'
+  | 'DUE_SOON'
   | 'STATUS_CHANGED';
 
 export type NotificationMarkAllReadInput = {
@@ -2141,6 +2229,12 @@ export type QueryWorkspaceMembersArgs = {
   workspaceSlug: Scalars['String']['input'];
 };
 
+/** How often a template files itself. Deliberately three words and not a cron expression: a cron field is a small language with its own parser and its own surprises, bought so a project tracker can express a schedule nobody asks a project tracker for. */
+export type RecurrenceFrequency =
+  | 'DAILY'
+  | 'MONTHLY'
+  | 'WEEKLY';
+
 export type RegisterInput = {
   email: Scalars['String']['input'];
   name?: InputMaybe<Scalars['String']['input']>;
@@ -2431,6 +2525,8 @@ export type SlackTestNotificationPayload = {
 export type Team = {
   __typename?: 'Team';
   createdAt: Scalars['DateTime']['output'];
+  /** The unit this team's estimates are in. Read it to LABEL an `Issue.estimate` -- the number alone says nothing, which is what this field exists to fix -- and to decide which values an estimate input may offer. An issue's scale is its team's; there is no per-issue override. */
+  estimateScale: EstimateScale;
   id: Scalars['UUID']['output'];
   /** The prefix of this team's issue identifiers -- the ENG in ENG-42. Unique within the workspace, and not beyond it. */
   key: Scalars['String']['output'];
@@ -2442,6 +2538,12 @@ export type TeamCreateInput = {
   /** The prefix of this team's issue identifiers -- the ENG in ENG-42. 1-10 uppercase letters and digits, starting with a letter. Unique within the workspace. */
   key: Scalars['String']['input'];
   name: Scalars['String']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+export type TeamEstimateScaleSetInput = {
+  scale: EstimateScale;
+  teamId: Scalars['UUID']['input'];
   workspaceSlug: Scalars['String']['input'];
 };
 

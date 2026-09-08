@@ -136,9 +136,9 @@ _NULLABLE_ORDER_KEYS = frozenset(
 #                  upper bound is exclusive so that the arithmetic reads as
 #                  "seven days" once rather than as "six" with a comment
 #                  explaining the seventh.
-#   * NONE      -- `IS NULL`, which a btree indexes, so the undated issues are
-#                  a range at the far end of that index. The same property 015
-#                  relies on for `assigneeId: null`.
+#   * NO_DUE_DATE -- `IS NULL`, which a btree indexes, so the undated issues
+#                  are a range at the far end of that index. The same property
+#                  015 relies on for `assigneeId: null`.
 _DUE_WINDOW_CLAUSES: dict[DueWindow, str] = {
     DueWindow.OVERDUE: "issues.due_date < CURRENT_DATE",
     DueWindow.TODAY: "issues.due_date = CURRENT_DATE",
@@ -146,7 +146,7 @@ _DUE_WINDOW_CLAUSES: dict[DueWindow, str] = {
         "issues.due_date >= CURRENT_DATE"
         f" AND issues.due_date < CURRENT_DATE + {THIS_WEEK_DAYS}"
     ),
-    DueWindow.NONE: "issues.due_date IS NULL",
+    DueWindow.NO_DUE_DATE: "issues.due_date IS NULL",
 }
 
 

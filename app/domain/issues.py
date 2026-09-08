@@ -188,9 +188,12 @@ class DueWindow(StrEnum):
     the list somebody planning their week asked for; a rolling seven days
     answers the same question on every day of the week.
 
-    NONE is the issues with no due date, which is most of them -- an ordinary
-    state and not missing data, exactly as 006 says. It is a filter people
-    genuinely want: "what have we committed to nothing about".
+    NO_DUE_DATE is the issues that have committed to no day, which is most of
+    them -- an ordinary state and not missing data, exactly as 006 says. It is
+    a filter people genuinely want: "what have we promised nothing about".
+    Spelled out rather than as a bare NONE, because GraphQL publishes the
+    member NAME and `due: NONE` beside `estimateScale: NONE` in one document is
+    two unrelated words that read as one.
 
     A StrEnum for the reason every other vocabulary here is one: the member is
     the spelling, so a value read out of a stored saved-view filter becomes a
@@ -200,7 +203,7 @@ class DueWindow(StrEnum):
     OVERDUE = "overdue"
     TODAY = "today"
     THIS_WEEK = "this_week"
-    NONE = "none"
+    NO_DUE_DATE = "no_due_date"
 
 
 # How many days THIS_WEEK reaches forward, today included.

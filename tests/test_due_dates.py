@@ -89,7 +89,7 @@ async def sent_for(issue_filter: IssueFilter) -> dict:
         # A btree indexes NULLs, so this is a range at the far end of the
         # due-date index rather than a scan -- the same property migration 015
         # relies on for `assigneeId: null`.
-        (DueWindow.NONE, "issues.due_date IS NULL"),
+        (DueWindow.NO_DUE_DATE, "issues.due_date IS NULL"),
     ],
 )
 async def test_each_window_is_a_bound_on_the_due_date_column(window, predicate):
@@ -110,7 +110,7 @@ async def test_no_window_binds_today_as_a_parameter(window):
     sent = await sent_for(IssueFilter(due_window=window))
 
     assert sent["args"] == (WORKSPACE_ID, 51)
-    assert "CURRENT_DATE" in sent["query"] or window is DueWindow.NONE
+    assert "CURRENT_DATE" in sent["query"] or window is DueWindow.NO_DUE_DATE
 
 
 @pytest.mark.parametrize("window", list(DueWindow))
