@@ -28,6 +28,7 @@ from app.graphql.mutations.slack import SlackMutation
 from app.graphql.mutations.subscribers import SubscriberMutation
 from app.graphql.mutations.templates import TemplateMutation
 from app.graphql.mutations.triage import TriageMutation
+from app.graphql.queries.analytics import AnalyticsQuery
 from app.graphql.queries.auth import AuthQuery
 from app.graphql.queries.cycles import CycleQuery
 from app.graphql.queries.documents import DocumentQuery
@@ -92,6 +93,7 @@ QUERY_TYPES = (
     TemplateQuery,
     TriageQuery,
     ReleaseQuery,
+    AnalyticsQuery,
 )
 
 Query = merge_types("Query", QUERY_TYPES)
