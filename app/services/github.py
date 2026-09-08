@@ -1825,6 +1825,7 @@ class GithubService:
         changed status with the timeline silent, nobody told, and no
         announcement in a channel that gets one for every human move. So the
         same three follow, through the same functions.
+
         LOGGED WITH A CAUSE AND NO ACTOR. `actor_id` is None because there is
         no person: a webhook runs on nobody's session, and inventing the
         installer as the actor would attribute to them a move they did not make
