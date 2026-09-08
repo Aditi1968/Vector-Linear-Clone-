@@ -1058,9 +1058,22 @@ async def test_no_aggregate_over_one_workspace_can_see_the_other(
     a = await _overview(repository, connection, SCOPE_A)
     b = await _overview(repository, connection, SCOPE_B)
 
-    # Throughput: A finished 3 and B finished 5. A leak reads 8.
+    # Throughput: all three series, and all three deliberately.
+    #
+    # `completed` alone was not enough, and a mutation run proved it: dropping
+    # the tenant predicate from `creation_series` left every assertion in this
+    # test green, because creation is bucketed by a different statement over a
+    # different column and nothing here read it. A leak is per statement, so
+    # the assertions have to be per statement too.
+    #
+    # A filed 4 and finished 3; B filed 10 and finished 5. Every number changes
+    # if the other tenant is visible.
+    assert throughput_totals(a["throughput"]).created == 4
+    assert throughput_totals(b["throughput"]).created == 10
     assert throughput_totals(a["throughput"]).completed == 3
     assert throughput_totals(b["throughput"]).completed == 5
+    assert throughput_totals(a["throughput"]).canceled == 1
+    assert throughput_totals(b["throughput"]).canceled == 2
 
     # Durations: B's issues were delivered in 24h flat, A's in 36-48h, so a
     # leak moves both medians rather than merely one count.
