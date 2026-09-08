@@ -109,18 +109,25 @@ export function IssueRow({
 
         <span className={styles.rowTitle}>{issue.title}</span>
 
-        {issue.labels.length > 0 && (
-          <span className={styles.rowLabels}>
-            {labels.map((label) => (
-              <Tag color={label.color} key={label.id} name={label.name} />
-            ))}
-            {hiddenLabelCount > 0 && (
-              <span className={styles.labelOverflow}>+{hiddenLabelCount}</span>
-            )}
-          </span>
-        )}
+        {/*
+          Always rendered, even with nothing in it. Every row is its own grid
+          container, so a row that omitted this cell would put its meta column
+          in track 5 and leave track 6 empty -- and the gap before that empty
+          track moves the trailing edge of an unlabelled row out of line with
+          a labelled one.
 
-        <span className={styles.rowMeta}>
+          The project sits here rather than in the meta column because that is
+          where the design puts it: what an issue is *about* belongs beside its
+          labels, and the trailing column is reserved for when and who.
+        */}
+        <span className={styles.rowLabels}>
+          {labels.map((label) => (
+            <Tag color={label.color} key={label.id} name={label.name} />
+          ))}
+          {hiddenLabelCount > 0 && (
+            <span className={styles.labelOverflow}>+{hiddenLabelCount}</span>
+          )}
+
           {issue.project !== null && (
             <span className={styles.chip}>
               <ProjectIcon />
@@ -128,7 +135,9 @@ export function IssueRow({
               {issue.project.name}
             </span>
           )}
+        </span>
 
+        <span className={styles.rowMeta}>
           {issue.cycle !== null && (
             <span className={styles.chip}>
               <CycleIcon />

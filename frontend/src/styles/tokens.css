@@ -329,6 +329,13 @@
   --avatar-fg: 85% 41%;
   /* An unassigned slot is an empty dashed ring, not a grey disc. */
   --avatar-empty-border: 1px dashed var(--color-border-strong);
+  /* The inline size, which the *empty* slot in a list row also has to know:
+   * a placeholder a few pixels off its filled sibling makes the assignee
+   * column wobble down a list of mixed rows. Named here rather than left as a
+   * literal inside `Avatar`, because two components draw this one measurement.
+   * ponytail: `md`/`lg` still live in Avatar.module.css -- nothing outside it
+   * draws those, and a token nobody shares is a token nobody maintains. */
+  --avatar-size-sm: 1.25rem; /* 20px -- inline in a dense row */
 
   /* --- Focus ring --------------------------------------------------- */
   /* The accent, at 9.9:1 on ground -- three times the 3:1 the guidelines ask

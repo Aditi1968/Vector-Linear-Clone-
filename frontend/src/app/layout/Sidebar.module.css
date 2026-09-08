@@ -45,7 +45,10 @@
  * so the accessible names survive and only the pixels go.
  */
 .collapsed {
-  width: 3.25rem;
+  /* The design's 54px, from the token rather than restated here -- the two had
+   * drifted a pixel apart, which is enough to move the icon column off the
+   * centre the expanded rail puts it on. */
+  width: var(--layout-sidebar-width-collapsed);
   padding-inline: var(--space-3);
 }
 
@@ -101,6 +104,15 @@
   gap: var(--space-4);
 }
 
+/**
+ * The workspace mark: a dark, top-lit tile with the brand glyph cut into it.
+ *
+ * A gradient and a 1px edge, not a flat accent chip. On a rail that is the
+ * darkest surface in the product, a solid cyan square is the brightest thing
+ * on screen and pulls the eye to the one element that is never a destination;
+ * the tile reads as an engraved plate instead, which is what the design draws
+ * and the reason `--gradient-mark` exists in the token file.
+ */
 .mark {
   display: inline-flex;
   align-items: center;
@@ -109,11 +121,12 @@
 
   width: 1.375rem;
   height: 1.375rem;
+  border: var(--border-width) solid var(--color-border-strong);
   border-radius: var(--radius-md);
 
-  background-color: var(--color-accent);
-  color: var(--color-text-on-accent);
-  font-size: 0.875rem;
+  background: var(--gradient-mark);
+  color: var(--color-text-secondary);
+  font-size: var(--text-md);
 }
 
 .identityName {

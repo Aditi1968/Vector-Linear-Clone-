@@ -35,10 +35,13 @@
   flex: 1 1 auto;
 }
 
+/* `heading` and not `primary`: the design paints a page title one step
+ * brighter than body text, which is the only thing separating it from the
+ * subtitle beneath at these two sizes. */
 .title {
   min-width: 0;
   overflow: hidden;
-  color: var(--color-text-primary);
+  color: var(--color-text-heading);
   font-size: var(--text-xl);
   font-weight: var(--weight-semibold);
   line-height: var(--leading-tight);
