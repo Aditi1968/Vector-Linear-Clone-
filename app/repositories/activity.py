@@ -21,6 +21,7 @@ _ACTIVITY_COLUMNS = """
                 kind,
                 from_value,
                 to_value,
+                caused_by,
                 created_at
 """
 
@@ -55,6 +56,7 @@ class ActivityRepository:
         kind: ActivityKind,
         from_value: str | None = None,
         to_value: str | None = None,
+        caused_by: str | None = None,
     ) -> None:
         """Append one event to one issue's history.
 
@@ -73,6 +75,12 @@ class ActivityRepository:
         `kind` is bound as the StrEnum member. asyncpg sends it as its string
         value, which is the spelling `issue_activity_kind_known` admits, so a
         kind this application does not know cannot be spelled at all.
+
+        `caused_by` defaults to None and is None for every write a person made:
+        the actor is the cause, and repeating it in a second column would be a
+        second place for the two to disagree. It is written only where
+        `actor_id` is None AND something other than nobody did it -- today,
+        exactly the GitHub status automation. See migration 030.
         """
         await connection.execute(
             """
@@ -82,9 +90,10 @@ class ActivityRepository:
                 actor_id,
                 kind,
                 from_value,
-                to_value
+                to_value,
+                caused_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             """,
             scope.workspace_id,
             issue_id,
@@ -92,6 +101,7 @@ class ActivityRepository:
             kind.value,
             from_value,
             to_value,
+            caused_by,
         )
 
     async def list_for_issue(
@@ -169,5 +179,6 @@ class ActivityRepository:
             kind=ActivityKind(row["kind"]),
             from_value=row["from_value"],
             to_value=row["to_value"],
+            caused_by=row["caused_by"],
             created_at=row["created_at"],
         )

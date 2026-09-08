@@ -2,7 +2,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Final
+from typing import Any, Final
 from uuid import UUID
 
 
@@ -91,6 +91,17 @@ class GithubRepositoryEntity:
     repository_id: int
     full_name: str
 
+    # Whether this workspace applies deliveries about it. See
+    # `github_repositories.tracked` in migration 030.
+    #
+    # Defaulted to True because this type is two things: a row read back, where
+    # the column says, and a PARSE RESULT off a webhook payload, where there is
+    # no column to read -- GitHub reports what an installation covers and has
+    # no opinion about what a Vector workspace wants from it. A newly seeded
+    # repository is tracked, so the default is the same answer the column's own
+    # DEFAULT gives and the parse path needs no third value meaning "unknown".
+    tracked: bool = True
+
 
 @dataclass(frozen=True, slots=True)
 class GithubGrant:
@@ -138,6 +149,16 @@ class GithubIntegrationEntity:
     status: str
     installation: GithubInstallationEntity | None
     repositories: tuple[GithubRepositoryEntity, ...]
+
+    # The per-team status automations, for the teams that have configured one.
+    #
+    # A forward reference because the type is declared with the rest of the
+    # development-activity vocabulary below, which is where it belongs: it is
+    # what a pull request does, not what an installation is. Empty for a
+    # workspace where nobody has turned one on, which is also every workspace
+    # until somebody does -- absence is the off switch, so an empty tuple and
+    # "automation disabled everywhere" are the same fact rather than two.
+    automations: tuple["GithubAutomationEntity", ...] = ()
 
 
 # --- development activity ---------------------------------------------
@@ -225,6 +246,174 @@ def pull_request_display_state(
         return CLOSED
 
     return DRAFT if draft else OPEN
+
+
+# --- moving an issue because of a pull request --------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class GithubAutomationEntity:
+    """One team's answer to "what does a pull request do to an issue".
+
+    Both ids are optional and NULL means that half does nothing, which is a
+    real configuration: a team may want the merge automated and the start left
+    to whoever is doing the work. A row with both NULL cannot exist --
+    `github_issue_automations_moves_something` refuses it -- because the
+    absence of the row is already how the automation is turned off.
+
+    Carries no workspace, exactly as every other entity here: it is only ever
+    read through a scope the caller already holds.
+    """
+
+    team_id: UUID
+    started_state_id: UUID | None
+    completed_state_id: UUID | None
+
+
+# The pull-request actions that are a TRANSITION rather than a restatement.
+#
+# This is the one place in the GitHub feature that branches on `action`, and
+# the divergence from `GithubService._apply_pull_request` -- which deliberately
+# does not, because every action carries the whole `pull_request` object -- is
+# the difference between STORING a pull request and REACTING to one. Storing
+# asks what the pull request IS, and every payload answers that in full.
+# Moving an issue asks what just CHANGED, and `action` is the only field that
+# says; every other field says what is true now and would say it again on the
+# next `synchronize`.
+#
+# That distinction is also the idempotency and the don't-fight-a-human rule in
+# one. GitHub sends the whole object on every later edit of an open pull
+# request, each under a delivery id `github_deliveries` has never seen, so a
+# rule keyed on "the pull request is open" would re-assert the move on every
+# push -- dragging an issue back out of wherever a person had since moved it.
+# Keyed on the transition, the automation acts once and then leaves the issue
+# alone.
+#
+# `reopened` and `ready_for_review` are here for the same reason `opened` is:
+# each is the instant work restarts or stops being a draft. `synchronize`,
+# `edited`, `labeled`, `assigned` and the rest are absent -- they change
+# something about a pull request that was already open.
+#
+# `converted_to_draft` is deliberately absent too, and that is a decision
+# rather than an omission: it would have to move the issue BACKWARDS, and an
+# automation that can undo a state move is one that can undo a person's.
+START_ACTIONS: Final = frozenset({"opened", "reopened", "ready_for_review"})
+
+# The action a merge arrives under. GitHub has no `merged` action: a merge is
+# `closed` with `merged_at` set, which is why 017 stores the three source
+# fields rather than a flattened enum, and why the check below reads the
+# derived display state instead of the action alone.
+CLOSE_ACTION: Final = "closed"
+
+# The categories an automated move may move an issue OUT of, in order.
+#
+# `canceled` is deliberately not on this ladder. A person who cancels an issue
+# has made a statement about the work, and a pull request merging afterwards --
+# which happens, because a branch outlives the decision to drop it -- must not
+# quietly reopen the question by marking it done. Off the ladder means never a
+# source, which makes that a property of the vocabulary rather than a condition
+# somebody has to remember to write.
+CATEGORY_LADDER: Final = ("backlog", "unstarted", "started", "completed")
+
+
+def automated_move_for(*, action: Any, display_state: str) -> str | None:
+    """Which category of state this delivery moves a linked issue to, if any.
+
+    A category and not a state id, because there is no such thing as "the
+    started state": 005 makes states team-scoped and user-named, so the id is
+    the team's configured answer and this is only the question.
+
+    The four outcomes, and the two that return None are the interesting ones:
+
+    * a pull request that OPENS, reopens or leaves draft -> 'started';
+    * one that MERGES -> 'completed';
+    * one that is a DRAFT -> nothing. Opening a draft is a statement that the
+      work is not ready, and an issue that jumped to In Progress because
+      somebody pushed a work-in-progress branch is the bug report this rule
+      exists to prevent. Marking it ready for review is what fires;
+    * one that is CLOSED WITHOUT MERGING -> nothing, and emphatically not a
+      completion. An abandoned attempt is not shipped work, and moving the
+      issue to a completed state for one would report as finished something
+      nobody did. The issue also does not move BACK: what state it should
+      return to is a question only the person who abandoned the pull request
+      can answer.
+
+    `action` is typed `Any` because it arrives out of a JSON payload, where a
+    key can be missing or hold anything at all. Anything that is not one of the
+    strings named above answers None, which is the same answer the ordinary
+    `synchronize` gets.
+
+    Pure application code: no Strawberry, FastAPI, asyncpg or PostgreSQL.
+    """
+    if display_state == MERGED:
+        # Guarded by the action as well, so a later `edited` of an
+        # already-merged pull request -- which GitHub sends in full, under a
+        # fresh delivery id -- does not re-assert the move.
+        return "completed" if action == CLOSE_ACTION else None
+
+    if display_state == OPEN and action in START_ACTIONS:
+        return "started"
+
+    return None
+
+
+def categories_below(target: str) -> tuple[str, ...]:
+    """The categories an issue may be moved out of, to reach `target`.
+
+    Forward-only, and this is the whole of "do not fight a human". An
+    automation may carry an issue further along the ladder and never back down
+    it, so:
+
+    * an issue a person has already moved to a `started` state stays in THAT
+      state when a pull request opens -- the team may have three of them, and
+      "In Review" is not something to overwrite with "In Progress";
+    * an issue already in a completed or canceled state is never moved by
+      anything;
+    * a merge still completes an issue sitting in backlog, unstarted or
+      started, because every one of those is behind the merge.
+
+    It is also what makes redelivery harmless without a dedupe table: the
+    second application finds the issue already at or past the target and moves
+    nothing, so there is no second activity row and no second notification.
+
+    An unknown target answers `()` -- move nothing -- rather than raising. The
+    only callers pass a value `automated_move_for` returned, and failing closed
+    is the right shape for a rule that decides whether to write.
+    """
+    if target not in CATEGORY_LADDER:
+        return ()
+
+    return CATEGORY_LADDER[: CATEGORY_LADDER.index(target)]
+
+
+# How the history records that a pull request moved an issue, and the prefix a
+# renderer matches on. See `issue_activity.caused_by` in migration 030.
+#
+# Built from the repository's `full_name` rather than its numeric id, because
+# this string is read by a person: "#84" alone is ambiguous the moment a
+# workspace tracks two repositories, and GitHub's ids are not something anybody
+# recognises.
+AUTOMATION_CAUSE_PREFIX: Final = "github_pull_request:"
+
+# `issue_activity_caused_by_length`, restated so the value is clamped here
+# rather than aborting a delivery on the CHECK.
+CAUSE_MAX_LENGTH: Final = 200
+
+
+def pull_request_cause(repository_full_name: str | None, number: int) -> str:
+    """What `issue_activity.caused_by` says when a pull request did it.
+
+    `github_pull_request:acme/vector#84`, or the number alone when the payload
+    carried no usable repository name -- which is still enough for a reader to
+    find the pull request in the Development section beside the timeline, and
+    much better than a row that says nobody did it.
+    """
+    if not repository_full_name:
+        return f"{AUTOMATION_CAUSE_PREFIX}#{number}"
+
+    return f"{AUTOMATION_CAUSE_PREFIX}{repository_full_name}#{number}"[
+        :CAUSE_MAX_LENGTH
+    ]
 
 
 # `ENG-142` wherever it appears, rather than anchored the way

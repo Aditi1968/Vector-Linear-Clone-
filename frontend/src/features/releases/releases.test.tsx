@@ -90,8 +90,16 @@ const INTEGRATIONS: WorkspaceIntegrationsQuery = {
     accountLogin: 'acme',
     connectedAt: '2026-01-01T00:00:00.000Z',
     repositories: [
-      { __typename: 'GithubRepository', repositoryId: '90210', fullName: 'acme/vector' },
+      {
+        __typename: 'GithubRepository',
+        repositoryId: '90210',
+        fullName: 'acme/vector',
+        tracked: true,
+      },
     ],
+    // No team has turned a pull-request automation on, which is the default
+    // and is all this screen needs from the field.
+    automations: [],
   },
   slackIntegration: {
     __typename: 'SlackIntegration',
@@ -99,6 +107,7 @@ const INTEGRATIONS: WorkspaceIntegrationsQuery = {
     teamName: null,
     scopes: [],
   },
+  teams: [],
 }
 
 async function openReleases(

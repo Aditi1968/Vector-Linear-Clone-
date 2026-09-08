@@ -76,6 +76,17 @@ class ActivityType:
     kind: ActivityKindEnum
     from_value: str | None
     to_value: str | None
+    caused_by: str | None = strawberry.field(
+        description=(
+            "What caused this, when `actorId` is null and it was not nobody. "
+            "Null for everything a person did -- the actor is the cause. "
+            "Opaque text with a documented prefix; today the only one is "
+            "`github_pull_request:owner/name#84`, written when a pull request "
+            "moved the issue. A client that does not recognise a prefix should "
+            "render the row exactly as it renders one with no cause, which is "
+            "what keeps a second cause from being a breaking change."
+        )
+    )
     created_at: datetime
 
     @classmethod
@@ -87,6 +98,7 @@ class ActivityType:
             kind=ActivityKindEnum(entity.kind.value),
             from_value=entity.from_value,
             to_value=entity.to_value,
+            caused_by=entity.caused_by,
             created_at=entity.created_at,
         )
 
