@@ -94,6 +94,7 @@ EXPECTED_MIGRATIONS = [
     "027_domain_events.sql",
     "028_embedding_jobs.sql",
     "029_estimates_dates.sql",
+    "031_analytics.sql",
     "032_auth_hardening.sql",
 ]
 
