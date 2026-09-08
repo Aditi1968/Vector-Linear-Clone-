@@ -810,6 +810,96 @@ def test_the_frontend_typecheck_builds_the_project_references():
     assert "run: npm run build" in workflow
 
 
+def test_every_notification_kind_is_declared_in_all_three_places():
+    """A notification kind lives in three files that nothing else binds.
+
+    `NotificationKind` is declared in `app/domain/notifications.py`, again as
+    a Strawberry enum in `app/graphql/types/notification.py`, and a third time
+    as the `notifications_kind_known` CHECK in whichever migration last
+    widened it. All three must agree, and none of them imports another, so
+    they agree only by hand until this test says so.
+
+    Each pairwise drift fails differently and none of them fails loudly:
+
+      * domain ahead of the CHECK -- the write path builds a kind PostgreSQL
+        refuses, so the notification is lost at insert time, inside the
+        transaction of whatever wrote it;
+      * domain ahead of GraphQL -- `NotificationType.from_entity` raises on a
+        value its enum cannot say, turning one inbox row into a 500 for the
+        whole query;
+      * CHECK ahead of domain -- a column that permits a value nothing writes,
+        which is harmless and is the one worth knowing about anyway, because
+        it means a migration widened for a feature that was never finished.
+
+    DUE_SOON is why this exists. Migration 029 added it to all three of these
+    correctly and the fourth place -- the frontend's exhaustive switch -- was
+    missed, which broke the build. That fourth place is now held by an
+    `assertNever` in `InboxPage.tsx` and checked by `npm run typecheck`; this
+    test holds the three on the Python side, so the enum cannot drift at any
+    of the four points without something going red.
+
+    The CHECK is read from the migrations rather than from a live database on
+    purpose: this file is a lint gate and must not need PostgreSQL. The last
+    `ADD CONSTRAINT notifications_kind_known` in filename order is by
+    definition the one in force, because a migration may only widen it by
+    dropping and re-adding it -- which 020 and 029 both do.
+    """
+    domain = _notification_kind_values("app/domain/notifications.py")
+    transport = _notification_kind_values("app/graphql/types/notification.py")
+
+    assert domain == transport, (
+        "app/domain/notifications.py and app/graphql/types/notification.py "
+        "disagree about NotificationKind"
+    )
+
+    checked: set[str] | None = None
+
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        found = re.search(
+            r"ADD CONSTRAINT notifications_kind_known\s*"
+            r"CHECK\s*\(\s*kind IN \(([^)]*)\)",
+            path.read_text(encoding="utf-8"),
+            re.DOTALL,
+        )
+
+        if found is not None:
+            checked = set(re.findall(r"'([a-z_]+)'", found.group(1)))
+
+    assert checked is not None, "no migration declares notifications_kind_known"
+    assert checked == domain, (
+        f"the notifications_kind_known CHECK permits {sorted(checked)} but "
+        f"NotificationKind declares {sorted(domain)}"
+    )
+
+
+def _notification_kind_values(relative_path: str) -> set[str]:
+    """The wire values of the `NotificationKind` enum declared in a file.
+
+    Parsed from the source rather than imported, so a mismatch is reported as
+    a mismatch between two files rather than as an import error in whichever
+    of them happens to be edited.
+    """
+    source = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+    # `\w*` because the two classes are not identically named: the domain enum
+    # is `NotificationKind` and the transport one is `NotificationKindEnum`,
+    # following this package's convention of suffixing a Strawberry enum whose
+    # published name would otherwise collide. A `\b` here matches only the
+    # first of them, which made this helper silently find nothing.
+    body = re.search(
+        r"class NotificationKind\w*\(.*?(?=\n(?:@|class |def ))",
+        source,
+        re.DOTALL,
+    )
+
+    assert body is not None, f"{relative_path} declares no NotificationKind"
+
+    values = set(re.findall(r'^\s{4}[A-Z_]+ = "([a-z_]+)"', body.group(0), re.M))
+
+    assert values, f"{relative_path}'s NotificationKind parsed as empty"
+
+    return values
+
+
 def _skip_guard_source() -> str:
     """The guard script as it is actually written in ci.yml.
 
