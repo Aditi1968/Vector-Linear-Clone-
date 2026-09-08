@@ -1,0 +1,49 @@
+# Every GraphQL document the environments feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`. Edit here, never there.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`.
+#
+# There is no `first` anywhere below, and that is the schema talking rather
+# than an oversight: `environments(workspaceSlug:)` returns `[Environment!]!`
+# -- a plain list with no connection, no `pageInfo` and no cursor. A workspace
+# has a handful of deploy targets, not a feed of them, so there is nothing to
+# paginate, no field policy to write in `src/lib/graphql/cache.ts`, and no
+# "Load more" for the screen to draw. `app/graphql/limits.py` charges a list
+# field with no page-size argument once, however many rows come back.
+
+fragment EnvironmentFields on Environment {
+  id
+  name
+  kind
+  createdAt
+}
+
+# Every deploy target this workspace has declared.
+query EnvironmentList($workspaceSlug: String!) {
+  environments(workspaceSlug: $workspaceSlug) {
+    ...EnvironmentFields
+  }
+}
+
+# Declare one.
+#
+# Refetches the list rather than writing into it by hand. `environments` is a
+# plain list, so the created row is not normalised into it the way a member of
+# a connection would be -- Apollo has no way to know this new `Environment`
+# belongs in that array. One refetch of a handful of rows is cheaper to be
+# right about than a `cache.modify` that has to reproduce the server's
+# ordering (name, ascending) to avoid the row appearing in the wrong place.
+mutation EnvironmentCreate($input: EnvironmentCreateInput!) {
+  environmentCreate(input: $input) {
+    environment {
+      ...EnvironmentFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

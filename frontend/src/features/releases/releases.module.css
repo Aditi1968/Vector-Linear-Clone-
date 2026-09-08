@@ -1,0 +1,301 @@
+/*
+ * Styles for the releases feature.
+ *
+ * Every value comes from `src/styles/tokens.css`; there is no literal hex or
+ * pixel measurement below. Resets, list semantics and the focus ring belong to
+ * `src/styles/base.css` and are not restated.
+ */
+
+/* ---------------------------------------------------------------- layout */
+
+/*
+ * The panel is the wide column here, opposite the initiatives screen.
+ *
+ * A release row is a version, a target and a range -- narrow by nature. The
+ * panel holds a generated note that can run to a hundred lines and needs the
+ * width to be read rather than scanned. Below 62rem the two stack, list first,
+ * for the same reason every other split in this product does.
+ */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-7);
+}
+
+@media (min-width: 62rem) {
+  .split {
+    grid-template-columns: minmax(0, 22rem) minmax(0, 1fr);
+    align-items: start;
+  }
+}
+
+.column {
+  min-width: 0;
+}
+
+.skeletonStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* ------------------------------------------------------------------ rows */
+
+.rowButton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.rowName {
+  overflow: hidden;
+  color: var(--color-text-body);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+/* --------------------------------------------------------------- panel */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-6-5);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-xl);
+  background: var(--gradient-panel);
+}
+
+.panelHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  align-items: center;
+  min-width: 0;
+}
+
+.panelTitle {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-heading);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-tight);
+  text-overflow: ellipsis;
+}
+
+.sectionTitle {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  margin: var(--space-4) 0 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+/*
+ * A definition list, because that is what these are: a term and the value it
+ * names. Two columns above 30rem so the values line up down the panel, one
+ * below it so a long environment name does not squeeze its own label.
+ */
+.facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-4) var(--space-6);
+  margin: 0;
+}
+
+@media (min-width: 30rem) {
+  .facts {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
+  .fact {
+    display: contents;
+  }
+}
+
+.facts dt {
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  color: var(--color-text-body);
+  font-size: var(--text-sm);
+}
+
+.panelActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+}
+
+/*
+ * The generated release note.
+ *
+ * `pre-wrap`, so the note's own line breaks are kept -- they are the
+ * structure of the document -- while a long pull-request title still wraps
+ * inside the panel instead of scrolling the page sideways.
+ */
+.notes {
+  margin: 0;
+  max-height: 30rem;
+  overflow: auto;
+  padding: var(--space-5);
+  border: var(--border-width) solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface);
+  color: var(--color-text-body);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: var(--leading-relaxed);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.idList,
+.numberList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.idLink {
+  color: var(--color-text-accent);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+}
+
+/* ------------------------------------------------------------ small type */
+
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--numeric-tabular);
+}
+
+.count {
+  color: var(--color-text-body);
+  font-variant-numeric: var(--numeric-tabular);
+}
+
+.countLine {
+  margin: 0;
+  color: var(--color-text-faint);
+  font-size: var(--text-meta);
+}
+
+.hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+  line-height: var(--leading-normal);
+}
+
+/* A value that is genuinely absent, or one this screen holds and cannot name.
+ * Muted and italic rather than hidden. */
+.unresolved {
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+.actionError {
+  margin: 0 0 var(--space-5);
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-text);
+  font-size: var(--text-body-sm);
+}
+
+.loadMore {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-5);
+  align-items: center;
+  justify-content: space-between;
+  margin-block-start: var(--space-6);
+}
+
+/* ------------------------------------------------------------------ form */
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+
+.formBlocked {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  color: var(--color-text-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}
+
+.formBlocked p {
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.label {
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm);
+  font-weight: var(--weight-medium);
+}
+
+.fieldError {
+  margin: 0;
+  color: var(--color-danger-text);
+  font-size: var(--text-meta);
+}
+
+.formError {
+  margin: 0;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-width) solid var(--color-danger-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-danger-subtle);
+  color: var(--color-danger-text);
+  font-size: var(--text-body-sm);
+}
+
+.formActions {
+  display: flex;
+  gap: var(--space-4);
+  justify-content: flex-end;
+}

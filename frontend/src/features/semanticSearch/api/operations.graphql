@@ -1,0 +1,120 @@
+# Every GraphQL document the semantic-search screen sends.
+#
+# Source file; `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`. Edit here, never there.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`.
+#
+# ------------------------------------------------------------------
+# Why this screen does not send `search`
+# ------------------------------------------------------------------
+#
+# `features/search` already sends it, as `WorkspaceSearch`, and that is the
+# right screen for it. `search` is HYBRID when the deployment has an embedder
+# -- the lexical ordering from migration 011 fused with the vector ordering
+# from 025 by reciprocal rank -- and the LEXICAL ARM ALWAYS RUNS. So an empty
+# answer from `search` genuinely means "no row contains these words and none
+# was near enough in meaning", and a second screen sending it would be the
+# first screen with a different heading.
+#
+# `issueDuplicateSuggestions` is the embeddings-only field. From
+# `SearchService.suggest_duplicates`:
+#
+#     "Empty results when this service has no embedder, and that is the honest
+#      answer rather than a degraded one. [...] A caller that wants lexical
+#      matches for a title can call `search`."
+#
+# Its empty answer is therefore ambiguous in exactly the way
+# `embeddingIndexingState` was added to resolve -- see the docstring on
+# `SearchService.indexing_state`, which names this screen's job outright:
+# "a UI that cannot tell 'still building' from 'this deployment does not do
+# this' has to guess, and it guesses wrong on exactly the fresh installs where
+# getting it right matters".
+#
+# So the two documents below are sent together, always, and the screen renders
+# neither without the other.
+
+# Issues nearest in meaning to some text.
+#
+# `first` is a literal, never a variable: `app/graphql/limits.py` prices a
+# list field at `page size x fields below it` during *validation*, and a
+# variable has no value then, so `first: $first` is charged at
+# `ASSUMED_PAGE_SIZE = 100` however small a page was meant.
+#
+# Ten rather than the schema default of five, because this is a search screen
+# and not the inline duplicate check the field was first built for. Cost:
+# 10 x (1 similarity + 7 on the issue) = 80 of 1000.
+#
+# The issue selection is the search feature's, field for field, and for the
+# same reason: a result row draws an identifier, a title, a priority glyph, a
+# status glyph and an avatar, and the three ids behind those glyphs are
+# resolved from the workspace context rather than by asking for objects the
+# schema does not expose (there is no `Issue.assignee` and no
+# `Issue.workflowState`).
+#
+# `description` is NOT selected. It is what the caller typed, not what the
+# server matched on, and a row showing an issue's own description would
+# suggest the match was made against the words in it -- which is precisely the
+# thing this screen is not doing.
+query SemanticIssueMatches(
+  $workspaceSlug: String!
+  $title: String!
+  $description: String
+) {
+  issueDuplicateSuggestions(
+    workspaceSlug: $workspaceSlug
+    title: $title
+    description: $description
+    first: 10
+  ) {
+    similarity
+    issue {
+      id
+      identifier
+      title
+      priority
+      teamId
+      workflowStateId
+      assigneeId
+    }
+  }
+}
+
+# How much of this workspace's semantic index actually exists.
+#
+# The field that lets this screen stop guessing. Four counts and a flag, no
+# list, so it costs nothing worth stating.
+#
+#   enabled  false when the deployment wired no embedder or no job repository
+#            -- the `vector` extension missing, or no model. All three counts
+#            are then zero WITHOUT A ROUND TRIP, which is why zero beside
+#            `enabled: false` must never be rendered as a fully indexed
+#            workspace.
+#   indexed  issues whose current text has a current embedding.
+#   pending  issues waiting for one. Results are incomplete while this is
+#            above zero.
+#   failed   issues whose embedding attempts hit the retry bound. A poison
+#            row: it will not be retried, and it will never be findable here.
+query EmbeddingIndexState($workspaceSlug: String!) {
+  embeddingIndexingState(workspaceSlug: $workspaceSlug) {
+    indexed
+    pending
+    failed
+    enabled
+  }
+}
+
+# Embed a batch of this workspace's issues that need it.
+#
+# Returns how many rows were written, so a caller loops until it reports zero.
+# `limit` is omitted so the schema default of 100 applies -- the sweep is
+# bounded by the server, and a client choosing the batch size would be
+# choosing how long somebody else's request waits for a pool slot.
+#
+# This exists on the screen because a deployment may run no background worker
+# (`EMBEDDING_WORKER_ENABLED` unset), and then this mutation is the only thing
+# that ever writes an embedding. Refetches the index state, which is the whole
+# reason anybody presses it.
+mutation EmbeddingsRefresh($workspaceSlug: String!) {
+  embeddingsRefresh(workspaceSlug: $workspaceSlug)
+}

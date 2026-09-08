@@ -1,0 +1,159 @@
+# Every GraphQL document the label-groups feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`. Edit here, never there.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`,
+# which is why the labels query below is `GroupedLabelList` and not
+# `WorkspaceLabels` -- `features/collaboration` already owns that name, and
+# its `LabelFields` fragment does not select `groupId`, which is the one field
+# this screen exists to administer.
+
+fragment LabelGroupFields on LabelGroup {
+  id
+  name
+  # Whether an issue may wear at most one label from this group.
+  #
+  # Enforced by PostgreSQL, not by the API server: migration 021 carries the
+  # flag down onto each label as `group_exclusive`, computes an
+  # `exclusivity_key` from it, and refuses a second attachment through a
+  # partial unique index on `issue_labels`. Two consequences this screen has
+  # to render honestly, both from that constraint rather than from a service
+  # that remembered to check:
+  #
+  #   - attaching a second label from an exclusive group is refused;
+  #   - turning exclusivity ON is refused for a group whose labels already
+  #     share an issue, because the ON UPDATE CASCADE reaches that same index.
+  exclusive
+  createdAt
+  updatedAt
+}
+
+# What a grouped label looks like here.
+#
+# `groupId` is the whole point. `color` is selected so the swatch beside a
+# label is the label's own rather than a generic chip -- a group's membership
+# is read by eye, and two labels whose colours are lost look interchangeable.
+fragment GroupedLabelFields on Label {
+  id
+  name
+  color
+  groupId
+}
+
+# Every group in the workspace.
+#
+# A plain `[LabelGroup!]!` with no page-size argument, so there is nothing to
+# paginate and no field policy in `src/lib/graphql/cache.ts`. A taxonomy is a
+# handful of groups, not a feed.
+query LabelGroupList($workspaceSlug: String!) {
+  labelGroups(workspaceSlug: $workspaceSlug) {
+    ...LabelGroupFields
+  }
+}
+
+# The workspace's labels, so a group can show what is in it.
+#
+# `labels` IS a connection, and this asks for one page of 50. It is not
+# paginated further here on purpose: the screen needs the labels in order to
+# say which group each belongs to, and a partial answer would make an empty
+# group indistinguishable from one whose labels are on page two. The screen
+# says outright when there are more. Cost: 50 x (4 + 2) = 300 of 1000.
+#
+# The `labels` field policy keyed on `workspaceSlug` already exists for
+# `features/collaboration`'s copy of this read; both write the same cache
+# field and Apollo merges the two selections onto each `Label:<uuid>`.
+query GroupedLabelList($workspaceSlug: String!) {
+  labels(workspaceSlug: $workspaceSlug, first: 50) {
+    nodes {
+      ...GroupedLabelFields
+    }
+    pageInfo {
+      hasNextPage
+    }
+  }
+}
+
+# Create a group.
+#
+# `exclusive` is `Boolean = null` on the input -- there is no database
+# default, deliberately (migration 021: "a default here would decide, silently
+# and forever, what an unspecified group means"). The form always sends a
+# value, so the application default in `app/services/labels.py` is never the
+# thing that decides.
+mutation LabelGroupCreate($input: LabelGroupCreateInput!) {
+  labelGroupCreate(input: $input) {
+    group {
+      ...LabelGroupFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Rename a group, or change whether it is exclusive.
+#
+# `LabelGroupUpdateInput` requires BOTH `name` and `exclusive` -- neither is
+# nullable, so this is a whole-row replace and not a patch. The form therefore
+# always sends both, seeded from the group it opened on. Sending only the
+# changed one is not expressible here, unlike `InitiativeUpdateInput`.
+#
+# No refetch: the payload returns the same fragment over the same
+# `LabelGroup:<id>` entity the list holds.
+mutation LabelGroupUpdate($input: LabelGroupUpdateInput!) {
+  labelGroupUpdate(input: $input) {
+    group {
+      ...LabelGroupFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Delete a group.
+#
+# `LabelService` ungroups the group's labels first, in the same transaction --
+# migration 021's `labels_group_fk` is ON DELETE RESTRICT precisely so that
+# the two defensible answers (ungroup them, delete them) cannot be chosen
+# silently by a constraint. The labels survive; only the grouping goes.
+#
+# Refetches both lists: the group leaves `labelGroups`, and every label that
+# was in it now has a different `groupId`, which no payload returns.
+mutation LabelGroupDelete($input: LabelGroupDeleteInput!) {
+  labelGroupDelete(input: $input) {
+    deletedGroupId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Put a label into a group, or take it out.
+#
+# One mutation for both directions: `groupId` is nullable on the input, and
+# null means "belongs to no group", which migration 021 is explicit is a real
+# state and not a missing value.
+#
+# The payload returns the `Label`, so the moved label corrects itself by
+# normalisation. Nothing else changes -- a group carries no member list of its
+# own; membership lives on the label -- so there is no refetch.
+mutation LabelSetGroup($input: LabelSetGroupInput!) {
+  labelSetGroup(input: $input) {
+    label {
+      ...GroupedLabelFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

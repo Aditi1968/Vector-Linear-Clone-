@@ -1,0 +1,145 @@
+# Every GraphQL document the releases feature sends.
+#
+# Source file; `npm run graphql:codegen` compiles it into
+# `src/generated/operations.ts`. Edit here, never there.
+#
+# The conventions are set out at length in
+# `src/features/issues/api/operations.graphql`. The one that bites here too:
+#
+#   **`first` is a literal, never a variable.** `app/graphql/limits.py` prices
+#   a list field at `page size x fields below it` during *validation*, and a
+#   variable has no value then, so `first: $first` is charged at
+#   `ASSUMED_PAGE_SIZE = 100` however small a page was meant. The `25` below
+#   must equal `DEFAULT_PAGE_SIZE` in `src/lib/graphql/pagination.ts`.
+#
+# Operation names are globally unique across every `.graphql` file in `src/`.
+
+# What a list row draws, and the base every write returns.
+#
+# `notes` is NOT here, and that is the one interesting omission. Migration 024
+# bounds it at 100000 characters and freezes it at creation, so it is a
+# document rather than a field: selecting it on 25 rows would move up to two
+# and a half megabytes of text to render nothing, because a row shows a name
+# and a status. The detail fragment below adds it for the one release open in
+# the panel.
+#
+# `issueIds` and `pullRequestNumbers` are omitted for the same reason at a
+# smaller scale -- a release can ship a hundred issues, and a row shows none
+# of them.
+#
+# `commitSha` and `previousCommitSha` ARE on the row. They are what a release
+# IS: migration 024 is explicit that a release is a reading of the range
+# `(previousCommitSha, commitSha]`, and a row that hid them would make two
+# deploys of the same version name look identical.
+fragment ReleaseFields on Release {
+  id
+  name
+  environmentId
+  repositoryId
+  commitSha
+  previousCommitSha
+  status
+  deployedAt
+  createdAt
+  updatedAt
+}
+
+# Everything the panel shows. A strict superset of the row fields.
+#
+# `notes` is the frozen release note -- generated once, at creation, from the
+# commits and merged pull requests in the range. It is plain text and is
+# rendered as such; see ../components/ReleaseDetailPanel.tsx for why it is not
+# parsed as Markdown.
+fragment ReleaseDetailFields on Release {
+  ...ReleaseFields
+  notes
+  issueIds
+  pullRequestNumbers
+}
+
+# One page of releases, newest first.
+#
+# Cursor pagination. `src/lib/graphql/cache.ts` carries the `releases` field
+# policy that merges pages; without it `fetchMore` writes page two under a
+# cache key no mounted query watches and "Load more" becomes a button that
+# sends a request and changes nothing. Cost: 25 x (10 + 2) = 300 of 1000.
+query ReleaseList($workspaceSlug: String!, $after: String) {
+  releases(workspaceSlug: $workspaceSlug, first: 25, after: $after) {
+    nodes {
+      ...ReleaseFields
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+
+# One release, with its notes and what it shipped.
+#
+# A null answer is "no such release" -- which is also what the server answers
+# for one the caller may not see, deliberately, so that a hidden release and
+# an absent one cannot be told apart.
+query ReleaseDetail($workspaceSlug: String!, $id: UUID!) {
+  release(workspaceSlug: $workspaceSlug, id: $id) {
+    ...ReleaseDetailFields
+  }
+}
+
+# Cut a release.
+#
+# Refetches the list: `releases` is a connection this payload is not part of,
+# so a created row cannot arrive by normalisation.
+#
+# `previousCommitSha` is optional and is normally left out. The server
+# resolves the previous deploy itself, through
+# `releases_workspace_repository_environment_deployed_idx` -- see migration
+# 024 -- so a client that guessed it would be overriding a lookup the database
+# is indexed for. It is offered on the form only for the case a person
+# genuinely knows better than the last recorded deploy.
+mutation ReleaseCreate($input: ReleaseCreateInput!) {
+  releaseCreate(input: $input) {
+    release {
+      ...ReleaseDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+# Move a release to its next status.
+#
+# No refetch: the payload returns the same fragment over the same
+# `Release:<id>` entity the list holds, and `status` and `deployedAt` are the
+# only two columns the write touches. The row corrects itself.
+#
+# Which moves are legal is `app.domain.releases.RELEASE_TRANSITIONS` and is
+# mirrored in ../lib/releases.ts so the menu offers only the legal ones. The
+# server is still the authority: a transition refused there arrives in
+# `errors` and is shown.
+mutation ReleaseStatusSet($input: ReleaseStatusSetInput!) {
+  releaseStatusSet(input: $input) {
+    release {
+      ...ReleaseDetailFields
+    }
+    errors {
+      field
+      code
+      message
+    }
+  }
+}
+
+mutation ReleaseDelete($input: ReleaseDeleteInput!) {
+  releaseDelete(input: $input) {
+    deletedReleaseId
+    errors {
+      field
+      code
+      message
+    }
+  }
+}

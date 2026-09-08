@@ -4,17 +4,21 @@ import { RequireAuth, authRoutes } from '../../features/auth'
 import { BoardScreen } from '../../features/board'
 import { CycleDetailPage, CycleListPage } from '../../features/cycles'
 import { DocumentsPage } from '../../features/documents'
+import { EnvironmentsPage } from '../../features/environments'
 import { FavoritesPage } from '../../features/favorites'
 import { InboxPage } from '../../features/inbox'
 import { InitiativesPage } from '../../features/initiatives'
 import { IssueDetailPage, IssueListPage } from '../../features/issues'
+import { LabelGroupsPage } from '../../features/labelGroups'
 import { MembersPage } from '../../features/members'
 import { MyIssuesPage } from '../../features/myIssues'
 import { onboardingRoutes } from '../../features/onboarding'
 import { ProjectDetailPage, ProjectListPage } from '../../features/projects'
+import { ReleasesPage } from '../../features/releases'
 import { RoadmapPage } from '../../features/roadmap'
 import { SavedViewsPage } from '../../features/savedViews'
 import { SearchPage } from '../../features/search'
+import { SemanticSearchPage } from '../../features/semanticSearch'
 import { SettingsPage } from '../../features/settings'
 import { TeamIssuesPage, TeamPage } from '../../features/teams'
 import { TemplatesPage } from '../../features/templates'
@@ -33,37 +37,25 @@ import { RouteError } from './RouteError'
  * the page says it will be -- a sentence about the screen, never a promise
  * about when.
  *
- * Seven of the original twelve have landed and left this table: triage, saved
+ * Eleven of the original twelve have landed and left this table: triage, saved
  * views, favorites and templates first, then initiatives, roadmap and
- * documents. Each is a real screen now, mounted individually below. Removing
- * an entry from here and adding a route object there is the whole of what
- * replacing a placeholder involves.
+ * documents, then releases, environments, label groups and semantic search.
+ * Each is a real screen now, mounted individually below. Removing an entry
+ * from here and adding a route object there is the whole of what replacing a
+ * placeholder involves.
+ *
+ * ONE is left, and it is left deliberately: analytics has no backend. There is
+ * no throughput field, no cycle-time field and no aggregate of any kind in
+ * `schema.graphql`, so a screen here could only be built out of numbers
+ * invented on the client -- which is the one thing a metrics page must never
+ * do. The placeholder is the honest rendering until the API has something to
+ * report.
  */
 const SECOND_WAVE = [
-  {
-    segment: ROUTE_SEGMENTS.releases,
-    title: 'Releases',
-    description: 'What shipped, and what is going out next.',
-  },
-  {
-    segment: ROUTE_SEGMENTS.environments,
-    title: 'Environments',
-    description: 'Where the product runs, and what is deployed to each.',
-  },
-  {
-    segment: ROUTE_SEGMENTS.labelGroups,
-    title: 'Label groups',
-    description: 'Labels that are mutually exclusive, administered together.',
-  },
   {
     segment: ROUTE_SEGMENTS.analytics,
     title: 'Analytics',
     description: 'Throughput, cycle time, and how the workspace is actually moving.',
-  },
-  {
-    segment: ROUTE_SEGMENTS.semanticSearch,
-    title: 'Semantic search',
-    description: 'Search by what an issue means rather than by the words it contains.',
   },
 ] as const
 
@@ -93,11 +85,11 @@ const SECOND_WAVE = [
  *
  * ## Screens that are not built yet
  *
- * The five second-wave routes at the foot of the table. Each mounts
- * `./Placeholder.tsx`, which is the right thing for a route whose screen is
- * somebody else's to write: the route is real, the URL is the one `paths`
- * builds, and the page says outright that it does not exist yet rather than
- * leaving a dead link behind.
+ * The one second-wave route at the foot of the table. It mounts
+ * `./Placeholder.tsx`, which is the right thing for a route whose screen has
+ * no API behind it: the route is real, the URL is the one `paths` builds, and
+ * the page says outright that it does not exist yet rather than leaving a dead
+ * link behind.
  *
  * Replacing one is a one-line change here -- swap the `element` for the real
  * page -- and nothing else in this file moves. That is the point of listing
@@ -230,6 +222,27 @@ export const routes: RouteObject[] = [
       {
         path: ROUTE_SEGMENTS.documents,
         element: <DocumentsPage />,
+      },
+      {
+        // List and panel on one screen: there is no `releases/:id` segment,
+        // and a release's notes are what the panel exists to show.
+        path: ROUTE_SEGMENTS.releases,
+        element: <ReleasesPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.environments,
+        element: <EnvironmentsPage />,
+      },
+      {
+        path: ROUTE_SEGMENTS.labelGroups,
+        element: <LabelGroupsPage />,
+      },
+      {
+        // Not the same screen as `search`, and deliberately not folded into
+        // it: this one sends `issueDuplicateSuggestions`, the embeddings-only
+        // field, where `/search` sends the hybrid `search`.
+        path: ROUTE_SEGMENTS.semanticSearch,
+        element: <SemanticSearchPage />,
       },
       ...SECOND_WAVE.map(({ segment, title, description }) => ({
         path: segment,

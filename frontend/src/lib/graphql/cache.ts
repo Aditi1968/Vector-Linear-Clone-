@@ -202,6 +202,21 @@ export function createCache(): InMemoryCache {
             'projectId',
             'initiativeId',
           ]),
+
+          /*
+           * `releases` is `initiatives` again: one connection of entities
+           * carrying an `id`, keyset-paged newest-first, whose only
+           * list-selecting argument is the workspace.
+           *
+           * `environmentId` is deliberately NOT in the key list, because it
+           * is not an argument -- `releases(workspaceSlug:, first:, after:)`
+           * is the whole signature, and the releases screen filters by
+           * environment over the rows it has rather than by asking for a
+           * narrower list. If the field ever grows that argument it belongs
+           * in this array, because a single environment's releases are not a
+           * page of the workspace's.
+           */
+          releases: cursorConnectionPolicy(['workspaceSlug']),
         },
       },
       Issue: {
