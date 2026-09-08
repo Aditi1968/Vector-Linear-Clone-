@@ -12,14 +12,18 @@ from app.http_limits import add_request_body_limit
 from app.repositories.embedding_jobs import EmbeddingJobRepository
 from app.repositories.embeddings import EmbeddingRepository
 from app.repositories.events import EventRepository
+from app.repositories.rate_limits import RateLimitRepository
+from app.repositories.sessions import SessionRepository
 from app.repositories.slack import SlackRepository
+from app.repositories.users import UserRepository
 from app.rest.github import router as github_router
 from app.rest.health import router as health_router
 from app.rest.slack import router as slack_router
+from app.services.auth import AuthService, run_sweep_loop
 from app.services.embedding_jobs import EmbeddingWorker
 from app.services.embeddings import load_embedder
 from app.services.notifications import SlackNotifier, run_delivery_loop
-from app.services.passwords import warm_password_hashing
+from app.services.passwords import Argon2PasswordHasher, warm_password_hashing
 from app.services.slack import DatabaseTokenStore, SlackWebClient
 
 
@@ -91,6 +95,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # `_build_notifier`.
     worker = _start_embedding_worker(get_settings())
     delivery = asyncio.create_task(run_delivery_loop(_build_notifier()))
+    # The third, and the only one that runs unconditionally on every replica
+    # with no coordination at all. `AuthService.sweep_once` carries the
+    # argument for why that is safe: the statements are idempotent DELETEs, so
+    # two replicas racing leave the table in the one state either intended,
+    # and there is nothing here worth a lease.
+    sweep = asyncio.create_task(run_sweep_loop(_build_sweeper()))
 
     try:
         yield
@@ -123,7 +133,42 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         with suppress(asyncio.CancelledError):
             await delivery
 
+        # Same order and same reasoning: cancelled, then awaited, then the
+        # pool goes. A sweep caught mid-DELETE when `disconnect()` ran would
+        # be holding a connection the pool is trying to close.
+        sweep.cancel()
+
+        with suppress(asyncio.CancelledError):
+            await sweep
+
         await disconnect()
+
+
+def _build_sweeper() -> AuthService:
+    """The service the background sweep runs `sweep_once` on.
+
+    A whole AuthService for two DELETEs, rather than the two repositories
+    directly, because the repositories are not allowed to acquire a connection
+    -- that is the architecture rule, and the service is what holds the
+    boundary the statements run inside. Cheap to build: every argument is a
+    stateless namespace for statements, and `Argon2PasswordHasher` says in its
+    own docstring that construction costs nothing, which is why the GraphQL
+    context makes one per request.
+
+    The hasher and the user repository are unused here and are passed anyway,
+    for the reason `app/rest/slack.py` gives about the same object: the service
+    is one thing, and a half-built one fails at the first call that needed the
+    missing part rather than at the line where it was left out.
+
+    The pool is owned by the lifespan above; this only borrows it.
+    """
+    return AuthService(
+        pool=get_pool(),
+        users=UserRepository(),
+        sessions=SessionRepository(),
+        hasher=Argon2PasswordHasher(),
+        rate_limits=RateLimitRepository(),
+    )
 
 
 def _build_notifier() -> SlackNotifier:

@@ -18,6 +18,7 @@ log-ins take a five-connection pool out of service, and it is invisible in
 any test that only checks the return value.
 """
 
+import asyncio
 import hashlib
 from datetime import datetime, timedelta, timezone
 from inspect import signature
@@ -31,12 +32,23 @@ from app.domain.errors import (
     EmailAlreadyRegisteredError,
     ValidationError,
 )
+from app.repositories.rate_limits import RateLimitRepository
+from app.repositories.sessions import SessionRepository
 from app.services.auth import (
     EMAIL_MAX_LENGTH,
+    LOGIN_BUDGETS,
+    LOGIN_EMAIL_SCOPE,
+    LOGIN_IP_SCOPE,
     NAME_MAX_LENGTH,
     PASSWORD_MAX_LENGTH,
     PASSWORD_MIN_LENGTH,
+    RATE_LIMIT_WINDOW,
+    REGISTER_BUDGETS,
+    REGISTER_IP_SCOPE,
+    SWEEP_BATCH,
     AuthService,
+    _subject_for_email,
+    run_sweep_loop,
 )
 from app.services.passwords import Argon2PasswordHasher
 from app.services.tokens import hash_session_token
@@ -241,6 +253,124 @@ class FakeSessionRepository:
 
         return self.rows.pop(token_hash, None) is not None
 
+    async def delete_expired(self, connection, *, batch):
+        self.calls.append(("delete_expired", batch))
+
+        expired = [
+            token_hash
+            for token_hash, session in self.rows.items()
+            if session.expires_at <= self.now
+        ][:batch]
+
+        for token_hash in expired:
+            del self.rows[token_hash]
+
+        return len(expired)
+
+    # The instant `delete_expired` compares against, which the real repository
+    # takes from `now()` in the server. A fake cannot have a database clock, so
+    # a test that wants a session collected moves this rather than sleeping.
+    now = BASE_TIME
+
+
+class FakeRateLimitRepository:
+    """An in-memory `auth_rate_limits`, counting the way the real one counts.
+
+    A real counter rather than a stub returning a number, because every
+    assertion about the limiter is an assertion about arithmetic across
+    several calls -- that the eleventh attempt is refused and the tenth is
+    not, that a success puts a subject back at zero -- and a stub that answers
+    a fixed count cannot be wrong in any of the ways that matter.
+
+    Deliberately does NOT roll the window. The real rollover is a CASE inside
+    one upsert and is a claim about SQL, so it is proved in
+    tests/test_migration_032_db.py against a server and nowhere else. A Python
+    reimplementation here would be a second window implementation that could
+    agree with itself while disagreeing with the one that ships.
+    """
+
+    def __init__(self):
+        self.counts: dict[tuple[str, str], int] = {}
+        self.calls: list[tuple] = []
+
+    async def consume(self, connection, *, buckets, window):
+        self.calls.append(("consume", tuple(buckets), window))
+
+        attempts = {}
+
+        for scope, subject in buckets:
+            key = (scope, subject)
+            self.counts[key] = self.counts.get(key, 0) + 1
+            attempts[scope] = self.counts[key]
+
+        return attempts
+
+    async def clear(self, connection, *, buckets):
+        self.calls.append(("clear", tuple(buckets)))
+
+        for scope, subject in buckets:
+            self.counts.pop((scope, subject), None)
+
+    async def delete_stale(self, connection, *, window, batch):
+        self.calls.append(("delete_stale", window, batch))
+
+        # Everything is "stale" here, because this fake holds no timestamps.
+        # What the sweep tests need from this method is that it is called, that
+        # it is batched, and that the pass loops until a batch comes back
+        # short; whether a particular row was old enough is the SQL's claim.
+        stale = list(self.counts)[:batch]
+
+        for key in stale:
+            del self.counts[key]
+
+        return len(stale)
+
+
+def argument_shape(method) -> list[tuple[str, object]]:
+    """A callable's parameters, by name and by how they may be passed.
+
+    Names and kinds rather than whole signatures, unlike the hasher check
+    below, and the difference is what each fake is. FakeHasher is annotated
+    exactly like the real hasher, so comparing whole signatures there costs
+    nothing and catches more. The repository fakes are not annotated -- the
+    rest of this file's fakes are not either -- so a whole-signature
+    comparison would fail on `connection: asyncpg.Connection` versus
+    `connection`, which is not drift, and would have to be silenced by
+    annotating a fake for the benefit of the test that checks it.
+
+    What actually broke here was an ARGUMENT: a service that started passing
+    `client_ip=` to fakes that took no such thing. Names and kinds are exactly
+    that failure, and keyword-only versus positional is part of it -- a fake
+    that accepted `buckets` positionally would answer a call the real
+    repository refuses.
+    """
+    return [(p.name, p.kind) for p in signature(method).parameters.values()]
+
+
+@pytest.mark.parametrize(
+    "method",
+    ["consume", "clear", "delete_stale"],
+)
+def test_the_fake_rate_limiter_takes_the_real_repository_s_arguments(method):
+    """The guard that would have caught this file's last breakage.
+
+    Every assertion below about budgets, refusals and the sweep runs against
+    FakeRateLimitRepository. If RateLimitRepository renames a keyword or adds
+    one, those tests go on passing against a shape the service no longer
+    calls -- which is exactly what happened when `client_ip` was added, and is
+    why this exists alongside the hasher's version of it.
+    """
+    assert argument_shape(getattr(FakeRateLimitRepository, method)) == argument_shape(
+        getattr(RateLimitRepository, method)
+    )
+
+
+def test_the_fake_session_repository_takes_the_real_one_s_sweep_arguments():
+    """The same guard, for the one method the sweep depends on."""
+    assert argument_shape(FakeSessionRepository.delete_expired) == argument_shape(
+        SessionRepository.delete_expired
+    )
+
 
 @pytest.mark.parametrize("method", ["hash", "verify", "verify_decoy"])
 def test_the_fake_hasher_has_the_real_hasher_s_signature(method):
@@ -257,7 +387,14 @@ def test_the_fake_hasher_has_the_real_hasher_s_signature(method):
     )
 
 
-def build_service(pool=None, hasher=None, users=None, sessions=None, **kwargs):
+def build_service(
+    pool=None,
+    hasher=None,
+    users=None,
+    sessions=None,
+    rate_limits=None,
+    **kwargs,
+):
     pool = pool if pool is not None else FakePool()
     hasher = hasher if hasher is not None else FakeHasher(pool)
 
@@ -266,6 +403,9 @@ def build_service(pool=None, hasher=None, users=None, sessions=None, **kwargs):
         users=users if users is not None else FakeUserRepository(),
         sessions=sessions if sessions is not None else FakeSessionRepository(),
         hasher=hasher,
+        rate_limits=(
+            rate_limits if rate_limits is not None else FakeRateLimitRepository()
+        ),
         **kwargs,
     )
 
@@ -286,13 +426,24 @@ def sessions() -> FakeSessionRepository:
 
 
 @pytest.fixture
+def rate_limits() -> FakeRateLimitRepository:
+    return FakeRateLimitRepository()
+
+
+@pytest.fixture
 def hasher(pool) -> FakeHasher:
     return FakeHasher(pool)
 
 
 @pytest.fixture
-def service(pool, hasher, users, sessions) -> AuthService:
-    return build_service(pool=pool, hasher=hasher, users=users, sessions=sessions)
+def service(pool, hasher, users, sessions, rate_limits) -> AuthService:
+    return build_service(
+        pool=pool,
+        hasher=hasher,
+        users=users,
+        sessions=sessions,
+        rate_limits=rate_limits,
+    )
 
 
 def codes(error: ValidationError) -> list[tuple[str, str]]:
@@ -342,7 +493,9 @@ async def test_invalid_registration_is_rejected_with_structured_issues(
     service = build_service(pool=ExplodingPool(), hasher=FakeHasher())
 
     with pytest.raises(ValidationError) as raised:
-        await service.register(email=email, password=password, name=name)
+        await service.register(
+            email=email, password=password, name=name, client_ip=None
+        )
 
     assert codes(raised.value) == expected
 
@@ -357,13 +510,16 @@ async def test_a_password_at_the_floor_is_accepted(service):
         email=EMAIL,
         password="x" * PASSWORD_MIN_LENGTH,
         name=None,
+        client_ip=None,
     )
 
 
 async def test_an_email_at_the_ceiling_is_accepted(service):
     email = "a" * (EMAIL_MAX_LENGTH - len("@example.com")) + "@example.com"
 
-    authentication = await service.register(email=email, password=PASSWORD, name=None)
+    authentication = await service.register(
+        email=email, password=PASSWORD, name=None, client_ip=None
+    )
 
     assert authentication.user.email == email
 
@@ -374,18 +530,25 @@ async def test_registration_hashes_before_it_touches_the_pool(pool, hasher, serv
     The assertion lives in FakeHasher._check_pool_is_idle and fires from
     inside `hash`, so this test fails if a future refactor moves the hashing
     inside the `async with pool.acquire()` block.
+
+    TWO acquisitions now, not one, and the second one is the point rather
+    than a regression: the rate limiter counts the attempt in an acquisition
+    of its own that is RELEASED before the hash begins. A limiter that held
+    its connection across the hash would be the very thing this test exists
+    to forbid, and the fake's pool check is what would catch it.
     """
-    await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    await service.register(email=EMAIL, password=PASSWORD, name=NAME, client_ip=None)
 
     assert hasher.operations == ["hash"]
-    assert pool.acquire_count == 1
+    assert pool.acquire_count == 2
+    assert pool.checked_out == 0
 
 
 # --- registration behaviour --------------------------------------------
 
 
 async def test_registration_stores_a_hash_and_never_the_password(users, service):
-    await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    await service.register(email=EMAIL, password=PASSWORD, name=NAME, client_ip=None)
 
     (operation, email, password_hash, name) = users.calls[0]
 
@@ -409,6 +572,7 @@ async def test_registration_folds_the_address_to_lowercase(users, service):
         email="Ada@Example.COM",
         password=PASSWORD,
         name=None,
+        client_ip=None,
     )
 
     assert authentication.user.email == EMAIL
@@ -416,7 +580,7 @@ async def test_registration_folds_the_address_to_lowercase(users, service):
 
 
 async def test_an_empty_name_is_stored_as_no_name(users, service):
-    await service.register(email=EMAIL, password=PASSWORD, name="")
+    await service.register(email=EMAIL, password=PASSWORD, name="", client_ip=None)
 
     assert users.calls[0][3] is None
 
@@ -426,12 +590,14 @@ async def test_registration_issues_a_session_in_the_same_transaction(
 ):
     """A user without a session is an account whose owner was told otherwise.
 
-    One acquire and one transaction: both writes land together or neither
-    does.
+    ONE transaction: both writes land together or neither does. The claim is
+    the transaction count and not the acquire count -- the limiter takes a
+    connection of its own before the hash, and it deliberately runs in no
+    transaction at all, because an attempt has to stay counted whether or not
+    the registration it belongs to commits.
     """
-    await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    await service.register(email=EMAIL, password=PASSWORD, name=NAME, client_ip=None)
 
-    assert pool.acquire_count == 1
     assert pool.connection.transactions == 1
     assert [call[0] for call in sessions.calls] == ["create"]
 
@@ -444,7 +610,9 @@ async def test_registration_stores_the_digest_and_returns_the_token_once(
     What the caller gets is a token; what the table gets is its digest. The
     token must be recoverable from neither.
     """
-    authentication = await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    authentication = await service.register(
+        email=EMAIL, password=PASSWORD, name=NAME, client_ip=None
+    )
     token = authentication.issued.token
 
     (_, _, stored_hash, _) = sessions.calls[0]
@@ -461,19 +629,23 @@ async def test_a_taken_address_is_a_validation_error_not_a_database_error(servic
     AuthService.register on why that is accepted here and why log-in must
     not.
     """
-    await service.register(email=EMAIL, password=PASSWORD, name=None)
+    await service.register(email=EMAIL, password=PASSWORD, name=None, client_ip=None)
 
     with pytest.raises(ValidationError) as raised:
-        await service.register(email=EMAIL, password="a different one", name=None)
+        await service.register(
+            email=EMAIL, password="a different one", name=None, client_ip=None
+        )
 
     assert codes(raised.value) == [("email", "EMAIL_TAKEN")]
 
 
 async def test_a_taken_address_is_detected_after_case_folding(service):
-    await service.register(email=EMAIL, password=PASSWORD, name=None)
+    await service.register(email=EMAIL, password=PASSWORD, name=None, client_ip=None)
 
     with pytest.raises(ValidationError) as raised:
-        await service.register(email="ADA@EXAMPLE.COM", password=PASSWORD, name=None)
+        await service.register(
+            email="ADA@EXAMPLE.COM", password=PASSWORD, name=None, client_ip=None
+        )
 
     assert codes(raised.value) == [("email", "EMAIL_TAKEN")]
 
@@ -482,19 +654,21 @@ async def test_a_taken_address_is_detected_after_case_folding(service):
 
 
 async def registered(service) -> None:
-    await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    await service.register(email=EMAIL, password=PASSWORD, name=NAME, client_ip=None)
 
 
 async def test_an_unknown_address_fails(service):
     with pytest.raises(AuthenticationError):
-        await service.log_in(email="nobody@example.com", password=PASSWORD)
+        await service.log_in(
+            email="nobody@example.com", password=PASSWORD, client_ip=None
+        )
 
 
 async def test_a_wrong_password_fails(service):
     await registered(service)
 
     with pytest.raises(AuthenticationError):
-        await service.log_in(email=EMAIL, password="not the password")
+        await service.log_in(email=EMAIL, password="not the password", client_ip=None)
 
 
 async def test_the_two_failures_are_the_same_failure(service):
@@ -507,10 +681,12 @@ async def test_the_two_failures_are_the_same_failure(service):
     await registered(service)
 
     with pytest.raises(AuthenticationError) as unknown:
-        await service.log_in(email="nobody@example.com", password=PASSWORD)
+        await service.log_in(
+            email="nobody@example.com", password=PASSWORD, client_ip=None
+        )
 
     with pytest.raises(AuthenticationError) as wrong:
-        await service.log_in(email=EMAIL, password="not the password")
+        await service.log_in(email=EMAIL, password="not the password", client_ip=None)
 
     assert type(unknown.value) is type(wrong.value)
     assert str(unknown.value) == str(wrong.value)
@@ -531,12 +707,14 @@ async def test_the_two_failures_cost_the_same_work(hasher, service):
 
     hasher.operations.clear()
     with pytest.raises(AuthenticationError):
-        await service.log_in(email="nobody@example.com", password=PASSWORD)
+        await service.log_in(
+            email="nobody@example.com", password=PASSWORD, client_ip=None
+        )
     unknown_address = list(hasher.operations)
 
     hasher.operations.clear()
     with pytest.raises(AuthenticationError):
-        await service.log_in(email=EMAIL, password="not the password")
+        await service.log_in(email=EMAIL, password="not the password", client_ip=None)
     wrong_password = list(hasher.operations)
 
     assert unknown_address == wrong_password == ["verify"]
@@ -553,10 +731,14 @@ async def test_an_oversized_submission_is_refused_without_hashing_or_a_query(has
     service = build_service(pool=ExplodingPool(), hasher=hasher)
 
     with pytest.raises(AuthenticationError):
-        await service.log_in(email="a" * (EMAIL_MAX_LENGTH + 1), password=PASSWORD)
+        await service.log_in(
+            email="a" * (EMAIL_MAX_LENGTH + 1), password=PASSWORD, client_ip=None
+        )
 
     with pytest.raises(AuthenticationError):
-        await service.log_in(email=EMAIL, password="x" * (PASSWORD_MAX_LENGTH + 1))
+        await service.log_in(
+            email=EMAIL, password="x" * (PASSWORD_MAX_LENGTH + 1), client_ip=None
+        )
 
     assert hasher.operations == []
 
@@ -569,7 +751,9 @@ async def test_a_correct_password_issues_a_new_session(sessions, service):
 
     before = set(sessions.rows)
 
-    authentication = await service.log_in(email=EMAIL, password=PASSWORD)
+    authentication = await service.log_in(
+        email=EMAIL, password=PASSWORD, client_ip=None
+    )
     token = authentication.issued.token
 
     assert authentication.user.email == EMAIL
@@ -579,7 +763,9 @@ async def test_a_correct_password_issues_a_new_session(sessions, service):
 async def test_log_in_folds_the_address_to_lowercase(service):
     await registered(service)
 
-    authentication = await service.log_in(email="ADA@example.com", password=PASSWORD)
+    authentication = await service.log_in(
+        email="ADA@example.com", password=PASSWORD, client_ip=None
+    )
 
     assert authentication.user.email == EMAIL
 
@@ -594,7 +780,7 @@ async def test_log_in_never_holds_a_connection_while_verifying(pool, service):
     """
     await registered(service)
 
-    await service.log_in(email=EMAIL, password=PASSWORD)
+    await service.log_in(email=EMAIL, password=PASSWORD, client_ip=None)
 
     assert pool.checked_out == 0
 
@@ -608,7 +794,7 @@ async def test_the_session_lifetime_reaches_the_repository(sessions):
     lifetime = timedelta(minutes=7)
     service = build_service(sessions=sessions, session_lifetime=lifetime)
 
-    await service.register(email=EMAIL, password=PASSWORD, name=None)
+    await service.register(email=EMAIL, password=PASSWORD, name=None, client_ip=None)
 
     assert sessions.calls[0][3] == lifetime
     assert service.session_lifetime == lifetime
@@ -622,6 +808,7 @@ async def test_a_valid_token_identifies_its_user(service):
         email=EMAIL,
         password=PASSWORD,
         name=NAME,
+        client_ip=None,
     )
 
     found = await service.authenticate(authentication.issued.token)
@@ -635,6 +822,7 @@ async def test_the_session_is_looked_up_by_digest_and_never_by_token(sessions, s
         email=EMAIL,
         password=PASSWORD,
         name=NAME,
+        client_ip=None,
     )
     token = authentication.issued.token
 
@@ -670,6 +858,7 @@ async def test_a_session_whose_user_is_gone_identifies_nobody(users, service):
         email=EMAIL,
         password=PASSWORD,
         name=NAME,
+        client_ip=None,
     )
 
     users.by_email.clear()
@@ -682,6 +871,7 @@ async def test_logging_out_deletes_the_session_by_digest(sessions, service):
         email=EMAIL,
         password=PASSWORD,
         name=NAME,
+        client_ip=None,
     )
     token = authentication.issued.token
 
@@ -702,6 +892,7 @@ async def test_logging_out_twice_is_not_an_error(service):
         email=EMAIL,
         password=PASSWORD,
         name=NAME,
+        client_ip=None,
     )
 
     await service.log_out(authentication.issued.token)
@@ -724,8 +915,8 @@ async def test_a_session_is_not_shared_between_log_ins(sessions, service):
     """
     await registered(service)
 
-    first = await service.log_in(email=EMAIL, password=PASSWORD)
-    second = await service.log_in(email=EMAIL, password=PASSWORD)
+    first = await service.log_in(email=EMAIL, password=PASSWORD, client_ip=None)
+    second = await service.log_in(email=EMAIL, password=PASSWORD, client_ip=None)
 
     assert first.issued.token != second.issued.token
     assert len(sessions.rows) == 3  # one from register, two from the log-ins
@@ -755,11 +946,11 @@ def flatten(calls) -> list[str]:
 
 
 async def test_no_repository_call_ever_carries_the_password(users, sessions, service):
-    await service.register(email=EMAIL, password=PASSWORD, name=NAME)
-    await service.log_in(email=EMAIL, password=PASSWORD)
+    await service.register(email=EMAIL, password=PASSWORD, name=NAME, client_ip=None)
+    await service.log_in(email=EMAIL, password=PASSWORD, client_ip=None)
 
     with pytest.raises(AuthenticationError):
-        await service.log_in(email=EMAIL, password="wrong")
+        await service.log_in(email=EMAIL, password="wrong", client_ip=None)
 
     for value in flatten(users.calls) + flatten(sessions.calls):
         assert PASSWORD not in value
@@ -770,6 +961,7 @@ async def test_no_repository_call_ever_carries_the_raw_token(users, sessions, se
         email=EMAIL,
         password=PASSWORD,
         name=NAME,
+        client_ip=None,
     )
     token = authentication.issued.token
 
@@ -778,3 +970,462 @@ async def test_no_repository_call_ever_carries_the_raw_token(users, sessions, se
 
     for value in flatten(users.calls) + flatten(sessions.calls):
         assert token not in value
+
+
+# --- rate limiting ------------------------------------------------------
+#
+# The budgets are policy and live in app/services/auth.py; every test below
+# reads them from there rather than restating a number, so that changing a
+# budget is one edit and not a hunt for the tests that hardcoded it.
+#
+# What is asserted here is the part decided in Python: which buckets an
+# attempt spends, when a refusal happens, what the refusal costs, and what it
+# says. The counting itself -- the upsert, the window rollover, the atomicity
+# under two replicas -- is SQL, and is proved against a server in
+# tests/test_migration_032_db.py.
+
+CLIENT_IP = "203.0.113.7"
+
+LOGIN_EMAIL_BUDGET = LOGIN_BUDGETS[LOGIN_EMAIL_SCOPE]
+LOGIN_IP_BUDGET = LOGIN_BUDGETS[LOGIN_IP_SCOPE]
+REGISTER_IP_BUDGET = REGISTER_BUDGETS[REGISTER_IP_SCOPE]
+
+
+async def fail_log_in(service, *, email=EMAIL, password="wrong", client_ip=None):
+    """One failed attempt, asserting only that it failed.
+
+    Every log-in in this section is expected to raise; the interesting part is
+    always what it cost or what it left behind, never that it raised.
+    """
+    with pytest.raises(AuthenticationError):
+        await service.log_in(email=email, password=password, client_ip=client_ip)
+
+
+async def register_user(service, *, email=EMAIL, client_ip=None):
+    return await service.register(
+        email=email,
+        password=PASSWORD,
+        name=NAME,
+        client_ip=client_ip,
+    )
+
+
+async def test_the_address_budget_permits_its_last_attempt_and_refuses_the_next(
+    hasher, service
+):
+    """The boundary, from both sides.
+
+    Off by one here is a limit quietly one tighter -- or one looser -- than the
+    number written above it in the policy block, and neither direction shows up
+    in a test that only checks that a refusal eventually happens.
+
+    The refusal is told apart from an ordinary failure by its COST, not by its
+    error, because the two errors are deliberately identical. A refused attempt
+    verifies nothing.
+    """
+    for _ in range(LOGIN_EMAIL_BUDGET):
+        await fail_log_in(service)
+
+    assert len(hasher.operations) == LOGIN_EMAIL_BUDGET
+
+    await fail_log_in(service)
+
+    assert len(hasher.operations) == LOGIN_EMAIL_BUDGET
+
+
+async def test_a_refused_attempt_is_the_same_error_as_a_wrong_password(service):
+    """The refusal must not become the enumeration channel.
+
+    A distinguishable "you are rate limited" would vary with something other
+    than the caller's own submission -- it would tell whoever spent one attempt
+    on an address that somebody has recently been failing log-ins against it,
+    which is a signal about a real account and exactly the class of signal the
+    decoy hash spends 100ms per request to erase.
+
+    AuthenticationError carries nothing, so "the same error" is the whole
+    externally visible answer. The correct password is used for the last
+    attempt deliberately: even the right answer is refused, and refused
+    identically.
+    """
+    await register_user(service)
+
+    for _ in range(LOGIN_EMAIL_BUDGET):
+        await fail_log_in(service)
+
+    with pytest.raises(AuthenticationError) as refused:
+        await service.log_in(email=EMAIL, password=PASSWORD, client_ip=None)
+
+    assert type(refused.value) is AuthenticationError
+    assert refused.value.args == ("Authentication failed",)
+
+
+async def test_a_refused_attempt_neither_hashes_nor_reads_users(hasher, users, service):
+    """The amplifier fix, asserted as the absence of both halves of the cost.
+
+    THIS IS THE TEST THAT FAILS IF THE LIMITER IS REVERTED. An unauthenticated
+    caller was able to make the server spend a full argon2id operation --
+    64 MiB and ~100ms -- per request, for an address that matches nothing,
+    because `verify_decoy` correctly spends what a real verification spends.
+    Reverting the limiter puts a hash back on this path.
+
+    The users read matters too, and separately: it is the one remaining
+    statement whose cost depends on whether the address exists, so a refusal
+    that still performed it would leave a measurable difference on the path
+    that skips everything else.
+    """
+    for _ in range(LOGIN_EMAIL_BUDGET):
+        await fail_log_in(service)
+
+    hasher.operations.clear()
+    users.calls.clear()
+
+    await fail_log_in(service)
+
+    assert hasher.operations == []
+    assert users.calls == []
+
+
+async def test_a_refusal_costs_the_same_for_a_real_address_as_for_an_unknown_one():
+    """Two services, one address, one observable answer.
+
+    The decoy makes an ORDINARY failure cost the same whether or not the
+    address has an account. This asserts the property survives the shortcut: a
+    refused attempt must not become the place where "this address exists" is
+    measurable again, which it would be the moment the refusal happened after
+    the credential lookup instead of before it.
+    """
+    costs = []
+
+    for exists in (True, False):
+        pool = FakePool()
+        hasher = FakeHasher(pool)
+        users = FakeUserRepository()
+        service = build_service(pool=pool, hasher=hasher, users=users)
+
+        if exists:
+            await register_user(service)
+
+        for _ in range(LOGIN_EMAIL_BUDGET):
+            await fail_log_in(service)
+
+        hasher.operations.clear()
+        users.calls.clear()
+
+        await fail_log_in(service)
+
+        costs.append((list(hasher.operations), [call[0] for call in users.calls]))
+
+    assert costs[0] == costs[1] == ([], [])
+
+
+async def test_a_successful_log_in_clears_the_budget_it_spent(rate_limits, service):
+    """The mitigation that keeps the address bucket from being a lockout.
+
+    A user who fumbles their password most of the way through the budget and
+    then gets it right must be back at zero, not one fumble from the edge. It
+    is also what stops a shared machine's accumulated typos from eventually
+    locking somebody out of an account nobody is attacking.
+    """
+    await register_user(service)
+
+    for _ in range(LOGIN_EMAIL_BUDGET - 1):
+        await fail_log_in(service)
+
+    assert rate_limits.counts
+
+    await service.log_in(email=EMAIL, password=PASSWORD, client_ip=CLIENT_IP)
+
+    assert rate_limits.counts == {}
+
+
+async def test_a_failed_log_in_does_not_clear_the_budget_it_spent(rate_limits, service):
+    """The other half, and the one a refactor is likelier to break.
+
+    Clearing on the way out of any attempt -- in a `finally`, say -- would be a
+    limiter that counts to one forever.
+    """
+    await register_user(service)
+
+    rate_limits.calls.clear()
+
+    await fail_log_in(service, client_ip=CLIENT_IP)
+
+    assert [call[0] for call in rate_limits.calls] == ["consume"]
+    assert set(rate_limits.counts) == {
+        (LOGIN_EMAIL_SCOPE, _subject_for_email(EMAIL)),
+        (LOGIN_IP_SCOPE, CLIENT_IP),
+    }
+
+
+async def test_the_address_bucket_is_a_digest_and_the_address_never_travels(
+    rate_limits, service
+):
+    """No raw address reaches `auth_rate_limits`, on any path.
+
+    Storing them would build a second copy of the user list -- plus every
+    address anyone ever guessed at -- in a table with no tenant, no foreign
+    key and no reason for anybody to have thought about who may read it. The
+    assertion is over every argument of every call rather than over the key
+    this test happens to know about, so a future bucket that carried an
+    address fails here too.
+    """
+    await fail_log_in(service, client_ip=CLIENT_IP)
+
+    assert (LOGIN_EMAIL_SCOPE, _subject_for_email(EMAIL)) in rate_limits.counts
+
+    for value in flatten(rate_limits.calls):
+        assert EMAIL not in value
+
+
+async def test_two_spellings_of_one_address_share_one_budget(rate_limits, service):
+    """Case folding happens BEFORE the digest, or it may as well not happen.
+
+    `users_email_key` treats the two as one account, so a limiter that gave
+    them separate budgets would hand anyone who noticed a free doubling
+    against every account on the deployment.
+    """
+    await fail_log_in(service, email="ADA@Example.COM")
+    await fail_log_in(service, email=EMAIL)
+
+    assert rate_limits.counts == {(LOGIN_EMAIL_SCOPE, _subject_for_email(EMAIL)): 2}
+
+
+async def test_an_attempt_with_no_address_to_key_on_still_has_a_budget(
+    rate_limits, service
+):
+    """A missing IP degrades the limit; it does not disable it.
+
+    `app/http_client_ip.py` is explicit that it cannot always produce an
+    address, so a limiter that refused to count without one would be a login
+    path whose protection depends on a proxy configuration this repository
+    does not own.
+    """
+    await fail_log_in(service, client_ip=None)
+
+    assert list(rate_limits.counts) == [(LOGIN_EMAIL_SCOPE, _subject_for_email(EMAIL))]
+
+
+async def test_the_ip_budget_catches_a_spray_across_many_addresses(hasher, service):
+    """What the address bucket cannot see, and the reason the IP bucket exists.
+
+    Credential stuffing tries one password against thousands of DIFFERENT
+    accounts, so no single address bucket ever reaches two. Only a key the
+    attacker holds constant bounds it, and from one host that key is the
+    address they are calling from.
+    """
+    for index in range(LOGIN_IP_BUDGET):
+        await fail_log_in(
+            service,
+            email=f"user{index}@example.com",
+            client_ip=CLIENT_IP,
+        )
+
+    assert len(hasher.operations) == LOGIN_IP_BUDGET
+
+    await fail_log_in(service, email="one-more@example.com", client_ip=CLIENT_IP)
+
+    assert len(hasher.operations) == LOGIN_IP_BUDGET
+
+
+async def test_a_spray_from_one_host_does_not_lock_out_a_different_host(
+    hasher, service
+):
+    """The IP bucket must bound its own caller and nobody else's.
+
+    An IP budget that leaked across addresses would be one attacker denying
+    the product to everybody, which is a worse outage than the one it prevents.
+    """
+    for index in range(LOGIN_IP_BUDGET + 1):
+        await fail_log_in(
+            service,
+            email=f"user{index}@example.com",
+            client_ip=CLIENT_IP,
+        )
+
+    before = len(hasher.operations)
+
+    await fail_log_in(service, email="elsewhere@example.com", client_ip="198.51.100.4")
+
+    assert len(hasher.operations) == before + 1
+
+
+async def test_registration_is_refused_after_its_budget_and_is_allowed_to_say_so(
+    hasher, service
+):
+    """The one refusal in this service that names itself.
+
+    Registration already discloses that an address is taken -- that is the
+    channel this budget slows, not a secret a message could spoil -- and the
+    bucket is keyed on the caller's own address and nothing else, so the answer
+    depends only on what the caller has themselves recently done. There is
+    nothing here to learn about anybody else, and somebody genuinely signing up
+    deserves to be told to wait.
+
+    It must also refuse BEFORE the hash, for the same reason log-in does.
+    """
+    for index in range(REGISTER_IP_BUDGET):
+        await register_user(
+            service,
+            email=f"user{index}@example.com",
+            client_ip=CLIENT_IP,
+        )
+
+    hasher.operations.clear()
+
+    with pytest.raises(ValidationError) as refused:
+        await register_user(service, email="one-more@example.com", client_ip=CLIENT_IP)
+
+    assert codes(refused.value) == [("email", "TOO_MANY_ATTEMPTS")]
+    assert hasher.operations == []
+
+
+async def test_a_malformed_registration_spends_no_budget(rate_limits, service):
+    """A typo must not cost somebody a share of their own budget.
+
+    Validation runs first and touches neither the database nor the hasher, so
+    refusing malformed input is free and does not need to be counted.
+    """
+    with pytest.raises(ValidationError):
+        await service.register(
+            email="nope",
+            password="short",
+            name=None,
+            client_ip=CLIENT_IP,
+        )
+
+    assert rate_limits.calls == []
+
+
+async def test_registration_without_an_address_has_no_budget(rate_limits, service):
+    """The accepted consequence, asserted rather than left as prose.
+
+    Enumeration walks a different address every time, so the submitted email is
+    a key that never repeats and would never trip -- the caller's IP is the
+    only key that sees the sweep at all. A deployment that cannot produce one
+    therefore has no registration budget, which is why `read_client_ip` falls
+    back to the TCP peer rather than giving up. This test exists so that the
+    day somebody adds a second register bucket, it fails and gets read.
+    """
+    await register_user(service)
+
+    assert rate_limits.calls == [("consume", (), RATE_LIMIT_WINDOW)]
+
+
+# --- the sweep ----------------------------------------------------------
+
+
+async def test_the_sweep_collects_expired_sessions_and_reports_the_count(
+    sessions, service
+):
+    """One pass, and the number the log line is built from."""
+    await register_user(service)
+
+    sessions.now = BASE_TIME + timedelta(days=365)
+
+    collected_sessions, collected_limits = await service.sweep_once()
+
+    assert (collected_sessions, collected_limits) == (1, 0)
+    assert sessions.rows == {}
+
+
+async def test_the_sweep_leaves_a_live_session_alone(sessions, service):
+    """The pass reclaims space; it must not sign anybody out.
+
+    A sweep whose predicate drifted -- `<` for `<=`, a cutoff computed the
+    wrong side of the lifetime -- would be indistinguishable from a product
+    that randomly logs people out, and would show up as a support ticket
+    rather than as a failure.
+    """
+    authentication = await register_user(service)
+
+    collected_sessions, _ = await service.sweep_once()
+
+    assert collected_sessions == 0
+    assert await service.authenticate(authentication.issued.token) is not None
+
+
+async def test_the_sweep_keeps_going_until_a_batch_comes_back_short(sessions, service):
+    """A backlog larger than one batch is drained, not sampled.
+
+    The batch is a bound on each TRANSACTION, not on what a pass collects. A
+    sweep that stopped after one statement would fall permanently behind on
+    exactly the table that got big enough to need it.
+    """
+    for index in range(SWEEP_BATCH + 3):
+        sessions.rows[index.to_bytes(8, "big")] = SessionEntity(
+            id=uuid4(),
+            user_id=uuid4(),
+            created_at=BASE_TIME,
+            last_used_at=None,
+            expires_at=BASE_TIME - timedelta(days=1),
+        )
+
+    collected_sessions, _ = await service.sweep_once()
+
+    assert collected_sessions == SWEEP_BATCH + 3
+    assert sessions.rows == {}
+    assert [call for call in sessions.calls if call[0] == "delete_expired"] == [
+        ("delete_expired", SWEEP_BATCH),
+        ("delete_expired", SWEEP_BATCH),
+    ]
+
+
+async def test_the_sweep_prunes_aged_out_rate_limit_buckets(rate_limits, service):
+    """The second table on the same pass, which is what the index is for."""
+    await fail_log_in(service, client_ip=CLIENT_IP)
+
+    assert len(rate_limits.counts) == 2
+
+    _, collected_limits = await service.sweep_once()
+
+    assert collected_limits == 2
+    assert rate_limits.counts == {}
+
+
+async def test_the_sweep_releases_its_connection_between_batches(pool, service):
+    """A catch-up pass must not hold a fifth of the pool for its duration.
+
+    Acquiring per batch is what keeps a first run against a never-swept table
+    invisible to concurrent requests rather than merely bounded.
+    """
+    await service.sweep_once()
+
+    assert pool.checked_out == 0
+    assert pool.acquire_count == 2
+
+
+async def test_the_sweep_loop_survives_a_failing_pass_and_stops_when_cancelled():
+    """A supervisor loop has no supervisor above it.
+
+    Propagating would end the task with nothing to restart it, and both tables
+    would silently resume growing forever for the life of the process. The
+    cancellation must still get through, or `app.main.lifespan` hangs on
+    shutdown waiting for a task that logged its own cancellation and went round
+    again.
+    """
+    passes = []
+    recovered = asyncio.Event()
+
+    class Failing:
+        async def sweep_once(self):
+            passes.append(len(passes))
+
+            if len(passes) == 1:
+                raise RuntimeError("the database is gone")
+
+            if len(passes) >= 3:
+                recovered.set()
+
+            return 0, 0
+
+    task = asyncio.create_task(run_sweep_loop(Failing(), interval=0))
+
+    # Waited on with a deadline rather than forever: a loop that died on the
+    # first failing pass never sets this, and the failure this test exists to
+    # catch must be a failure rather than a suite that hangs.
+    await asyncio.wait_for(recovered.wait(), timeout=5)
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task

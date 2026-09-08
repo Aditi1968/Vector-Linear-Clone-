@@ -1,4 +1,5 @@
 import strawberry
+from starlette.requests import Request
 from starlette.responses import Response
 from strawberry.types import Info
 
@@ -12,6 +13,7 @@ from app.graphql.types.auth import (
     UserType,
 )
 from app.graphql.types.errors import ValidationErrorType
+from app.http_client_ip import read_client_ip
 from app.http_cookies import clear_session_cookie, set_session_cookie
 
 
@@ -35,6 +37,7 @@ class AuthMutation:
                 email=input.email,
                 password=input.password,
                 name=input.name,
+                client_ip=_client_ip(info),
             )
         except ValidationError as exc:
             # Only expected input validation is translated into the payload.
@@ -56,12 +59,19 @@ class AuthMutation:
             authentication = await info.context.auth_service.log_in(
                 email=input.email,
                 password=input.password,
+                client_ip=_client_ip(info),
             )
         except AuthenticationError:
             # Deliberately not distinguished from any other failure, and
             # deliberately raised as a payload entry rather than a GraphQL
             # error: a wrong password is an expected answer to a well-formed
             # request, not a fault.
+            #
+            # A refused-by-rate-limit attempt arrives here too, as the same
+            # error and so as the same message. That is the service's decision
+            # and it is load-bearing -- see AuthService.log_in -- so there is
+            # deliberately nothing in this handler that could tell the two
+            # apart even if it wanted to.
             return LoginPayload(
                 user=None,
                 errors=[ValidationErrorType.from_domain(INVALID_CREDENTIALS)],
@@ -116,6 +126,26 @@ def _sign_in(info: Info, authentication: Authentication) -> UserType:
     )
 
     return UserType.from_entity(authentication.user)
+
+
+def _client_ip(info: Info) -> str | None:
+    """The address the rate limiter keys its backstop bucket on, or None.
+
+    Read here rather than inside `AuthService`, for the reason every other
+    request-shaped value in this layer is: the service takes arguments, not a
+    `starlette.Request`, and a domain service that reached into a transport
+    header would be a service that could only be called from one transport.
+
+    None is normal and is passed through as None rather than substituted. A
+    context built by hand has no request; see `app.http_client_ip` for what
+    this value is worth and why the budget on it is the loose one.
+    """
+    # Annotated because `Info.context` is untyped: without it the attribute is
+    # Any and this function would satisfy its own return type by saying
+    # nothing at all -- the same reason `_response` below annotates.
+    request: Request | None = info.context.request
+
+    return read_client_ip(request)
 
 
 def _response(info: Info) -> Response:

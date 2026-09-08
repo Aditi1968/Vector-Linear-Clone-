@@ -130,16 +130,16 @@ class FakeAuthService:
         self.register_error: Exception | None = None
         self.login_error: Exception | None = None
 
-    async def register(self, *, email, password, name) -> Authentication:
-        self.register_calls.append((email, password, name))
+    async def register(self, *, email, password, name, client_ip) -> Authentication:
+        self.register_calls.append((email, password, name, client_ip))
 
         if self.register_error is not None:
             raise self.register_error
 
         return make_authentication(self.user)
 
-    async def log_in(self, *, email, password) -> Authentication:
-        self.login_calls.append((email, password))
+    async def log_in(self, *, email, password, client_ip) -> Authentication:
+        self.login_calls.append((email, password, client_ip))
 
         if self.login_error is not None:
             raise self.login_error

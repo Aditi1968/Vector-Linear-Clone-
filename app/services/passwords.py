@@ -166,15 +166,22 @@ class Argon2PasswordHasher:
         on successful login is worth doing and is a write on the login path,
         which needs a transaction boundary and a decision about failure --
         a later change, not a side effect of this one.
+
+        Gated, and this is the gate that matters most. `hash` is reachable
+        only from `register`, which writes a row; this one is reachable from
+        every log-in attempt, correct or not, and through `verify_decoy` from
+        every attempt against an address that has no account at all. An
+        unauthenticated flood arrives HERE.
         """
-        try:
-            return await asyncio.to_thread(
-                self._hasher.verify,
-                password_hash,
-                password,
-            )
-        except VerifyMismatchError:
-            return False
+        async with _gate():
+            try:
+                return await asyncio.to_thread(
+                    self._hasher.verify,
+                    password_hash,
+                    password,
+                )
+            except VerifyMismatchError:
+                return False
 
     async def verify_decoy(self, password: str) -> None:
         """Spend what a real verification spends, and learn nothing.
@@ -197,6 +204,19 @@ class Argon2PasswordHasher:
         -- which is the one thing this module exists to avoid. `app.main`
         warms it at startup, so in a running deployment this is the dict
         lookup; the thread hop is what makes the cold path harmless anyway.
+
+        Not gated here, because `verify` below is and an `asyncio.Semaphore`
+        is not reentrant -- taking it twice on one call would deadlock the
+        path this exists to keep fast. So the bound is one permit per decoy
+        verification, which is the same permit a real one costs, which is the
+        arithmetic the decoy is supposed to preserve.
+
+        The one operation outside the bound is the UNCACHED `_decoy_hash`,
+        and it is uncached exactly once per process. `app.main.lifespan`
+        awaits `warm_password_hashing` before it yields, so nothing is served
+        until it is a dict lookup; a burst that arrived first would find
+        `functools.cache` making no promise about concurrent misses and could
+        compute it more than once. Warming is what closes that, not this.
         """
         decoy = await asyncio.to_thread(_decoy_hash)
 
