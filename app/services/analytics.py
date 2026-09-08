@@ -15,10 +15,13 @@ import asyncpg
 from app.domain.analytics import (
     ANALYTICS_MAX_DAYS,
     ANALYTICS_MIN_DAYS,
+    CYCLE_LIMIT,
+    PROJECT_LIMIT,
     TEAM_LIMIT,
     WORKLOAD_LIMIT,
     WorkspaceAnalytics,
     analytics_window,
+    throughput_totals,
     window_bounds,
 )
 from app.domain.errors import ValidationError, ValidationIssue
@@ -27,7 +30,13 @@ from app.repositories.analytics import AnalyticsRepository
 
 
 class AnalyticsService:
-    """Six aggregates over one workspace, for one bounded window."""
+    """Eleven aggregates over one workspace, for one bounded window.
+
+    Eleven statements on one connection rather than one statement per metric on
+    one connection each. They are read together because they are RENDERED
+    together, and the alternative -- a root field per metric -- would let a
+    document ask for eleven different windows in one request.
+    """
 
     def __init__(self, pool: asyncpg.Pool, repository: AnalyticsRepository):
         self._pool = pool
@@ -93,6 +102,14 @@ class AnalyticsService:
 
         async with self._pool.acquire() as connection:
             async with connection.transaction():
+                # Creation first, because the completion series merges it: the
+                # two bucket on different columns and one calendar carries both.
+                created = await self._repository.creation_series(
+                    connection,
+                    scope=scope,
+                    start=start,
+                    end=end,
+                )
                 throughput = await self._repository.completion_series(
                     connection,
                     scope=scope,
@@ -100,6 +117,13 @@ class AnalyticsService:
                     end=end,
                     range_start=range_start,
                     days=days,
+                    created=created,
+                )
+                lead_time = await self._repository.lead_time(
+                    connection,
+                    scope=scope,
+                    start=start,
+                    end=end,
                 )
                 cycle_time = await self._repository.cycle_time(
                     connection,
@@ -107,7 +131,15 @@ class AnalyticsService:
                     start=start,
                     end=end,
                 )
+                issue_age = await self._repository.issue_age(
+                    connection,
+                    scope=scope,
+                )
                 state_mix = await self._repository.state_mix(
+                    connection,
+                    scope=scope,
+                )
+                priority_mix = await self._repository.priority_mix(
                     connection,
                     scope=scope,
                 )
@@ -128,17 +160,39 @@ class AnalyticsService:
                     end=end,
                     limit=TEAM_LIMIT,
                 )
+                projects, project_total = await self._repository.project_progress(
+                    connection,
+                    scope=scope,
+                    limit=PROJECT_LIMIT,
+                )
+                cycles, cycle_total = await self._repository.cycle_progress(
+                    connection,
+                    scope=scope,
+                    start=start,
+                    end=end,
+                    limit=CYCLE_LIMIT,
+                )
 
         return WorkspaceAnalytics(
             range_start=range_start,
             range_end=range_end,
             days=days,
             throughput=throughput,
+            # Summed from the series rather than counted again, so the headline
+            # and the chart under it cannot disagree.
+            totals=throughput_totals(throughput),
+            lead_time=lead_time,
             cycle_time=cycle_time,
+            issue_age=issue_age,
             state_mix=state_mix,
+            priority_mix=priority_mix,
             workload=workload,
             assignee_total=assignee_total,
             teams=teams,
             team_total=team_total,
+            projects=projects,
+            project_total=project_total,
+            cycles=cycles,
+            cycle_total=cycle_total,
             overdue=overdue,
         )

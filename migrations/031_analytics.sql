@@ -74,6 +74,34 @@
 -- stopped", not "when work succeeded" -- so they are in this index, and every
 -- query over it that means *finished* joins `workflow_states` and says
 -- `type = 'completed'`. See app/repositories/analytics.py.
+--
+--
+-- WHY THERE IS ONLY ONE INDEX HERE
+-- --------------------------------
+-- `AnalyticsRepository.creation_series` runs the mirror-image range scan on
+-- `created_at`, and gets no index in this file because it already has one:
+-- 002's `issues_workspace_created_at_id_idx` is (workspace_id, created_at
+-- DESC, id DESC), which serves a workspace-scoped range on `created_at`
+-- whichever direction it is read in. The completion half needed a new index
+-- precisely because nothing in 001-029 leads on `completed_at`; the creation
+-- half was covered before this feature existed.
+--
+-- The seven snapshot aggregates -- state mix, priority mix, workload, issue
+-- age, overdue, project progress, cycle progress -- get nothing either, and
+-- that is the more interesting refusal. Every one of them is deliberately
+-- unbounded in time: they are questions about the board as it stands, so their
+-- predicate is `workspace_id` plus `archived_at IS NULL` and their answer
+-- genuinely depends on every live row the workspace has. No index makes a
+-- count of everything cheaper than reading everything. An index per GROUP BY
+-- key would be write amplification on every issue write, bought to accelerate
+-- scans that would still be scans.
+--
+-- Which sets the real ceiling on this screen, and it is worth naming: the cost
+-- of the page is proportional to the workspace's LIVE issue count, not to the
+-- window. Narrowing the range picker does not make it cheaper. The upgrade
+-- path, if a workspace ever gets large enough to feel it, is a materialised
+-- snapshot refreshed on a schedule -- which is the roll-up this file argues
+-- against building SPECULATIVELY, not one it argues against forever.
 CREATE INDEX issues_workspace_completed_at_idx
     ON issues (workspace_id, completed_at)
     WHERE completed_at IS NOT NULL;
