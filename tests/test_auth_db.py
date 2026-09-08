@@ -31,6 +31,7 @@ import asyncpg
 import pytest
 
 from app.domain.errors import AuthenticationError, ValidationError
+from app.repositories.rate_limits import RateLimitRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.users import UserRepository
 from app.services.auth import AuthService
@@ -45,6 +46,17 @@ pytestmark = pytest.mark.db
 
 MIGRATION = Path(__file__).resolve().parents[1] / "migrations" / "003_auth.sql"
 MIGRATIONS_DIR = MIGRATION.parent
+
+# 032 builds `auth_rate_limits`, which `AuthService` now writes to on every
+# register and every log-in. Applied alongside 003 rather than folded into
+# `apply_auth_migration`, because the tests below about the migration itself
+# are about 003 and their answers would change if a second file ran inside
+# the call they make.
+RATE_LIMIT_MIGRATION = MIGRATIONS_DIR / "032_auth_hardening.sql"
+
+# The address the service is called from. A documentation-range address
+# (RFC 5737), so that nothing here could ever be a real host.
+CLIENT_IP = "203.0.113.7"
 
 EMAIL = "ada@example.com"
 PASSWORD = "correct horse battery staple"
@@ -114,18 +126,33 @@ async def prepared(postgres_dsn):
 
 
 @pytest.fixture
-def service(prepared) -> AuthService:
+async def service(prepared) -> AuthService:
     """The real service over the real repositories over the real database.
 
     Real argon2 too. Every registration in this file costs one hash and
     every log-in costs one verification, which is the price of testing the
     thing that ships.
+
+    032 is applied HERE and not in `prepared`, and the placement is the whole
+    point. The service writes `auth_rate_limits` on every register and every
+    log-in, so it needs that table -- but the tests above about the migration
+    itself are about what 003 builds and nothing else, and applying a second
+    file underneath them would change their answer rather than their subject.
     """
+    async with prepared.acquire() as connection:
+        async with connection.transaction():
+            await apply_migration(
+                connection,
+                RATE_LIMIT_MIGRATION,
+                migrations_dir=MIGRATIONS_DIR,
+            )
+
     return AuthService(
         pool=prepared,
         users=UserRepository(),
         sessions=SessionRepository(),
         hasher=Argon2PasswordHasher(),
+        rate_limits=RateLimitRepository(),
     )
 
 
@@ -350,8 +377,12 @@ async def test_a_session_cannot_reference_a_user_that_is_not_there(prepared):
 
 
 async def test_registering_then_signing_in_identifies_the_same_person(service):
-    registered = await service.register(email=EMAIL, password=PASSWORD, name=NAME)
-    signed_in = await service.log_in(email=EMAIL, password=PASSWORD)
+    registered = await service.register(
+        email=EMAIL, password=PASSWORD, name=NAME, client_ip=CLIENT_IP
+    )
+    signed_in = await service.log_in(
+        email=EMAIL, password=PASSWORD, client_ip=CLIENT_IP
+    )
 
     assert signed_in.user.id == registered.user.id
     assert signed_in.user.email == EMAIL
@@ -367,9 +398,13 @@ async def test_registering_then_signing_in_identifies_the_same_person(service):
 
 
 async def test_the_address_is_matched_regardless_of_case(service):
-    await service.register(email=EMAIL, password=PASSWORD, name=None)
+    await service.register(
+        email=EMAIL, password=PASSWORD, name=None, client_ip=CLIENT_IP
+    )
 
-    signed_in = await service.log_in(email="ADA@Example.COM", password=PASSWORD)
+    signed_in = await service.log_in(
+        email="ADA@Example.COM", password=PASSWORD, client_ip=CLIENT_IP
+    )
 
     assert signed_in.user.email == EMAIL
 
@@ -381,10 +416,14 @@ async def test_registering_a_taken_address_is_a_validation_error(service):
     comes from PostgreSQL, is caught by constraint name in the repository,
     and becomes a ValidationError in the service. Every layer is real.
     """
-    await service.register(email=EMAIL, password=PASSWORD, name=None)
+    await service.register(
+        email=EMAIL, password=PASSWORD, name=None, client_ip=CLIENT_IP
+    )
 
     with pytest.raises(ValidationError) as raised:
-        await service.register(email=EMAIL, password="another password", name=None)
+        await service.register(
+            email=EMAIL, password="another password", name=None, client_ip=CLIENT_IP
+        )
 
     assert [(issue.field, issue.code) for issue in raised.value.issues] == [
         ("email", "EMAIL_TAKEN")
@@ -392,13 +431,19 @@ async def test_registering_a_taken_address_is_a_validation_error(service):
 
 
 async def test_a_wrong_password_and_an_unknown_address_fail_identically(service):
-    await service.register(email=EMAIL, password=PASSWORD, name=None)
+    await service.register(
+        email=EMAIL, password=PASSWORD, name=None, client_ip=CLIENT_IP
+    )
 
     with pytest.raises(AuthenticationError) as wrong:
-        await service.log_in(email=EMAIL, password="not the password")
+        await service.log_in(
+            email=EMAIL, password="not the password", client_ip=CLIENT_IP
+        )
 
     with pytest.raises(AuthenticationError) as unknown:
-        await service.log_in(email="nobody@example.com", password=PASSWORD)
+        await service.log_in(
+            email="nobody@example.com", password=PASSWORD, client_ip=CLIENT_IP
+        )
 
     assert type(wrong.value) is type(unknown.value)
     assert wrong.value.args == unknown.value.args
@@ -407,7 +452,9 @@ async def test_a_wrong_password_and_an_unknown_address_fail_identically(service)
 async def test_the_stored_password_hash_verifies_and_is_not_the_password(
     prepared, service
 ):
-    await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    await service.register(
+        email=EMAIL, password=PASSWORD, name=NAME, client_ip=CLIENT_IP
+    )
 
     stored = await rows_as_text(prepared, USERS_AS_TEXT)
 
@@ -426,7 +473,9 @@ async def test_the_raw_token_is_nowhere_in_the_sessions_table(prepared, service)
     Asked of the rendered row rather than of a named column, so that a
     column added later is covered by this test on the day it is added.
     """
-    registered = await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    registered = await service.register(
+        email=EMAIL, password=PASSWORD, name=NAME, client_ip=CLIENT_IP
+    )
     token = registered.issued.token
 
     stored = await rows_as_text(prepared, SESSIONS_AS_TEXT)
@@ -445,7 +494,9 @@ async def test_an_expired_session_identifies_nobody(prepared, service):
     expired by the same arithmetic that issues a live one -- `now()` plus an
     interval, on the database's clock.
     """
-    registered = await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    registered = await service.register(
+        email=EMAIL, password=PASSWORD, name=NAME, client_ip=CLIENT_IP
+    )
     token = generate_session_token()
 
     async with prepared.acquire() as connection:
@@ -469,7 +520,9 @@ async def test_a_session_is_stamped_when_it_is_used(prepared, service):
     NULL until the session is first presented, then set. It is what an idle
     timeout and a "your devices" screen would both be built from.
     """
-    registered = await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    registered = await service.register(
+        email=EMAIL, password=PASSWORD, name=NAME, client_ip=CLIENT_IP
+    )
 
     async with prepared.acquire() as connection:
         before = await connection.fetchval("SELECT last_used_at FROM sessions")
@@ -485,7 +538,9 @@ async def test_a_session_is_stamped_when_it_is_used(prepared, service):
 
 
 async def test_logging_out_revokes_the_session_for_good(prepared, service):
-    registered = await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    registered = await service.register(
+        email=EMAIL, password=PASSWORD, name=NAME, client_ip=CLIENT_IP
+    )
     token = registered.issued.token
 
     assert await service.authenticate(token) is not None
@@ -508,8 +563,10 @@ async def test_logging_out_leaves_other_sessions_alone(service):
     A log-out that deleted by user id rather than by digest would pass every
     other test in this file.
     """
-    first = await service.register(email=EMAIL, password=PASSWORD, name=NAME)
-    second = await service.log_in(email=EMAIL, password=PASSWORD)
+    first = await service.register(
+        email=EMAIL, password=PASSWORD, name=NAME, client_ip=CLIENT_IP
+    )
+    second = await service.log_in(email=EMAIL, password=PASSWORD, client_ip=CLIENT_IP)
 
     await service.log_out(first.issued.token)
 
@@ -518,6 +575,8 @@ async def test_logging_out_leaves_other_sessions_alone(service):
 
 
 async def test_an_unknown_token_identifies_nobody(service):
-    await service.register(email=EMAIL, password=PASSWORD, name=NAME)
+    await service.register(
+        email=EMAIL, password=PASSWORD, name=NAME, client_ip=CLIENT_IP
+    )
 
     assert await service.authenticate(generate_session_token()) is None

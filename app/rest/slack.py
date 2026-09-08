@@ -42,6 +42,7 @@ from app.domain.tenancy import AuthorizedWorkspaceScope
 from app.http_cookies import is_secure_environment, read_session_token
 from app.repositories.invitations import InvitationRepository
 from app.repositories.memberships import MembershipRepository
+from app.repositories.rate_limits import RateLimitRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.slack import SlackRepository
 from app.repositories.users import UserRepository
@@ -471,6 +472,11 @@ def slack_services() -> SlackRequestServices:
             users=UserRepository(),
             sessions=SessionRepository(),
             hasher=Argon2PasswordHasher(),
+            # Unused on this path -- an OAuth callback only asks the service
+            # who the caller already is, and `authenticate` spends no budget --
+            # but the service is one object and a half-built one fails at the
+            # first call that does need it rather than here.
+            rate_limits=RateLimitRepository(),
         ),
         membership=MembershipService(
             pool=pool,

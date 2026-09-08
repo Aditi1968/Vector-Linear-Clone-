@@ -123,7 +123,8 @@ class SessionRepository:
         No expiry predicate. Logout means the row must be gone, and an
         expired row is still a row: leaving it because it had already lapsed
         would keep a digest in the table that nothing will ever clean up
-        except a sweep that does not exist yet.
+        except `delete_expired` below, which runs on a timer and not on the
+        request the user is making right now.
 
         The boolean is for the caller's own logic, not for the client. Whether
         a presented token matched anything is the same fact `touch_valid`
@@ -145,6 +146,63 @@ class SessionRepository:
         )
 
         return status != "DELETE 0"
+
+    async def delete_expired(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        batch: int,
+    ) -> int:
+        """Remove lapsed sessions, up to `batch` of them, and say how many.
+
+        Not a security fix. `touch_valid` has always refused an expired row, so
+        nothing here changes who can authenticate; migrations/003_auth.sql even
+        created `sessions_expires_at_idx` for a sweep it correctly predicted
+        would be needed and that nobody had written. What was broken is that
+        the table only ever grew -- one row per log-in, forever, each holding a
+        digest of a credential that stopped meaning anything a fortnight ago.
+
+        BOUNDED, and that is the whole reason this takes an argument. The first
+        run against a table that has never been swept could match every row in
+        it, and an unbounded DELETE is then one transaction holding row locks
+        over all of them, bloating WAL and blocking the `touch_valid` UPDATE
+        that every authenticated request makes. A batch turns that into a
+        series of short transactions the caller can pace; see
+        `AuthService.sweep_once`, which loops until a pass comes back short.
+
+        `now()` and not a caller's timestamp, so the sweep and the predicate in
+        `touch_valid` are deciding expiry off one clock. A Python-computed
+        cutoff on a host running fast would delete sessions that this database
+        still considers live, which is signing people out at random.
+
+        SAFE ON TWO REPLICAS WITH NO `FOR UPDATE SKIP LOCKED`, unlike the
+        claims in migrations/027 and 028, and the difference is what the
+        statement leads to. Those two lease a row so that exactly one worker
+        performs an expensive, external, non-idempotent action with it -- a
+        model run, a Slack post. Here the statement IS the work, and it is
+        idempotent: a row deleted twice is a row deleted. Two sweeps racing
+        take row locks in physical order, the loser waits and then finds the
+        rows already gone under READ COMMITTED, and both return having left the
+        table in the one state either intended. SKIP LOCKED would only mean the
+        loser reports a smaller number for the same outcome.
+        """
+        status: str = await connection.execute(
+            """
+            DELETE FROM sessions
+            WHERE id IN (
+                SELECT id
+                FROM sessions
+                WHERE expires_at <= now()
+                LIMIT $1
+            )
+            """,
+            batch,
+        )
+
+        # asyncpg ships no types for `execute`, so the tag is Any; annotating
+        # above and parsing here is what stops an unannotated read satisfying
+        # any return type at all.
+        return int(status.split()[-1])
 
     @staticmethod
     def _to_entity(row: asyncpg.Record) -> SessionEntity:

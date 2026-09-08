@@ -92,6 +92,7 @@ EXPECTED_MIGRATIONS = [
     "026_member_departure.sql",
     "027_domain_events.sql",
     "028_embedding_jobs.sql",
+    "032_auth_hardening.sql",
 ]
 
 # The checksum `scripts/apply_migration.py` records in the ledger, over the

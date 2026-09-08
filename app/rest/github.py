@@ -50,6 +50,7 @@ from app.http_cookies import is_secure_environment, read_session_token
 from app.repositories.github import GithubRepository
 from app.repositories.invitations import InvitationRepository
 from app.repositories.memberships import MembershipRepository
+from app.repositories.rate_limits import RateLimitRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
@@ -239,6 +240,11 @@ def build_services() -> GithubHttpServices:
             users=UserRepository(),
             sessions=SessionRepository(),
             hasher=Argon2PasswordHasher(),
+            # Unused on this path -- an OAuth callback only asks the service
+            # who the caller already is, and `authenticate` spends no budget --
+            # but the service is one object and a half-built one fails at the
+            # first call that does need it rather than here.
+            rate_limits=RateLimitRepository(),
         ),
         memberships=MembershipService(
             pool=pool,

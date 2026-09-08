@@ -41,6 +41,7 @@ from app.repositories.labels import LabelRepository
 from app.repositories.memberships import MembershipRepository
 from app.repositories.notifications import NotificationRepository
 from app.repositories.projects import ProjectRepository
+from app.repositories.rate_limits import RateLimitRepository
 from app.repositories.relations import RelationRepository
 from app.repositories.releases import ReleaseRepository
 from app.repositories.saved_views import FavoriteRepository, SavedViewRepository
@@ -428,6 +429,14 @@ async def get_context() -> VectorContext:
             users=UserRepository(),
             sessions=SessionRepository(),
             hasher=Argon2PasswordHasher(),
+            # The shared counter in front of `register` and `log_in`. A
+            # fresh instance rather than a shared one: a repository here
+            # holds no state and no connection -- it is a namespace for
+            # statements -- so there is nothing for one request to get two
+            # of. The BUDGETS are module constants in app/services/auth.py,
+            # which is what keeps them one policy rather than one per
+            # composition root.
+            rate_limits=RateLimitRepository(),
         ),
         label_service=label_service,
         comment_service=CommentService(pool=pool, repository=CommentRepository()),
