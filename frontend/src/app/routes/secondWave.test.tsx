@@ -39,7 +39,7 @@ const GRADUATED = [
   [paths.analytics, 'Analytics'],
   [paths.roadmap, 'Roadmap'],
   [paths.releases, 'Releases'],
-  [paths.semanticSearch, 'Similar issues'],
+  [paths.semanticSearch, 'Semantic search'],
 ] as const satisfies readonly (readonly [(slug: string) => string, string])[]
 
 describe('the routes whose screens were built last', () => {
