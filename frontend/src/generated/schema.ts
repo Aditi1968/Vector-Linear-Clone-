@@ -27,6 +27,16 @@ export type Scalars = {
   UUID: { input: string; output: string; }
 };
 
+/** One person's share of the unfinished work. A null `assigneeId` is the unassigned pile, which is a real bucket and usually the largest. */
+export type AssigneeWorkload = {
+  __typename?: 'AssigneeWorkload';
+  assigneeId?: Maybe<Scalars['UUID']['output']>;
+  /** The assignee's display name, falling back to their email address when they have not set one. Null with a null `assigneeId`. */
+  name?: Maybe<Scalars['String']['output']>;
+  /** Live issues in a BACKLOG, UNSTARTED or STARTED state. Finished work is excluded: this is what somebody is carrying, not what they have ever shipped. */
+  openIssues: Scalars['Int']['output'];
+};
+
 export type Comment = {
   __typename?: 'Comment';
   authorId: Scalars['UUID']['output'];
@@ -99,6 +109,38 @@ export type CyclePayload = {
   __typename?: 'CyclePayload';
   cycle?: Maybe<Cycle>;
   errors: Array<ValidationErrorType>;
+};
+
+/** One cycle's scope and delivery, in its own team's estimate unit. Counts are over the cycle's WHOLE scope, not the part of it inside the requested window -- a sprint's progress is the sprint's. Cycles are listed when their span overlaps the window. */
+export type CycleProgress = {
+  __typename?: 'CycleProgress';
+  completed: Scalars['Int']['output'];
+  /** The sum of the completed issues' estimates, in this team's unit. Null for a t-shirt team -- the stored integer is a rung on a ladder, so two of them do not add to a size -- and null when nothing was estimated. Read `estimated` to tell the two apart. Never add this across cycles: two cycles may be on two scales. */
+  completedEstimate?: Maybe<Scalars['Int']['output']>;
+  cycleId: Scalars['UUID']['output'];
+  endsAt: Scalars['DateTime']['output'];
+  estimateScale: EstimateScale;
+  /** How many of those completions carried an estimate at all. */
+  estimated: Scalars['Int']['output'];
+  /** Live issues currently in this cycle. */
+  issues: Scalars['Int']['output'];
+  name?: Maybe<Scalars['String']['output']>;
+  number: Scalars['Int']['output'];
+  startsAt: Scalars['DateTime']['output'];
+  /** The owning team's key. A cycle belongs to exactly one team, which is why a single estimate scale applies to the whole row. */
+  teamKey: Scalars['String']['output'];
+};
+
+/** How long delivered work spent BEING WORKED ON -- first transition into a started state, to completion -- together with how much of the work that covers. This schema has no `started_at` column, so the start instant is read from the activity history, which begins at one migration and records nothing for an issue dragged straight from backlog to done. Compare `measured` against `completedTotal` before quoting the median, and read `leadTime` where the coverage is thin. */
+export type CycleTimeSummary = {
+  __typename?: 'CycleTimeSummary';
+  /** Completed issues in this window, measurable or not. The denominator of the coverage, and the same number as `leadTime.count`. */
+  completedTotal: Scalars['Int']['output'];
+  /** Completed issues that had a recorded start, and so are in the percentiles. Zero is a real answer: it means no delivered issue in this window has a usable start, and the two hour figures below are then meaningless and must not be shown. */
+  measured: Scalars['Int']['output'];
+  medianHours: Scalars['Float']['output'];
+  /** The 90th percentile, interpolated between samples. */
+  p90Hours: Scalars['Float']['output'];
 };
 
 export type CycleUpdateInput = {
@@ -249,6 +291,16 @@ export type DuplicateSuggestion = {
   __typename?: 'DuplicateSuggestion';
   issue: Issue;
   similarity: Scalars['Float']['output'];
+};
+
+/** A distribution of durations in hours: median and 90th percentile, with the sample size they are over. Percentiles rather than a mean, because one two-year-old issue moves a mean by more than a week's real work. */
+export type DurationSummary = {
+  __typename?: 'DurationSummary';
+  /** How many issues the two percentiles are over. A median over three issues is a number that will move next week; this is what lets a reader see that. */
+  count: Scalars['Int']['output'];
+  medianHours: Scalars['Float']['output'];
+  /** The 90th percentile, interpolated between samples. */
+  p90Hours: Scalars['Float']['output'];
 };
 
 export type EmbeddingIndexingState = {
@@ -1783,6 +1835,13 @@ export type PageInfo = {
   hasNextPage: Scalars['Boolean']['output'];
 };
 
+/** Live, unfinished issues at one priority level. `priority` is the stored 0-4, where 0 means NO priority rather than the lowest one. Naming the levels is the client's job. */
+export type PriorityCount = {
+  __typename?: 'PriorityCount';
+  issues: Scalars['Int']['output'];
+  priority: Scalars['Int']['output'];
+};
+
 export type Project = {
   __typename?: 'Project';
   createdAt: Scalars['DateTime']['output'];
@@ -1893,6 +1952,17 @@ export type ProjectPayload = {
   project?: Maybe<Project>;
 };
 
+/** One project's live issues and how many are done. Two counts rather than a percentage: 2 of 5 and 200 of 500 are the same fraction and are not equally worth acting on. Both exclude archived issues, so filing work away cannot make progress fall. */
+export type ProjectProgress = {
+  __typename?: 'ProjectProgress';
+  completed: Scalars['Int']['output'];
+  issues: Scalars['Int']['output'];
+  name: Scalars['String']['output'];
+  projectId: Scalars['UUID']['output'];
+  /** The project's own state: planned, started, paused, completed or canceled. Independent of its issues -- a project can be marked completed with issues still open, and the screen shows both. */
+  state: Scalars['String']['output'];
+};
+
 export type ProjectState =
   | 'CANCELED'
   | 'COMPLETED'
@@ -1984,6 +2054,8 @@ export type Query = {
   teams: Array<Team>;
   triageCount: Scalars['Int']['output'];
   triageIssues: TriageIssueConnection;
+  /** How this workspace has been moving over the last `days` days, which must be between 1 and 180: a larger window is refused rather than quietly shortened. One aggregate rather than a field per metric, because they share a window and a tenant and are rendered together -- separate root fields would let one document ask for six different windows at once. */
+  workspaceAnalytics: WorkspaceAnalytics;
   /** Everyone in a workspace, with the role each holds, including people who have left -- see `removedAt`. Members only. */
   workspaceMembers: Array<WorkspaceMember>;
 };
@@ -2221,6 +2293,12 @@ export type QueryTriageIssuesArgs = {
   after?: InputMaybe<Scalars['String']['input']>;
   first?: Scalars['Int']['input'];
   teamId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
+
+export type QueryWorkspaceAnalyticsArgs = {
+  days?: Scalars['Int']['input'];
   workspaceSlug: Scalars['String']['input'];
 };
 
@@ -2522,6 +2600,14 @@ export type SlackTestNotificationPayload = {
   failure?: Maybe<SlackFailure>;
 };
 
+/** Live issues sitting in one workflow-state category, as of now. A snapshot with no time dimension: the historical version needs a complete state history, which begins only at the activity migration. */
+export type StateCategoryCount = {
+  __typename?: 'StateCategoryCount';
+  category: WorkflowStateCategory;
+  /** Unarchived issues in this category. COMPLETED and CANCELED are two of the five buckets, not an excluded remainder -- finished work stays on the board until it is archived. */
+  issues: Scalars['Int']['output'];
+};
+
 export type Team = {
   __typename?: 'Team';
   createdAt: Scalars['DateTime']['output'];
@@ -2532,6 +2618,21 @@ export type Team = {
   key: Scalars['String']['output'];
   name: Scalars['String']['output'];
   workflowStates: Array<WorkflowState>;
+};
+
+/** What one team delivered in this window, in that team's own estimate unit. There is deliberately no workspace-wide estimate total: a workspace whose teams estimate in points, hours and t-shirt sizes has no unit to sum them into, and t-shirt sizes are a ladder rather than a quantity at all. */
+export type TeamCompletion = {
+  __typename?: 'TeamCompletion';
+  completed: Scalars['Int']['output'];
+  /** The unit this team's estimates are in, and the reason there is no workspace-wide total to compare it against. */
+  estimateScale: EstimateScale;
+  /** The sum of those estimates, in this team's unit. Null when the team estimates in t-shirt sizes -- the stored integer is a position on a five-rung ladder, so summing two of them produces no size -- and also null when nothing was estimated. Read `estimated` to tell the two apart. */
+  estimateTotal?: Maybe<Scalars['Int']['output']>;
+  /** How many of those completions carried an estimate at all. */
+  estimated: Scalars['Int']['output'];
+  key: Scalars['String']['output'];
+  name: Scalars['String']['output'];
+  teamId: Scalars['UUID']['output'];
 };
 
 export type TeamCreateInput = {
@@ -2551,6 +2652,28 @@ export type TeamPayload = {
   __typename?: 'TeamPayload';
   errors: Array<ValidationErrorType>;
   team?: Maybe<Team>;
+};
+
+/** One UTC calendar day, and the work that stopped on it. Days are UTC for every viewer -- nothing in this schema records a person's timezone -- so a completion late in the evening west of Greenwich lands on the following day's point. */
+export type ThroughputDay = {
+  __typename?: 'ThroughputDay';
+  /** Issues that reached a CANCELED state on this day. Reported separately and never added to `completed`: `issues.completed_at` is stamped for both terminal categories, so a single closed count would report abandonment as delivery. */
+  canceled: Scalars['Int']['output'];
+  /** Issues that reached a workflow state in the COMPLETED category on this day. */
+  completed: Scalars['Int']['output'];
+  /** Issues FILED on this day. From `created_at`, so it counts a different event from the other two and an issue can appear on one day here and another day there. */
+  created: Scalars['Int']['output'];
+  day: Scalars['Date']['output'];
+};
+
+/** The window's three series added up, and the completion rate derived from two of them. Summed from the same points the chart draws, so a headline can never disagree with the series under it. */
+export type ThroughputTotals = {
+  __typename?: 'ThroughputTotals';
+  canceled: Scalars['Int']['output'];
+  completed: Scalars['Int']['output'];
+  /** completed / (completed + canceled): of the work that STOPPED in this window, the share that was delivered rather than abandoned. Deliberately NOT completed/created -- the issues finished this month are mostly not the ones filed this month, so that quotient can exceed 1 and is not a proportion of anything. Null when nothing stopped; 0 would report a failure that did not happen. */
+  completionRate?: Maybe<Scalars['Float']['output']>;
+  created: Scalars['Int']['output'];
 };
 
 export type TriageAcceptInput = {
@@ -2640,6 +2763,48 @@ export type Workspace = {
   id: Scalars['UUID']['output'];
   name: Scalars['String']['output'];
   slug: Scalars['String']['output'];
+};
+
+/** How one workspace has been moving over a bounded recent window. Every figure is computed from stored rows at request time; nothing here is precomputed, and nothing here is estimated. Metrics this schema cannot compute honestly -- in-progress time, cycle burndown, and open counts over time -- are absent rather than approximated. */
+export type WorkspaceAnalytics = {
+  __typename?: 'WorkspaceAnalytics';
+  /** How many distinct assignees hold unfinished work, including the unassigned pile as one. `workload` is a prefix of these. */
+  assigneeTotal: Scalars['Int']['output'];
+  /** Start of work to completion, with its coverage. Partial by construction; read `measured` against `completedTotal`. */
+  cycleTime?: Maybe<CycleTimeSummary>;
+  /** How many cycles overlap the window; `cycles` may be a prefix. */
+  cycleTotal: Scalars['Int']['output'];
+  /** Cycles whose span overlaps the window, newest first, bounded server-side. Each row's counts are over the whole cycle. */
+  cycles: Array<CycleProgress>;
+  /** The window length actually used, which is the one that was asked for: a value above 180 is refused rather than quietly reduced. */
+  days: Scalars['Int']['output'];
+  /** How long the UNFINISHED work has been open, as of now. A snapshot of the backlog, not of the window. Null when nothing is open. */
+  issueAge?: Maybe<DurationSummary>;
+  /** Creation to completion, over work delivered in this window. Complete -- both instants are columns on the issue -- so this is the duration to quote when `cycleTime.measured` is small. Null when nothing was delivered. */
+  leadTime?: Maybe<DurationSummary>;
+  /** Live, unfinished issues whose due date is before today. A thing due today is not yet late. */
+  overdue: Scalars['Int']['output'];
+  /** Live UNFINISHED issues by priority -- a different population from `stateMix`, and the same one as `workload`, because the question is what is on the plate now. Levels holding no issues are omitted. At most five rows: the column is constrained 0-4. */
+  priorityMix: Array<PriorityCount>;
+  /** How many projects hold live issues; `projects` may be a prefix. */
+  projectTotal: Scalars['Int']['output'];
+  /** Projects holding live issues, largest first, bounded server-side. Issues in no project are excluded rather than bucketed: most issues are in none, so that bar would be the biggest on every chart and would say nothing. */
+  projects: Array<ProjectProgress>;
+  /** The last day of the window, inclusive. Today, in UTC. */
+  rangeEnd: Scalars['Date']['output'];
+  rangeStart: Scalars['Date']['output'];
+  /** A snapshot of now, not of the window. Every live issue, so COMPLETED and CANCELED are two of the buckets. Categories holding no issues are omitted. */
+  stateMix: Array<StateCategoryCount>;
+  /** How many teams delivered something; `teams` may be a prefix. */
+  teamTotal: Scalars['Int']['output'];
+  /** Teams that delivered something in the window, busiest first. */
+  teams: Array<TeamCompletion>;
+  /** One point per day in the window, including days on which nothing happened. A day with a zero is a fact; a day missing from a series is a hole a renderer will draw a line through. */
+  throughput: Array<ThroughputDay>;
+  /** `throughput` summed, and the completion rate it supports. */
+  totals: ThroughputTotals;
+  /** The busiest assignees, most work first, bounded server-side. Compare its length against `assigneeTotal` before describing it as the whole workspace. */
+  workload: Array<AssigneeWorkload>;
 };
 
 export type WorkspaceCreateInput = {
