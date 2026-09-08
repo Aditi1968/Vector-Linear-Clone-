@@ -26,3 +26,10 @@ dist
 .env
 .env.*
 .git
+
+# The Playwright suite, which drives the *built* image from outside it and is
+# in no tsconfig, so `tsc -b && vite build` never reads a byte of it. Excluded
+# for the layer cache rather than for size: without this, editing a spec
+# invalidates `COPY . .` and forces a full rebuild of a bundle that could not
+# have changed.
+e2e

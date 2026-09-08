@@ -6,15 +6,22 @@ import { useWorkspace } from '../../app/workspace'
 import {
   Badge,
   Button,
+  Checkbox,
   Dialog,
   ErrorState,
+  Select,
   Spinner,
   Tag,
   VisuallyHidden,
 } from '../../components'
 import styles from '../screens.module.css'
 import { useIntegrations } from './api'
-import type { IntegrationStatus } from './api'
+import type {
+  GithubAutomation,
+  GithubIntegration,
+  IntegrationStatus,
+  SettingsTeam,
+} from './api'
 
 /**
  * The backend's own OAuth entry points.
@@ -238,6 +245,192 @@ function IntegrationPanel({
   )
 }
 
+interface GithubDetailsProps {
+  github: GithubIntegration
+  teams: SettingsTeam[]
+  isSaving: boolean
+  onTrackedChange: (repositoryIds: string[]) => void
+  onAutomationChange: (input: {
+    teamId: string
+    enabled: boolean
+    startedStateId?: string | null
+    completedStateId?: string | null
+  }) => void
+}
+
+/**
+ * What a connected GitHub installation is doing here: which repositories this
+ * workspace takes activity from, and what a pull request does to its issues.
+ *
+ * ## Why the repositories are checkboxes and not tags
+ *
+ * An installation covers what the GitHub admin granted, which for an
+ * organisation is routinely everything. A workspace wants development activity
+ * from the handful it works in. Unticking one stops new deliveries being
+ * applied; it deletes nothing, and the history already collected stays on the
+ * issues showing it.
+ *
+ * Each tick submits the WHOLE set, because that is what the mutation takes --
+ * sending only the change would let two admins on two tabs interleave into a
+ * selection neither chose.
+ *
+ * ## Why the automation is a checkbox and then two selects
+ *
+ * Workflow states belong to a TEAM and are named by it, so there is no global
+ * "In Progress" to default to and a team may have several states of the same
+ * category. The checkbox asks the server for the sensible default -- the first
+ * `started` and first `completed` state on that team's board -- which it stores
+ * explicitly and hands straight back, so the selects below it immediately show
+ * two named states rather than a rule. Changing either is an ordinary write.
+ *
+ * A team with no row is a team with no automation, which is every team until
+ * somebody ticks the box. That is the opt-in, and it is why the checkbox is
+ * unchecked by default rather than reflecting some ambient setting.
+ */
+function GithubDetails({
+  github,
+  teams,
+  isSaving,
+  onTrackedChange,
+  onAutomationChange,
+}: GithubDetailsProps) {
+  const tracked = github.repositories.filter((one) => one.tracked)
+  const automations = new Map<string, GithubAutomation>(
+    github.automations.map((automation) => [automation.teamId, automation]),
+  )
+
+  return (
+    <>
+      <fieldset className={styles.field}>
+        <legend className={styles.label}>Repositories</legend>
+
+        {github.repositories.length === 0 ? (
+          <p className={styles.footnote}>
+            No repositories are visible to this installation yet.
+          </p>
+        ) : (
+          <>
+            <p className={styles.footnote}>
+              Vector applies pull requests and pushes only from the repositories
+              ticked here. Unticking one keeps the activity already collected.
+            </p>
+            {github.repositories.map((repository) => (
+              <label className={styles.fieldRow} key={repository.repositoryId}>
+                <Checkbox
+                  checked={repository.tracked}
+                  disabled={isSaving}
+                  onChange={(event) => {
+                    const next = event.currentTarget.checked
+                      ? [...tracked.map((one) => one.repositoryId), repository.repositoryId]
+                      : tracked
+                          .filter((one) => one.repositoryId !== repository.repositoryId)
+                          .map((one) => one.repositoryId)
+
+                    onTrackedChange(next)
+                  }}
+                />
+                <span>{repository.fullName}</span>
+              </label>
+            ))}
+          </>
+        )}
+      </fieldset>
+
+      {teams.map((team) => {
+        const automation = automations.get(team.id)
+        const started = team.workflowStates.filter(
+          (state) => state.category === 'STARTED',
+        )
+        const completed = team.workflowStates.filter(
+          (state) => state.category === 'COMPLETED',
+        )
+
+        return (
+          <fieldset className={styles.field} key={team.id}>
+            <legend className={styles.label}>
+              Pull request automation — {team.name}
+            </legend>
+
+            <label className={styles.fieldRow}>
+              <Checkbox
+                checked={automation !== undefined}
+                disabled={isSaving}
+                onChange={(event) => {
+                  onAutomationChange({
+                    teamId: team.id,
+                    enabled: event.currentTarget.checked,
+                  })
+                }}
+              />
+              <span>
+                Move {team.key} issues when a pull request that names them opens
+                or merges
+              </span>
+            </label>
+
+            {automation !== undefined && (
+              <>
+                <label className={styles.fieldRow}>
+                  <span>Pull request opened</span>
+                  <Select
+                    value={automation.startedStateId ?? ''}
+                    disabled={isSaving}
+                    onChange={(event) => {
+                      onAutomationChange({
+                        teamId: team.id,
+                        enabled: true,
+                        startedStateId: event.currentTarget.value || null,
+                        completedStateId: automation.completedStateId,
+                      })
+                    }}
+                  >
+                    <option value="">Do nothing</option>
+                    {started.map((state) => (
+                      <option key={state.id} value={state.id}>
+                        {state.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+
+                <label className={styles.fieldRow}>
+                  <span>Pull request merged</span>
+                  <Select
+                    value={automation.completedStateId ?? ''}
+                    disabled={isSaving}
+                    onChange={(event) => {
+                      onAutomationChange({
+                        teamId: team.id,
+                        enabled: true,
+                        startedStateId: automation.startedStateId,
+                        completedStateId: event.currentTarget.value || null,
+                      })
+                    }}
+                  >
+                    <option value="">Do nothing</option>
+                    {completed.map((state) => (
+                      <option key={state.id} value={state.id}>
+                        {state.name}
+                      </option>
+                    ))}
+                  </Select>
+                </label>
+
+                <p className={styles.footnote}>
+                  A draft pull request moves nothing until it is marked ready
+                  for review, and one closed without merging is not a
+                  completion. An issue somebody has already moved on is left
+                  where they put it.
+                </p>
+              </>
+            )}
+          </fieldset>
+        )
+      })}
+    </>
+  )
+}
+
 /**
  * Workspace settings: identity, and the two integrations.
  *
@@ -255,13 +448,17 @@ export function SettingsPage() {
   const {
     github,
     slack,
+    teams,
     isLoading,
     errorMessage,
     actionErrorMessage,
     isDisconnecting,
+    isSaving,
     retry,
     disconnectGithub,
     disconnectSlack,
+    setTrackedRepositories,
+    setAutomation,
   } = useIntegrations()
 
   return (
@@ -341,18 +538,13 @@ export function SettingsPage() {
               isDisconnecting={isDisconnecting}
               onDisconnect={disconnectGithub}
               details={
-                github.repositories.length > 0 ? (
-                  <div className={styles.rowActions}>
-                    <span className={styles.footnote}>Repositories:</span>
-                    {github.repositories.map((repository) => (
-                      <Tag key={repository.repositoryId} name={repository.fullName} />
-                    ))}
-                  </div>
-                ) : (
-                  <p className={styles.footnote}>
-                    No repositories are visible to this installation yet.
-                  </p>
-                )
+                <GithubDetails
+                  github={github}
+                  teams={teams}
+                  isSaving={isSaving}
+                  onTrackedChange={setTrackedRepositories}
+                  onAutomationChange={setAutomation}
+                />
               }
             />
           )}

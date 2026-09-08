@@ -22,3 +22,11 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# What a Playwright run leaves behind: the HTML report, and the traces and
+# screenshots of whatever failed. Both are outputs of the e2e/ suite rather
+# than sources of it -- CI uploads them as artefacts of the run that produced
+# them, which is the only place they mean anything.
+playwright-report
+test-results
+

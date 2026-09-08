@@ -6,6 +6,7 @@ import asyncpg
 
 from app.domain.errors import GithubInstallationClaimedError
 from app.domain.github import (
+    GithubAutomationEntity,
     GithubCommitEntity,
     GithubInstallationEntity,
     GithubPullRequestEntity,
@@ -91,7 +92,7 @@ class GithubRepository:
         """
         rows = await connection.fetch(
             """
-            SELECT repository_id, full_name
+            SELECT repository_id, full_name, tracked
             FROM github_repositories
             WHERE workspace_id = $1
             ORDER BY full_name
@@ -100,6 +101,82 @@ class GithubRepository:
         )
 
         return [self._to_repository(row) for row in rows]
+
+    async def set_tracked_repositories(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        repository_ids: Sequence[int],
+    ) -> None:
+        """Make the tracked set exactly `repository_ids`. One statement.
+
+        The whole set rather than one repository per call, because the setting
+        is a list of checkboxes an admin submits together and a per-repository
+        toggle would make "untrack these three" three round trips, three
+        chances to half-apply, and three separate answers to the release check
+        the service performs once for the set.
+
+        An id naming a repository this workspace does not cover simply matches
+        nothing -- there is no INSERT here, only an UPDATE over rows the
+        workspace already has -- so a client cannot use this to learn whether
+        another tenant covers a repository, and cannot create coverage it was
+        never granted.
+
+        `tracked = (repository_id = ANY(...))` writes both halves in one pass:
+        the ids named are tracked and every other row of this workspace is not.
+        Two statements would leave an instant at which nothing was tracked, and
+        a delivery landing in it would be dropped.
+        """
+        await connection.execute(
+            """
+            UPDATE github_repositories
+            SET tracked = (repository_id = ANY($2::BIGINT[]))
+            WHERE workspace_id = $1
+              AND tracked IS DISTINCT FROM (repository_id = ANY($2::BIGINT[]))
+            """,
+            scope.workspace_id,
+            list(repository_ids),
+        )
+
+    async def repositories_with_releases(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        repository_ids: Sequence[int],
+    ) -> bool:
+        """Whether any of these repositories has a release recorded against it.
+
+        The probe behind the untracking refusal, and it exists because
+        untracking is an UPDATE where connect and disconnect are DELETEs:
+        `releases_repository_fk` is RESTRICT and refuses those two outright,
+        but a boolean flip trips no constraint at all. The rule is the same one
+        migration 024 argues for -- shipping history must not be silently
+        detached by a toggle elsewhere -- so it is enforced here rather than
+        left to a schema that cannot see it.
+
+        Answers a bool and names no release. Which repositories a workspace
+        holds is already admin-only and `GithubRepositoriesInUseError`
+        deliberately enumerates nothing; a count would be a second place
+        deciding who may read that.
+        """
+        if not repository_ids:
+            return False
+
+        found = await connection.fetchval(
+            """
+            SELECT 1
+            FROM releases
+            WHERE workspace_id = $1
+              AND repository_id = ANY($2::BIGINT[])
+            LIMIT 1
+            """,
+            scope.workspace_id,
+            list(repository_ids),
+        )
+
+        return found is not None
 
     async def insert_installation(
         self,
@@ -489,12 +566,20 @@ class GithubRepository:
         tenant's coverage of the same repository -- and two tenants covering
         one repository is legitimate, which is why
         `github_repositories_repository_id_idx` is not unique.
+
+        `tracked` is the second half of the predicate and the single point at
+        which repository selection takes effect. Both development events --
+        `pull_request` and `push` -- pass through here before they write
+        anything, so an untracked repository is answered exactly as one the
+        installation never covered: the delivery is dropped in silence, having
+        written nothing. One predicate in one place rather than a check in each
+        handler, which is the shape where the second handler forgets.
         """
         found = await connection.fetchval(
             """
             SELECT 1
             FROM github_repositories
-            WHERE workspace_id = $1 AND repository_id = $2
+            WHERE workspace_id = $1 AND repository_id = $2 AND tracked
             """,
             scope.workspace_id,
             repository_id,
@@ -995,9 +1080,278 @@ class GithubRepository:
             confirmed_at=row["confirmed_at"],
         )
 
+    # --- status automations ---------------------------------------------
+
+    async def list_automations(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+    ) -> list[GithubAutomationEntity]:
+        """Every team in this workspace that has configured an automation.
+
+        Unpaginated, for the reason `list_repositories` is: this is at most one
+        row per team, rendered as one list on one settings page, and the
+        primary key's leading `workspace_id` serves the predicate.
+
+        Teams with no row are simply absent. The settings screen reads the team
+        list from `teams` and joins; there is no row here meaning "off",
+        because the absence of one is what off is.
+        """
+        rows = await connection.fetch(
+            """
+            SELECT team_id, started_state_id, completed_state_id
+            FROM github_issue_automations
+            WHERE workspace_id = $1
+            ORDER BY team_id
+            """,
+            scope.workspace_id,
+        )
+
+        return [
+            GithubAutomationEntity(
+                team_id=row["team_id"],
+                started_state_id=row["started_state_id"],
+                completed_state_id=row["completed_state_id"],
+            )
+            for row in rows
+        ]
+
+    async def find_states(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        team_id: UUID,
+        state_ids: Sequence[UUID],
+    ) -> dict[UUID, str]:
+        """The category of each of these states, for states on THIS team.
+
+        Keyed by id and holding `workflow_states.type`, which is the only thing
+        the caller asks: whether the state an admin chose for the started slot
+        is actually a started state.
+
+        Scoped through (workspace_id, team_id), so a state belonging to another
+        team -- or another tenant -- is simply absent from the result and the
+        service reports it exactly as it reports one that does not exist.
+        `github_issue_automations_started_state_fk` would refuse the row anyway;
+        this is what turns that refusal into a field error rather than a
+        ForeignKeyViolationError reaching a client as "Internal server error".
+        """
+        wanted = [state_id for state_id in state_ids if state_id is not None]
+
+        if not wanted:
+            return {}
+
+        rows = await connection.fetch(
+            """
+            SELECT id, type
+            FROM workflow_states
+            WHERE workspace_id = $1
+              AND team_id = $2
+              AND id = ANY($3::UUID[])
+            """,
+            scope.workspace_id,
+            team_id,
+            wanted,
+        )
+
+        return {row["id"]: row["type"] for row in rows}
+
+    async def default_state_id(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        team_id: UUID,
+        category: str,
+    ) -> UUID | None:
+        """The state this team's board puts first in a category, or nothing.
+
+        THE default derived from category, and the only place a state is ever
+        chosen for a workspace rather than by one. It runs when an admin turns
+        the automation on without naming states, and what it writes is stored
+        explicitly -- so the delivery path never resolves a category, and a
+        team that later adds a second `started` state does not silently change
+        what its automation does.
+
+        `ORDER BY position, id` is 005's own total order for a board, restated
+        rather than invented: `workflow_states_position` is deliberately not
+        unique, so `id` is what makes the answer the same on every call.
+
+        None when the team has no state of that category -- which 005's seed
+        makes unusual but which a team that deleted one is in. The caller
+        leaves that half of the automation unset, and the trigger then does
+        nothing, which is the honest answer rather than a guess at a state of
+        some other category.
+        """
+        # Annotated rather than returned inline: `fetchval` answers Any, and
+        # returning it directly would satisfy any return type this method
+        # declared -- including the `str` a `type` column would give if the
+        # SELECT list were ever edited.
+        found: UUID | None = await connection.fetchval(
+            """
+            SELECT id
+            FROM workflow_states
+            WHERE workspace_id = $1 AND team_id = $2 AND type = $3
+            ORDER BY position, id
+            LIMIT 1
+            """,
+            scope.workspace_id,
+            team_id,
+            category,
+        )
+
+        return found
+
+    async def upsert_automation(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        team_id: UUID,
+        started_state_id: UUID | None,
+        completed_state_id: UUID | None,
+    ) -> None:
+        """Store this team's automation, replacing whatever it had."""
+        await connection.execute(
+            """
+            INSERT INTO github_issue_automations (
+                workspace_id, team_id, started_state_id, completed_state_id
+            )
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (workspace_id, team_id) DO UPDATE
+            SET started_state_id = EXCLUDED.started_state_id,
+                completed_state_id = EXCLUDED.completed_state_id,
+                updated_at = now()
+            """,
+            scope.workspace_id,
+            team_id,
+            started_state_id,
+            completed_state_id,
+        )
+
+    async def delete_automation(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        team_id: UUID,
+    ) -> None:
+        """Turn this team's automation off. Idempotent.
+
+        A delete rather than a flag, because the absence of a row IS off; see
+        the note on `github_issue_automations` in migration 030.
+        """
+        await connection.execute(
+            """
+            DELETE FROM github_issue_automations
+            WHERE workspace_id = $1 AND team_id = $2
+            """,
+            scope.workspace_id,
+            team_id,
+        )
+
+    async def move_issues_for_automation(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        issue_ids: Sequence[UUID],
+        category: str,
+        from_categories: Sequence[str],
+    ) -> list[tuple[UUID, UUID, UUID]]:
+        """Move these issues to their own team's configured state for `category`.
+
+        One statement for every issue a pull request links to, across every
+        team those issues belong to. A pull request titled "Fixes ENG-1, WEB-3"
+        names two teams with two boards and two configurations, so the target
+        state cannot be an argument -- it is joined per issue, from the row that
+        team wrote.
+
+        Returns `(issue_id, from_state_id, to_state_id)` for the issues that
+        ACTUALLY moved, which is what makes the caller's history and
+        notification writes exact: an issue the predicates excluded produces no
+        tuple and therefore no activity row, no notification and no event.
+
+        Every predicate below is doing a distinct job.
+
+        * `issues.workspace_id = $1` -- the tenant filter, leading, as every
+          statement in this file does. The ids came from `resolve_issue_ids`
+          under this same scope; this is the floor under that, not a repetition
+          of it.
+        * `archived_at IS NULL` -- an archived issue is not in the product, and
+          a pull request is not the way back in. The same rule
+          `resolve_issue_ids` applies, restated because an issue can be
+          archived between the two statements.
+        * `current.type = ANY($4)` -- forward only. See
+          `app.domain.github.categories_below`: this is what stops the
+          automation dragging an issue back out of a state a person moved it
+          to, and what makes a redelivery a no-op without a dedupe table.
+        * `issues.workflow_state_id <> target.id` -- an issue already sitting
+          in the target writes nothing at all, so `updated_at` does not move
+          and the row is not touched. Strictly redundant given the category
+          predicate when the target's own category is excluded from
+          `from_categories`, and kept because it is the one that stays true if
+          the ladder ever changes.
+
+        `completed_at` is recomputed by the same expression `IssueRepository`
+        uses, and it has to be: the rule -- non-NULL if and only if the state
+        is terminal, keeping the instant already there when moving between two
+        terminal categories -- lives at the write and not in a constraint,
+        because the two columns are in different tables. A move performed here
+        that skipped it would leave an issue in Done with no completion
+        instant, which every report over shipping dates would then be wrong
+        about.
+        """
+        wanted = list(issue_ids)
+
+        if not wanted:
+            return []
+
+        rows = await connection.fetch(
+            """
+            UPDATE issues
+            SET workflow_state_id = target.id,
+                completed_at = CASE
+                    WHEN target.type IN ('completed', 'canceled')
+                        THEN COALESCE(issues.completed_at, now())
+                    ELSE NULL
+                END,
+                updated_at = now()
+            FROM github_issue_automations AS automation
+            JOIN workflow_states AS target
+              ON target.workspace_id = automation.workspace_id
+             AND target.team_id = automation.team_id
+             AND target.id = CASE $3::TEXT
+                    WHEN 'started' THEN automation.started_state_id
+                    ELSE automation.completed_state_id
+                END
+            JOIN workflow_states AS current
+              ON current.workspace_id = automation.workspace_id
+             AND current.team_id = automation.team_id
+            WHERE issues.workspace_id = $1
+              AND issues.id = ANY($2::UUID[])
+              AND issues.archived_at IS NULL
+              AND automation.workspace_id = issues.workspace_id
+              AND automation.team_id = issues.team_id
+              AND current.id = issues.workflow_state_id
+              AND current.type = ANY($4::TEXT[])
+              AND issues.workflow_state_id <> target.id
+            RETURNING issues.id, current.id AS from_state_id, target.id AS to_state_id
+            """,
+            scope.workspace_id,
+            wanted,
+            category,
+            list(from_categories),
+        )
+
+        return [(row["id"], row["from_state_id"], row["to_state_id"]) for row in rows]
+
     @staticmethod
     def _to_repository(row: asyncpg.Record) -> GithubRepositoryEntity:
         return GithubRepositoryEntity(
             repository_id=row["repository_id"],
             full_name=row["full_name"],
+            tracked=row["tracked"],
         )

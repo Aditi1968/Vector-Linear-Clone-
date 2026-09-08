@@ -64,6 +64,15 @@ class ActivityEntity:
     to_value: str | None
     created_at: datetime
 
+    # What caused this row when `actor_id` is None and it was not nobody.
+    #
+    # NULL for every row a person made -- the actor is the cause -- and for
+    # every row written before migration 030. Opaque text with a documented
+    # prefix (`github_pull_request:acme/vector#84`); a client that does not
+    # recognise the prefix renders the row exactly as it renders one with no
+    # cause, which is what keeps a second cause from being a schema change.
+    caused_by: str | None = None
+
 
 @dataclass(frozen=True, slots=True)
 class ActivityPage:

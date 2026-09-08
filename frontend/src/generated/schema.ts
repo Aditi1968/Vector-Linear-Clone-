@@ -387,6 +387,14 @@ export type FavoriteReorderInput = {
   workspaceSlug: Scalars['String']['input'];
 };
 
+export type GithubAutomationSetInput = {
+  completedStateId?: InputMaybe<Scalars['UUID']['input']>;
+  enabled: Scalars['Boolean']['input'];
+  startedStateId?: InputMaybe<Scalars['UUID']['input']>;
+  teamId: Scalars['UUID']['input'];
+  workspaceSlug: Scalars['String']['input'];
+};
+
 export type GithubCommit = {
   __typename?: 'GithubCommit';
   committedAt?: Maybe<Scalars['DateTime']['output']>;
@@ -428,10 +436,17 @@ export type GithubDisconnectInput = {
 export type GithubIntegration = {
   __typename?: 'GithubIntegration';
   accountLogin?: Maybe<Scalars['String']['output']>;
+  automations: Array<GithubIssueAutomation>;
   connectedAt?: Maybe<Scalars['DateTime']['output']>;
   connectedById?: Maybe<Scalars['UUID']['output']>;
   repositories: Array<GithubRepository>;
   status: GithubIntegrationStatus;
+};
+
+export type GithubIntegrationPayload = {
+  __typename?: 'GithubIntegrationPayload';
+  errors: Array<ValidationErrorType>;
+  integration?: Maybe<GithubIntegration>;
 };
 
 export type GithubIntegrationStatus =
@@ -439,6 +454,16 @@ export type GithubIntegrationStatus =
   | 'DISCONNECTED'
   | 'PENDING'
   | 'UNCONFIGURED';
+
+/** What a pull request does to one team's issues. Present only for teams that have turned it on; an absent team is a team with no automation, which is the default. */
+export type GithubIssueAutomation = {
+  __typename?: 'GithubIssueAutomation';
+  /** Where an issue goes when a pull request naming it MERGES. A pull request closed without merging moves nothing: an abandoned attempt is not shipped work. */
+  completedStateId?: Maybe<Scalars['UUID']['output']>;
+  /** Where an issue goes when a pull request naming it opens, reopens, or is marked ready for review. A pull request opened as a DRAFT moves nothing -- a draft says the work is not ready. */
+  startedStateId?: Maybe<Scalars['UUID']['output']>;
+  teamId: Scalars['UUID']['output'];
+};
 
 export type GithubLinkSource =
   | 'BODY'
@@ -470,10 +495,17 @@ export type GithubPullRequestState =
   | 'MERGED'
   | 'OPEN';
 
+export type GithubRepositoriesSetInput = {
+  repositoryIds: Array<Scalars['ID']['input']>;
+  workspaceSlug: Scalars['String']['input'];
+};
+
 export type GithubRepository = {
   __typename?: 'GithubRepository';
   fullName: Scalars['String']['output'];
   repositoryId: Scalars['ID']['output'];
+  /** Whether this workspace applies GitHub deliveries about this repository. False is a choice an admin made here, not something GitHub said: the installation still covers it, and Vector is declining the pull requests and pushes. Development history already collected is kept and still shown. */
+  tracked: Scalars['Boolean']['output'];
 };
 
 export type Health =
@@ -684,6 +716,8 @@ export type IssueRelationsArgs = {
 export type IssueActivity = {
   __typename?: 'IssueActivity';
   actorId?: Maybe<Scalars['UUID']['output']>;
+  /** What caused this, when `actorId` is null and it was not nobody. Null for everything a person did -- the actor is the cause. Opaque text with a documented prefix; today the only one is `github_pull_request:owner/name#84`, written when a pull request moved the issue. A client that does not recognise a prefix should render the row exactly as it renders one with no cause, which is what keeps a second cause from being a breaking change. */
+  causedBy?: Maybe<Scalars['String']['output']>;
   createdAt: Scalars['DateTime']['output'];
   fromValue?: Maybe<Scalars['String']['output']>;
   id: Scalars['UUID']['output'];
@@ -1227,7 +1261,9 @@ export type Mutation = {
   favoriteAdd: FavoritePayload;
   favoriteRemove: FavoriteDeletePayload;
   favoriteReorder: FavoritePayload;
+  githubAutomationSet: GithubIntegrationPayload;
   githubDisconnect: GithubIntegration;
+  githubRepositoriesSet: GithubIntegrationPayload;
   initiativeClearParent: InitiativePayload;
   initiativeCreate: InitiativePayload;
   initiativeDelete: InitiativeDeletePayload;
@@ -1397,8 +1433,18 @@ export type MutationFavoriteReorderArgs = {
 };
 
 
+export type MutationGithubAutomationSetArgs = {
+  input: GithubAutomationSetInput;
+};
+
+
 export type MutationGithubDisconnectArgs = {
   input: GithubDisconnectInput;
+};
+
+
+export type MutationGithubRepositoriesSetArgs = {
+  input: GithubRepositoriesSetInput;
 };
 
 

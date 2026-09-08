@@ -372,6 +372,14 @@ input FavoriteReorderInput {
   position: Int!
 }
 
+input GithubAutomationSetInput {
+  workspaceSlug: String!
+  teamId: UUID!
+  enabled: Boolean!
+  startedStateId: UUID = null
+  completedStateId: UUID = null
+}
+
 type GithubCommit {
   repositoryId: ID!
   repository: String!
@@ -412,6 +420,12 @@ type GithubIntegration {
   connectedAt: DateTime
   connectedById: UUID
   repositories: [GithubRepository!]!
+  automations: [GithubIssueAutomation!]!
+}
+
+type GithubIntegrationPayload {
+  integration: GithubIntegration
+  errors: [ValidationErrorType!]!
 }
 
 enum GithubIntegrationStatus {
@@ -419,6 +433,23 @@ enum GithubIntegrationStatus {
   DISCONNECTED
   PENDING
   CONNECTED
+}
+
+"""
+What a pull request does to one team's issues. Present only for teams that have turned it on; an absent team is a team with no automation, which is the default.
+"""
+type GithubIssueAutomation {
+  teamId: UUID!
+
+  """
+  Where an issue goes when a pull request naming it opens, reopens, or is marked ready for review. A pull request opened as a DRAFT moves nothing -- a draft says the work is not ready.
+  """
+  startedStateId: UUID
+
+  """
+  Where an issue goes when a pull request naming it MERGES. A pull request closed without merging moves nothing: an abandoned attempt is not shipped work.
+  """
+  completedStateId: UUID
 }
 
 enum GithubLinkSource {
@@ -465,9 +496,19 @@ enum GithubPullRequestState {
   CLOSED
 }
 
+input GithubRepositoriesSetInput {
+  workspaceSlug: String!
+  repositoryIds: [ID!]!
+}
+
 type GithubRepository {
   repositoryId: ID!
   fullName: String!
+
+  """
+  Whether this workspace applies GitHub deliveries about this repository. False is a choice an admin made here, not something GitHub said: the installation still covers it, and Vector is declining the pull requests and pushes. Development history already collected is kept and still shown.
+  """
+  tracked: Boolean!
 }
 
 enum Health {
@@ -668,6 +709,11 @@ type IssueActivity {
   kind: IssueActivityKind!
   fromValue: String
   toValue: String
+
+  """
+  What caused this, when `actorId` is null and it was not nobody. Null for everything a person did -- the actor is the cause. Opaque text with a documented prefix; today the only one is `github_pull_request:owner/name#84`, written when a pull request moved the issue. A client that does not recognise a prefix should render the row exactly as it renders one with no cause, which is what keeps a second cause from being a breaking change.
+  """
+  causedBy: String
   createdAt: DateTime!
 }
 
@@ -1287,6 +1333,8 @@ type Mutation {
   issueRelationCreate(input: IssueRelationCreateInput!): IssueRelationCreatePayload!
   issueRelationDelete(input: IssueRelationDeleteInput!): IssueRelationDeletePayload!
   githubDisconnect(input: GithubDisconnectInput!): GithubIntegration!
+  githubRepositoriesSet(input: GithubRepositoriesSetInput!): GithubIntegrationPayload!
+  githubAutomationSet(input: GithubAutomationSetInput!): GithubIntegrationPayload!
   slackDisconnect(input: SlackDisconnectInput!): SlackDisconnectPayload!
   slackChannelsSync(input: SlackChannelsSyncInput!): SlackChannelsSyncPayload!
   slackDefaultChannelSet(input: SlackDefaultChannelSetInput!): SlackNotificationSettingsPayload!

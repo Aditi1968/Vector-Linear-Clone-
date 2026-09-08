@@ -25,12 +25,17 @@ import httpx
 from pydantic import SecretStr
 
 from app.config import Settings
+from app.domain.activity import ActivityKind
 from app.domain.errors import (
     GithubNotConfiguredError,
     GithubRepositoriesInUseError,
+    ValidationError,
+    ValidationIssue,
     WorkspaceAccessDeniedError,
 )
+from app.domain.events import DomainEventKind
 from app.domain.github import (
+    CAUSE_MAX_LENGTH,
     CONNECTED,
     DEVELOPMENT_LIMIT,
     DISCONNECTED,
@@ -41,17 +46,24 @@ from app.domain.github import (
     PENDING,
     PULL_REQUEST_STATES,
     UNCONFIGURED,
+    GithubAutomationEntity,
     GithubDevelopmentEntity,
     GithubGrant,
     GithubInstallationEntity,
     GithubIntegrationEntity,
     GithubRepositoryEntity,
+    automated_move_for,
     branch_name_for,
+    categories_below,
     issue_identifiers,
+    pull_request_cause,
+    pull_request_display_state,
 )
+from app.domain.notifications import NotificationKind
 from app.domain.tenancy import AuthorizedWorkspaceScope, WorkspaceScope
 from app.repositories.github import GithubRepository
-from app.services.events import record_pull_request_merged
+from app.services import activity
+from app.services.events import record_issue_event, record_pull_request_merged
 
 
 # Who may see or change a workspace's GitHub integration.
@@ -171,6 +183,41 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 # work rather than a product rule: each commit costs an insert and a link
 # write inside the delivery's transaction.
 COMMITS_PER_PUSH_LIMIT: Final = 50
+
+
+# What a team is told when it asks for the derived default and has no state to
+# derive one from.
+#
+# `teamId` rather than a state field, because there is no state field to blame:
+# the caller named nothing, and what is wrong is the team's board. 005 seeds
+# every team with one state of each category, so this is a team that deleted
+# them -- rare, and much better answered than silently doing nothing.
+_NO_DEFAULT_STATES = ValidationIssue(
+    field="teamId",
+    code="NO_DEFAULT_STATES",
+    message=(
+        "This team has no started or completed workflow state to automate to. "
+        "Add one, or choose the states explicitly."
+    ),
+)
+
+
+def _wrong_state(field: str, category: str) -> ValidationIssue:
+    """A chosen state that is not this team's, or not of the right category.
+
+    ONE issue for both, and deliberately so. "That state belongs to another
+    team" and "that state is a backlog state" are different mistakes, but
+    telling them apart tells a caller that an id they guessed names a real
+    state somewhere -- and workflow states are readable only through a
+    workspace the caller is a member of. A typo and a probe get the same
+    answer, which is the rule `WorkspaceAccessDeniedError` states for the
+    workspace itself.
+    """
+    return ValidationIssue(
+        field=field,
+        code="INVALID_STATE",
+        message=(f"Choose a workflow state of this team whose category is {category}."),
+    )
 
 
 def _private_key(settings: Settings) -> str | None:
@@ -584,6 +631,28 @@ def _payload_repository_id(payload: Mapping[str, Any]) -> int | None:
     return _positive_int(repository.get("id"))
 
 
+def _payload_repository_name(payload: Mapping[str, Any]) -> str | None:
+    """`owner/name`, for the sentence the history writes about an automated move.
+
+    Read from the payload rather than from `github_repositories`, and safely so
+    for one reason: `repository_exists` has already established, under this
+    workspace's scope, that the id belongs here -- and the name arrives in the
+    same signature-verified body as the id. It costs no round trip inside a
+    delivery's transaction, which the stored copy would.
+
+    The value is a rendering and never an identity: nothing looks a repository
+    up by it, `_payload_repository_id` is what routes the delivery, and a
+    workspace that renamed the repository between two deliveries gets two
+    timeline rows naming it two ways -- which is what actually happened.
+    """
+    repository = payload.get("repository")
+
+    if not isinstance(repository, Mapping):
+        return None
+
+    return _text(repository.get("full_name"), CAUSE_MAX_LENGTH)
+
+
 @dataclass(frozen=True, slots=True)
 class _PushedCommit:
     """One commit off a push payload, already checked against the schema.
@@ -929,7 +998,20 @@ class GithubService:
                     scope=scope,
                 )
 
-        return self._view(installation, repositories)
+            # Read whether or not there is an installation, unlike the
+            # repositories above. An automation is configuration a team wrote
+            # about its own board, and it survives the integration being
+            # disconnected and reconnected -- `github_issue_automations`
+            # references `teams` and `workflow_states`, never
+            # `github_installations`, precisely so that reconnecting does not
+            # silently discard every team's settings. Hiding it here would tell
+            # an admin their configuration was gone when it was waiting.
+            automations = await self._repository.list_automations(
+                connection,
+                scope=scope,
+            )
+
+        return self._view(installation, repositories, automations)
 
     async def installations_for_grant(
         self, *, code: str, preferred: int | None = None
@@ -1139,6 +1221,246 @@ class GithubService:
                 await self._repository.delete_installation(connection, scope=scope)
 
         return self._view(None, ())
+
+    async def set_tracked_repositories(
+        self,
+        scope: AuthorizedWorkspaceScope,
+        *,
+        repository_ids: Sequence[int],
+    ) -> GithubIntegrationEntity:
+        """Choose which of the installation's repositories this workspace tracks.
+
+        An installation covering two hundred repositories is not a workspace
+        that wants development activity from two hundred repositories, and this
+        is the setting that says so. It is a NARROWING of what GitHub already
+        granted and never a widening: the statement is an UPDATE over rows this
+        workspace already has, so an id naming a repository the installation
+        does not cover matches nothing and is silently ignored rather than
+        refused -- which is also what stops this doubling as an oracle for
+        whether some other tenant covers a repository.
+
+        The whole set in one call, because that is what a page of checkboxes
+        submits. Two admins saving different selections is a last-writer-wins
+        race, which is the same race every settings form has and the right one
+        here: the alternative -- per-repository toggles -- would let two saves
+        interleave into a set neither admin chose.
+
+        Untracking a repository a RELEASE names is refused, and that refusal is
+        this method's own rather than the schema's. `releases_repository_fk` is
+        RESTRICT and stops `connect` and `disconnect`, which DELETE the rows;
+        untracking is a boolean flip and trips no constraint at all. The rule
+        migration 024 argues for is the same either way -- shipping history
+        must not be quietly detached by a toggle elsewhere -- so it is checked
+        here, in the same transaction, and reported as the error an admin can
+        act on rather than as a silently broken release page.
+
+        Untracking does NOT delete the development history already collected.
+        See migration 030: that history was gathered while the repository was
+        tracked and is what an issue's Development section is showing. What
+        stops is new deliveries.
+        """
+        require_workspace_admin(scope)
+
+        wanted = list(dict.fromkeys(repository_ids))
+
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                covered = await self._repository.list_repositories(
+                    connection,
+                    scope=scope,
+                )
+
+                dropped = [
+                    repository.repository_id
+                    for repository in covered
+                    if repository.repository_id not in set(wanted)
+                ]
+
+                if await self._repository.repositories_with_releases(
+                    connection,
+                    scope=scope,
+                    repository_ids=dropped,
+                ):
+                    raise GithubRepositoriesInUseError()
+
+                await self._repository.set_tracked_repositories(
+                    connection,
+                    scope=scope,
+                    repository_ids=wanted,
+                )
+
+                repositories = await self._repository.list_repositories(
+                    connection,
+                    scope=scope,
+                )
+                installation = await self._repository.get_installation(
+                    connection,
+                    scope=scope,
+                )
+                automations = await self._repository.list_automations(
+                    connection,
+                    scope=scope,
+                )
+
+        return self._view(installation, repositories, automations)
+
+    async def set_issue_automation(
+        self,
+        scope: AuthorizedWorkspaceScope,
+        *,
+        team_id: UUID,
+        enabled: bool,
+        started_state_id: UUID | None = None,
+        completed_state_id: UUID | None = None,
+    ) -> GithubIntegrationEntity:
+        """Say what a pull request does to this team's issues.
+
+        `enabled=False` removes the row, which is what off IS -- see migration
+        030 on why there is no boolean column. Idempotent: turning off an
+        automation that was never on succeeds.
+
+        `enabled=True` with neither state named is the DEFAULT DERIVED FROM
+        CATEGORY, and it is resolved exactly here and nowhere else. The team's
+        first `started` state and first `completed` state by board order become
+        the stored values, so what an admin turned on is visible on the settings
+        page as two named states rather than as a rule that will pick something
+        later. That is the whole answer to "which of a team's three started
+        states": at configuration time a default is a suggestion an admin can
+        see and change; at delivery time it would be a guess nobody made.
+
+        A team with no state of a category gets NULL for that half and that
+        trigger then does nothing -- honest, and better than reaching for a
+        state of some other category.
+
+        Naming a state explicitly is checked twice over, and both checks answer
+        with a field error rather than an exception a client cannot act on:
+
+        * it must be one of THIS team's states, which is also the tenancy check
+          -- another tenant's state id resolves to nothing and is reported
+          exactly as a typo is, so this cannot confirm that a leaked id exists;
+        * its category must match the slot. A `started` slot pointing at a
+          backlog state would move issues BACKWARDS the first time somebody
+          opened a pull request, and `categories_below` -- which reads the
+          target's category to decide what may move -- would then refuse every
+          move and leave an automation that silently never fires.
+
+        Refusing `enabled=True` with a state named for neither slot is not an
+        arbitrary rule: `github_issue_automations_moves_something` refuses that
+        row, so the alternative is a CheckViolationError reaching a client as
+        "Internal server error" for a form somebody filled in half of.
+        """
+        require_workspace_admin(scope)
+
+        async with self._pool.acquire() as connection:
+            async with connection.transaction():
+                if not enabled:
+                    await self._repository.delete_automation(
+                        connection,
+                        scope=scope,
+                        team_id=team_id,
+                    )
+                else:
+                    await self._store_automation(
+                        connection,
+                        scope=scope,
+                        team_id=team_id,
+                        started_state_id=started_state_id,
+                        completed_state_id=completed_state_id,
+                    )
+
+                installation = await self._repository.get_installation(
+                    connection,
+                    scope=scope,
+                )
+                repositories: Sequence[GithubRepositoryEntity] = ()
+
+                if installation is not None:
+                    repositories = await self._repository.list_repositories(
+                        connection,
+                        scope=scope,
+                    )
+
+                automations = await self._repository.list_automations(
+                    connection,
+                    scope=scope,
+                )
+
+        return self._view(installation, repositories, automations)
+
+    async def _store_automation(
+        self,
+        connection: asyncpg.Connection,
+        *,
+        scope: WorkspaceScope,
+        team_id: UUID,
+        started_state_id: UUID | None,
+        completed_state_id: UUID | None,
+    ) -> None:
+        """Validate and write one team's automation, on the caller's connection.
+
+        Split out so `set_issue_automation` reads as the four things it does --
+        authorize, write, read back, view -- rather than as one method with the
+        category rules inlined into the middle of it.
+        """
+        if started_state_id is None and completed_state_id is None:
+            started_state_id = await self._repository.default_state_id(
+                connection,
+                scope=scope,
+                team_id=team_id,
+                category="started",
+            )
+            completed_state_id = await self._repository.default_state_id(
+                connection,
+                scope=scope,
+                team_id=team_id,
+                category="completed",
+            )
+
+            if started_state_id is None and completed_state_id is None:
+                # A team with neither a started nor a completed state has no
+                # automation to derive, and writing a row of two NULLs is the
+                # one thing the CHECK refuses. Reported rather than silently
+                # doing nothing: the admin pressed a button.
+                raise ValidationError([_NO_DEFAULT_STATES])
+
+            await self._repository.upsert_automation(
+                connection,
+                scope=scope,
+                team_id=team_id,
+                started_state_id=started_state_id,
+                completed_state_id=completed_state_id,
+            )
+
+            return
+
+        slots = (
+            ("startedStateId", "started", started_state_id),
+            ("completedStateId", "completed", completed_state_id),
+        )
+
+        categories = await self._repository.find_states(
+            connection,
+            scope=scope,
+            team_id=team_id,
+            state_ids=[state_id for _, _, state_id in slots if state_id is not None],
+        )
+
+        issues = [
+            _wrong_state(field, category)
+            for field, category, state_id in slots
+            if state_id is not None and categories.get(state_id) != category
+        ]
+
+        if issues:
+            raise ValidationError(issues)
+
+        await self._repository.upsert_automation(
+            connection,
+            scope=scope,
+            team_id=team_id,
+            started_state_id=started_state_id,
+            completed_state_id=completed_state_id,
+        )
 
     async def apply_webhook(
         self,
@@ -1420,7 +1742,7 @@ class GithubService:
         if not applied:
             return
 
-        await self._link_pull_request(
+        linked = await self._link_pull_request(
             connection,
             scope,
             repository_id=repository_id,
@@ -1439,6 +1761,141 @@ class GithubService:
                 title=title,
             )
 
+        # The status automation, last, and on the SAME links the event above
+        # fans out over.
+        #
+        # Inline rather than hung off the domain event that `record_pull_request
+        # _merged` just wrote, and that is a decision worth stating because the
+        # outbox is right there. Three reasons, in order of weight:
+        #
+        # * there is no event for a pull request OPENING, so half the feature
+        #   would need a new kind in `domain_events_kind_known` -- and every
+        #   kind in that vocabulary is a Slack preference toggle, so the
+        #   automation would ship a switch in somebody's Slack settings for a
+        #   message nobody asked to receive;
+        # * `domain_events`' claim columns are Slack's (`slack_attempts`,
+        #   `slack_next_attempt_at`). A second consumer needs a second set, a
+        #   second background loop and its own backoff, bought to make a local
+        #   write asynchronous. The outbox exists to keep a NETWORK call out of
+        #   this transaction; a state move is a row in the same database;
+        # * the automation PRODUCES into `domain_events` -- an issue it moves
+        #   into a completed state emits `issue_completed`, so Slack announces
+        #   it exactly as it announces a person's move. A consumer that writes
+        #   into the table it consumes from is the shape to avoid.
+        #
+        # The single emitter the pipeline wants is preserved: `_automate_state`
+        # calls `app.services.events.record_issue_event`, the same function
+        # `activity.record_changes` calls for a human edit.
+        await self._automate_state(
+            connection,
+            scope,
+            action=payload.get("action"),
+            state=state,
+            draft=pull.get("draft") is True,
+            merged_at=merged_at,
+            issue_ids=linked,
+            cause=pull_request_cause(_payload_repository_name(payload), number),
+        )
+
+    async def _automate_state(
+        self,
+        connection: asyncpg.Connection,
+        scope: WorkspaceScope,
+        *,
+        action: Any,
+        state: str,
+        draft: bool,
+        merged_at: datetime | None,
+        issue_ids: Sequence[UUID],
+        cause: str,
+    ) -> None:
+        """Move the issues this pull request names, if their teams asked for it.
+
+        The rule is `app.domain.github.automated_move_for`, and it is stated
+        there rather than here because it is a decision about pull requests and
+        not about SQL: opened, reopened and ready_for_review move an issue to
+        the team's started state; a merge moves it to the team's completed one;
+        a draft and a close-without-merge move nothing.
+
+        Everything else this method does exists because a state change is not
+        one write. A person moving an issue through `IssueService.update` gets
+        an activity row, a notification to the watchers and a domain event, all
+        in the transaction that moved it -- see `activity.record_changes` -- and
+        an automated move that produced only the UPDATE would be an issue that
+        changed status with the timeline silent, nobody told, and no
+        announcement in a channel that gets one for every human move. So the
+        same three follow, through the same functions.
+
+        LOGGED WITH A CAUSE AND NO ACTOR. `actor_id` is None because there is
+        no person: a webhook runs on nobody's session, and inventing the
+        installer as the actor would attribute to them a move they did not make
+        and were possibly asleep for. `caused_by` is what migration 030 adds so
+        that None does not read as "nobody knows" -- it names the pull request,
+        which is the sentence the timeline has to be able to say.
+
+        Idempotency and don't-fight-a-human are the same predicate and neither
+        is here: `move_issues_for_automation` moves an issue only from a
+        category BELOW the target, so a redelivery finds it already there and
+        returns no rows, and a person who has moved it on themselves keeps
+        their move. Nothing after this point runs for an issue that did not
+        actually move.
+        """
+        target = automated_move_for(
+            action=action,
+            display_state=pull_request_display_state(
+                state=state,
+                draft=draft,
+                merged_at=merged_at,
+            ),
+        )
+
+        if target is None or not issue_ids:
+            return
+
+        moved = await self._repository.move_issues_for_automation(
+            connection,
+            scope=scope,
+            issue_ids=issue_ids,
+            category=target,
+            from_categories=categories_below(target),
+        )
+
+        for issue_id, from_state_id, to_state_id in moved:
+            await activity.record(
+                connection,
+                scope=scope,
+                issue_id=issue_id,
+                actor_id=None,
+                kind=ActivityKind.STATE_CHANGED,
+                from_value=str(from_state_id),
+                to_value=str(to_state_id),
+                caused_by=cause,
+            )
+
+            # The watchers, exactly as a human move notifies them. `actor_id`
+            # is None here too, which the statement handles: `IS DISTINCT FROM`
+            # against a NULL actor excludes nobody, so everyone watching hears
+            # about it -- which is right, because nobody in this workspace did
+            # it and there is therefore nobody to spare the notification.
+            await activity.notify(
+                connection,
+                scope=scope,
+                issue_id=issue_id,
+                actor_id=None,
+                kind=NotificationKind.STATUS_CHANGED,
+            )
+
+            # Writes a row only when the issue is NOW in a completed state --
+            # the join is inside the statement, so the started move emits
+            # nothing and the merge move emits exactly what a person's move to
+            # the same state would.
+            await record_issue_event(
+                connection,
+                scope=scope,
+                kind=DomainEventKind.ISSUE_COMPLETED,
+                issue_id=issue_id,
+            )
+
     async def _link_pull_request(
         self,
         connection: asyncpg.Connection,
@@ -1449,7 +1906,7 @@ class GithubService:
         title: str,
         body: Any,
         head_ref: str | None,
-    ) -> None:
+    ) -> tuple[UUID, ...]:
         """Point this pull request at the issues its text asks for, per source.
 
         This is the method migrations/017_github_development.sql was written
@@ -1476,6 +1933,16 @@ class GithubService:
         title edited to drop "ENG-142" makes `set_pull_request_links` delete
         the title's row, while the branch's row for the same issue survives
         because `source` is inside the key.
+
+        Returns the DISTINCT issues this pull request now links to, across all
+        three sources, which is the set the status automation acts on. Returned
+        rather than re-read, because the resolution has just been performed and
+        a second query for the same answer inside this transaction would be a
+        round trip with a chance of disagreeing with the rows it just wrote.
+        `dict.fromkeys` preserves first-appearance order, so a title naming two
+        issues moves them in the order it named them and a redelivery does the
+        same -- which matters only for the history's tie-break, and matters
+        there.
         """
         by_source = {
             LINK_SOURCE_TITLE: issue_identifiers(title),
@@ -1500,19 +1967,27 @@ class GithubService:
             ),
         )
 
+        linked: list[UUID] = []
+
         for source, identifiers in by_source.items():
+            issue_ids = [
+                resolved[identifier]
+                for identifier in identifiers
+                if identifier in resolved
+            ]
+
             await self._repository.set_pull_request_links(
                 connection,
                 scope=scope,
                 repository_id=repository_id,
                 number=number,
                 source=source,
-                issue_ids=[
-                    resolved[identifier]
-                    for identifier in identifiers
-                    if identifier in resolved
-                ],
+                issue_ids=issue_ids,
             )
+
+            linked.extend(issue_ids)
+
+        return tuple(dict.fromkeys(linked))
 
     async def _apply_push(
         self,
@@ -1772,6 +2247,16 @@ class GithubService:
         refuse the repository delete otherwise. An id that was already there
         is one this payload is re-stating, so there is nothing being lost that
         the next delivery does not restore.
+
+        ponytail: the delete-and-insert resets `tracked` to its default for
+        every id in the payload, so a repository an admin had UNTRACKED and
+        that GitHub then re-states in `repositories_added` comes back tracked.
+        GitHub sends genuinely-new repositories in that list, so this needs a
+        provider quirk to reach; the cost of it is one delivery applied that an
+        admin had declined, and the fix is one tick of a checkbox. The upgrade
+        is to read the existing rows' `tracked` before the delete and carry it
+        onto the insert -- a round trip and a widened `add_repositories`, which
+        is not worth buying until somebody sees it happen.
         """
         added = _repositories(payload.get("repositories_added")) or ()
         removed = _repositories(payload.get("repositories_removed")) or ()
@@ -1800,6 +2285,7 @@ class GithubService:
         self,
         installation: GithubInstallationEntity | None,
         repositories: Sequence[GithubRepositoryEntity],
+        automations: Sequence[GithubAutomationEntity] = (),
     ) -> GithubIntegrationEntity:
         """Assemble the answer, with the status decided in one place.
 
@@ -1831,4 +2317,5 @@ class GithubService:
             status=status,
             installation=installation,
             repositories=tuple(repositories),
+            automations=tuple(automations),
         )
