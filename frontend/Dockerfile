@@ -30,6 +30,18 @@ WORKDIR /build
 # separate layers means editing a component does not reinstall 400 packages.
 COPY package.json package-lock.json ./
 
+# `@playwright/test` is a devDependency, and `npm ci` below installs
+# devDependencies because the build needs vite and tsc. Playwright's install
+# script would then download Chromium, Firefox and WebKit -- roughly 400 MB of
+# browsers -- into a builder stage whose entire job is to run `vite build`, and
+# then throw them away, on every image build and in CI's docker-build job.
+#
+# Set here rather than passed to one command so it also covers the `npm ci`
+# layer's cache key: the browsers are never fetched, so nothing about them can
+# invalidate this layer. The e2e suite installs its own browser on the machine
+# that actually runs it -- see .github/workflows/ci.yml's `e2e` job.
+ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+
 # `npm ci`, never `npm install`. ci installs the lockfile as written and
 # fails when package.json and the lockfile disagree; install is allowed to
 # quietly rewrite the lockfile to make them agree, which would mean the image
