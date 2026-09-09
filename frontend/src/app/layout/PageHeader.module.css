@@ -25,10 +25,30 @@
   border-bottom: var(--border-width) solid var(--color-border);
 }
 
+/**
+ * A grid, so the readout can sit *beside* the title while the subtitle stays
+ * under it -- with no wrapper element around the pair.
+ *
+ * A flex row holding the h1 and the readout, nested in a flex column, would
+ * have been the obvious shape and would have added a div to every header in
+ * the product to serve the headers that pass a readout. Two columns and a
+ * subtitle that spans both does it with three declarations and leaves the DOM
+ * flat: title, optional readout, optional description, all siblings.
+ *
+ * Auto-placement does the rest. `grid-column: 1 / -1` on the subtitle cannot
+ * fit in what is left of the first row, so it moves to the second -- whether
+ * or not there is a readout occupying column two.
+ *
+ * `baseline` and not `center`: the readout is set in a different family at
+ * two thirds the title's size, and centring two such different faces on their
+ * boxes leaves neither sitting on a line.
+ */
 .titleBlock {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: baseline;
+  row-gap: var(--space-1);
+  column-gap: var(--space-5);
   min-width: 0;
   /* Takes the free space so `.actions` sits at the trailing edge without an
    * auto margin, and shrinks first when the two compete. */
@@ -50,7 +70,35 @@
   text-overflow: ellipsis;
 }
 
+/**
+ * The screen reporting its own state: `24 OPEN · 7 DONE`.
+ *
+ * Uppercased here rather than trusted to the caller, because the register is
+ * the shell's decision and not the page's -- a screen that passes "24 open"
+ * gets the same legend as one that passes "24 OPEN". Tabular figures so the
+ * numbers do not dance as they update.
+ *
+ * `--color-text-faint` where the artboard draws `#626c7d`. That value is
+ * 3.7:1 on ground and this is a word, not a glyph; the token file states that
+ * no word in the product is painted below 4.5:1, and one step brighter is a
+ * cheaper concession than an exception to that rule.
+ */
+.readout {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 .description {
+  grid-column: 1 / -1;
   min-width: 0;
   overflow: hidden;
   color: var(--color-text-secondary);
