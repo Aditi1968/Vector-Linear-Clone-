@@ -300,4 +300,3 @@ mutation ProjectMilestoneDelete($input: ProjectMilestoneDeleteInput!) {
     }
   }
 }
-

@@ -37,7 +37,17 @@ repos:
       - id: end-of-file-fixer
         exclude: ^migrations/
 
+      # `--allow-multiple-documents` because the k8s manifests are exactly
+      # that: `k8s/20-postgres.yaml` carries a Service and a StatefulSet,
+      # `30-api.yaml` a Deployment and its Service, `40-web.yaml` the same,
+      # each pair separated by `---`. That is the ordinary shape of a
+      # Kubernetes manifest, not a mistake -- and without this flag the hook
+      # rejects all three with "expected a single document in the stream",
+      # which fails the whole `pre-commit` job and takes check-toml and
+      # check-merge-conflict down with it. The flag relaxes the document
+      # count and nothing else; a syntax error in any document still fails.
       - id: check-yaml
+        args: [--allow-multiple-documents]
       # pyproject.toml carries the ruff, mypy and pytest configuration. A
       # syntax error in it does not fail loudly -- tools fall back to their
       # defaults and the gates quietly stop being the gates that were agreed.

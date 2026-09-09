@@ -254,4 +254,3 @@ textarea.input { min-height: 90px; resize: vertical; }
 .card, .dialog { border-radius: calc(var(--radius-lg) * 1.15); }
 .btn, .tag, .seg, .input { border-radius: 999px; }
 .input { padding-inline: 14px; }
-

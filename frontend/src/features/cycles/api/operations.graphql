@@ -163,4 +163,3 @@ mutation CycleDelete($workspaceSlug: String!, $id: UUID!) {
     }
   }
 }
-
