@@ -1,0 +1,86 @@
+/*
+ * The members screen's own paint.
+ *
+ * `../screens.module.css` owns the panels, the invite form and the rows; this
+ * file owns the three readouts that make a list of people read as a roster
+ * rather than a table of pills -- the section labels, the role, and when
+ * somebody joined.
+ *
+ * Every value is a `var(--*)` from `src/styles/tokens.css`.
+ */
+
+/*
+ * A section heading, set as the mono micro-label the direction speaks in.
+ *
+ * Still an `<h2>`/`<h3>` in the markup: level is structure and size is
+ * styling, and `base.css` decouples the two so a heading can be small without
+ * lying about the document outline.
+ */
+.sectionLabel {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+}
+
+/*
+ * Somebody's role, as a readout.
+ *
+ * It was a `Badge`, toned `info` for an admin -- a cyan pill -- and cyan in
+ * this product marks where you are and what is live. A role is neither. The
+ * word was always what carried the meaning (`Badge`'s own contract says a
+ * tone may never be the only place a meaning lives), so dropping the pill
+ * costs nothing and gives the accent back its single job.
+ *
+ * `--color-text-body` and not `--color-text-faint`: this is the answer to the
+ * question the screen exists to ask, and it sits beside a date that *is*
+ * secondary.
+ */
+.role {
+  flex: none;
+  color: var(--color-text-body);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/*
+ * When they joined.
+ *
+ * `--color-text-faint` is 5.0:1 -- the artboard paints this row `#626c7d`
+ * (3.7:1) and this codebase puts no word below 4.5:1, so it goes one step
+ * brighter, deliberately.
+ */
+.joined {
+  flex: none;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/*
+ * One issued invitation: the address, the link, and the copy control.
+ *
+ * A `<li>` is a block box, so the `.tight` gap it used to carry did nothing
+ * at all and the three lines ran together. Stated here rather than fixed in
+ * the shared sheet, where `.tight` is a modifier six other screens apply to
+ * things that already are flex containers.
+ */
+.issuedInvite {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  align-items: flex-start;
+  min-width: 0;
+}

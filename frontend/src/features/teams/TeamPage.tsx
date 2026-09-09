@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { PageContent, PageHeader } from '../../app/layout'
 import { useAppPaths } from '../../app/routes'
 import {
-  Badge,
   EmptyState,
   ErrorState,
   IssuesIcon,
@@ -19,7 +18,8 @@ import {
 import { useWorkspaceContext } from '../issues/api'
 import { formatAbsolute } from '../issues/lib/dates'
 import { IssueRows } from '../screens'
-import styles from '../screens.module.css'
+import shared from '../screens.module.css'
+import styles from './Teams.module.css'
 import { useTeamByKey, useTeamIssues } from './api'
 import type { TeamWorkflowState } from './api'
 import { TeamStateScreen } from './TeamStates'
@@ -97,24 +97,28 @@ export function TeamPage() {
       <PageHeader
         title={team.name}
         description={`Team ${team.key} · created ${formatAbsolute(team.createdAt)}`}
-        actions={<Link to={paths.teamIssues(team.key)}>All {team.key} issues</Link>}
+        actions={
+          <Link className={styles.headerAction} to={paths.teamIssues(team.key)}>
+            All {team.key} issues
+          </Link>
+        }
       />
 
       <PageContent>
-        <div className={styles.split}>
-          <section className={styles.panel} aria-labelledby="team-issues">
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle} id="team-issues">
+        <div className={shared.split}>
+          <section className={shared.panel} aria-labelledby="team-issues">
+            <div className={shared.panelHeader}>
+              <h2 className={styles.sectionLabel} id="team-issues">
                 Recent issues
               </h2>
               <Link to={paths.teamIssues(team.key)}>View all</Link>
             </div>
 
-            <div className={styles.panelBody}>
+            <div className={shared.panelBody}>
               {isLoadingFirstPage && <Spinner label={`Loading ${team.key} issues`} />}
 
               {!isLoadingFirstPage && errorMessage !== null && (
-                <p className={styles.formError} role="alert">
+                <p className={shared.formError} role="alert">
                   {errorMessage}
                 </p>
               )}
@@ -138,7 +142,7 @@ export function TeamPage() {
                   {/* "Newest" and not "all": this is a preview, and a list
                       that quietly showed five of forty would be read as
                       forty. The full list is one link away. */}
-                  <p className={styles.footnote}>
+                  <p className={shared.footnote}>
                     The {preview.length} newest of this team&rsquo;s issues.
                     {hasNextPage || issues.length > preview.length
                       ? ' There are more.'
@@ -149,14 +153,14 @@ export function TeamPage() {
             </div>
           </section>
 
-          <section className={styles.panel} aria-labelledby="team-states">
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle} id="team-states">
+          <section className={shared.panel} aria-labelledby="team-states">
+            <div className={shared.panelHeader}>
+              <h2 className={styles.sectionLabel} id="team-states">
                 Workflow states
               </h2>
             </div>
 
-            <div className={styles.panelBody}>
+            <div className={shared.panelBody}>
               {states.length === 0 ? (
                 /* Every team is seeded with the default states at creation, so
                    this is close to unreachable -- and it is still a state and
@@ -192,14 +196,14 @@ export function TeamPage() {
                               name={CATEGORY_LABELS[state.category]}
                               color={state.color ?? undefined}
                             />
-                            <Badge>{state.position}</Badge>
+                            <span className={styles.position}>{state.position}</span>
                           </ListRowMeta>
                         </ListRow>
                       )
                     })}
                   </List>
 
-                  <p className={styles.footnote}>
+                  <p className={shared.footnote}>
                     In board order. The name belongs to the team; the category
                     beside it is the fixed meaning the rest of Vector reads.
                   </p>

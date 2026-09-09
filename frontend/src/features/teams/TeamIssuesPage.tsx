@@ -11,7 +11,8 @@ import {
 } from '../../components'
 import { useWorkspaceContext } from '../issues/api'
 import { IssueRows, ListFooter } from '../screens'
-import styles from '../screens.module.css'
+import shared from '../screens.module.css'
+import styles from './Teams.module.css'
 import { useTeamByKey, useTeamIssues } from './api'
 import { TeamStateScreen } from './TeamStates'
 
@@ -69,13 +70,17 @@ export function TeamIssuesPage() {
       <PageHeader
         title={`${team.key} issues`}
         description={`Every issue filed against ${team.name}.`}
-        actions={<Link to={paths.team(team.key)}>Team overview</Link>}
+        actions={
+          <Link className={styles.headerAction} to={paths.team(team.key)}>
+            Team overview
+          </Link>
+        }
       />
 
       <PageContent>
-        <div className={styles.stack}>
+        <div className={shared.stack}>
           {isLoadingFirstPage && (
-            <div className={styles.skeletonStack} role="status" aria-busy="true">
+            <div className={shared.skeletonStack} role="status" aria-busy="true">
               {/* `Skeleton` is `aria-hidden` by design, so the announcement
                   belongs on one live region for the whole list. */}
               <VisuallyHidden as="div">Loading {team.key} issues</VisuallyHidden>
