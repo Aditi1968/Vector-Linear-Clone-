@@ -1,6 +1,17 @@
 /*
  * Styles for the board.
  *
+ * Drawn from `design/instrument/Board.dc.html`: the board is a bank of
+ * channels. Each column is a measured strip -- a mono legend, a count, and a
+ * 2px bar in that status category's own colour -- separated from its
+ * neighbours by one hairline rather than boxed in a rounded panel. Five
+ * bordered panels side by side is five frames competing with the cards inside
+ * them; a rule between two strips is the same separation for a pixel.
+ *
+ * Deliberately no `--pattern-grid` anywhere below. That token is for ground
+ * that is otherwise empty (signed-out, onboarding); ruled cards over a ruled
+ * ground is two grids arguing, and the cards lose.
+ *
  * Every colour, space, radius and size comes from `src/styles/tokens.css`.
  * There is not one literal hex value below, and not one `outline: none`
  * without a `box-shadow` ring replacing it.
@@ -22,16 +33,18 @@
  * Wraps rather than scrolls. Nine pickers is a lot of chrome, and a bar that
  * scrolls sideways hides the controls furthest from the default view -- which
  * are the filters, the ones a user goes looking for.
+ *
+ * A rule beneath rather than a border all the way round: the bar is the top
+ * edge of the board, not a card sitting above it, and a panel here would put
+ * a second frame between the page header's rule and the columns' own.
  */
 .controls {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-5);
   align-items: end;
-  padding: var(--space-5);
-  border: var(--border-width) solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-subtle);
+  padding-block-end: var(--space-5);
+  border-block-end: var(--border-width) solid var(--color-border-subtle);
 }
 
 .control {
@@ -41,11 +54,14 @@
   min-width: 0;
 }
 
+/* The instrument legend: mono, uppercase, tracked out. The tracking is what
+ * separates a legend from shouting at these sizes. */
 .controlLabel {
-  color: var(--color-text-secondary);
-  font-size: var(--text-2xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
   font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-caps);
+  letter-spacing: var(--label-mono-tracking-md);
   text-transform: uppercase;
 }
 
@@ -100,11 +116,14 @@
  * horizontally, so the overflow is contained to the strip that has it.
  *
  * `align-items: start` so a tall column does not stretch its empty neighbours
- * to match -- a column's height is information about how much is in it.
+ * to match -- a column's height is information about how much is in it. Which
+ * is also why the hairline between columns is a border on the column and not
+ * a gap over a coloured backdrop: a backdrop would paint a full-height rule
+ * beside a column holding one card, and claim a depth the column does not
+ * have.
  */
 .board {
   display: flex;
-  gap: var(--space-5);
   align-items: start;
   overflow-x: auto;
   padding-bottom: var(--space-4);
@@ -114,13 +133,42 @@
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: var(--space-4);
+  gap: var(--space-3-5);
   width: 18rem;
   max-width: 100%;
-  padding: var(--space-4);
-  border: var(--border-width) solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface-subtle);
+  padding: var(--space-5-5) var(--space-5);
+
+  /*
+   * The channel's own colour, set per category below and used by the bar
+   * under the legend. A column that is not a workflow state -- grouped by
+   * assignee, by priority -- keeps the neutral rule: there is no status
+   * being measured, and tinting it would name a category the column is not.
+   */
+  --channel: var(--color-border);
+}
+
+.column + .column {
+  border-inline-start: var(--border-width) solid var(--color-border-subtle);
+}
+
+.column[data-category='backlog'] {
+  --channel: var(--color-status-backlog);
+}
+
+.column[data-category='unstarted'] {
+  --channel: var(--color-status-unstarted);
+}
+
+.column[data-category='started'] {
+  --channel: var(--color-status-started);
+}
+
+.column[data-category='completed'] {
+  --channel: var(--color-status-completed);
+}
+
+.column[data-category='canceled'] {
+  --channel: var(--color-status-canceled);
 }
 
 /*
@@ -131,43 +179,71 @@
  * so a per-column hover state needs a counter to stop it flickering, and that
  * counter is exactly the fragile bookkeeping a board should not have. "These
  * are the targets" is the useful half of the message anyway.
+ *
+ * An `outline` and not a border: the columns abut, and swapping the hairline
+ * for a dashed edge would move every column one pixel sideways as a drag
+ * starts. This is also the one thing on the board allowed to be cyan-adjacent
+ * -- it marks what is live, which is the accent's only job.
  */
 .column[data-droppable] {
-  border-style: dashed;
-  border-color: var(--color-accent-border);
+  outline: var(--border-width) dashed var(--color-accent-border);
+  outline-offset: calc(-1 * var(--border-width));
   background: var(--color-accent-subtle);
 }
 
+/*
+ * The channel head: legend, count, and the bar.
+ *
+ * The bar is the border of the heading rather than an element of its own --
+ * one declaration instead of a div per column, and it cannot drift away from
+ * the words it belongs to. 2px because 1px reads as another hairline and the
+ * bar is the one thing on the column that is meant to be seen from across the
+ * room; written as a multiple of `--border-width` rather than as a literal.
+ */
 .columnHead {
   display: flex;
   gap: var(--space-4);
   align-items: center;
   margin: 0;
-  padding-inline: var(--space-2);
+  padding-block-end: var(--space-3);
+  border-block-end: calc(var(--border-width) * 2) solid var(--channel);
   font-size: var(--text-sm);
   font-weight: var(--weight-semibold);
 }
 
 .columnName {
   overflow: hidden;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-sm);
   text-overflow: ellipsis;
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
-/* "loaded", never a bare number -- see BoardColumn's note on the count. */
+/* "loaded", never a bare number -- see BoardColumn's note on the count.
+ *
+ * `--color-text-faint` (5.0:1) where the artboard paints `#626c7d` (3.7:1):
+ * this is a word, and the token file states that no word in the product is
+ * painted below 4.5:1. One step brighter is cheaper than an exception. */
 .columnCount {
   margin-inline-start: auto;
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
-  font-variant-numeric: tabular-nums;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  font-variant-numeric: var(--numeric-tabular);
   font-weight: var(--weight-regular);
+  letter-spacing: var(--label-mono-tracking-sm);
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 .columnEmpty {
   margin: 0;
-  padding: var(--space-5) var(--space-2);
-  color: var(--color-text-muted);
+  padding-block: var(--space-5);
+  color: var(--color-text-faint);
   font-size: var(--text-xs);
   line-height: var(--leading-normal);
 }
@@ -186,8 +262,8 @@
 .card {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
-  padding: var(--space-5);
+  gap: var(--space-3-5);
+  padding: var(--space-3-5) var(--space-5);
   border: var(--border-width) solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-surface);
@@ -210,10 +286,10 @@
 
 /* ENG-42. Monospaced and tabular, as everywhere else in the product. */
 .identifier {
-  color: var(--color-text-muted);
+  color: var(--color-text-faint);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
-  font-variant-numeric: tabular-nums;
+  font-variant-numeric: var(--numeric-tabular);
   white-space: nowrap;
 }
 
@@ -233,8 +309,9 @@
   overflow: hidden;
   color: inherit;
   font-size: var(--text-sm);
-  line-height: var(--leading-normal);
+  line-height: var(--leading-tight);
   text-decoration: none;
+  text-wrap: pretty;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
@@ -250,8 +327,10 @@
 }
 
 .labelOverflow {
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
 }
 
 .cardMeta {
@@ -259,7 +338,7 @@
   flex-wrap: wrap;
   gap: var(--space-4);
   align-items: center;
-  color: var(--color-text-muted);
+  color: var(--color-text-faint);
   font-size: var(--text-2xs);
 }
 
@@ -279,11 +358,16 @@
   font-weight: var(--weight-medium);
 }
 
+/* A bordered chip, not a filled pill. A filled capsule on a card that is
+ * itself a bordered rectangle reads as a badge -- something conferred -- where
+ * an estimate is a measurement, and the whole direction spends its fills on
+ * the one primary control. */
 .estimate {
   padding-inline: var(--space-3);
-  border-radius: var(--radius-full);
-  background: var(--color-surface-hover);
-  font-variant-numeric: tabular-nums;
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--numeric-tabular);
 }
 
 /* Pushed to the trailing edge, where the eye already looks for a face. */
@@ -308,7 +392,6 @@
  * many the team has. */
 .skeletonBoard {
   display: flex;
-  gap: var(--space-5);
   align-items: start;
 }
 
@@ -319,7 +402,9 @@
   gap: var(--space-4);
   width: 18rem;
   max-width: 100%;
-  padding: var(--space-4);
-  border: var(--border-width) solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
+  padding: var(--space-5-5) var(--space-5);
+}
+
+.skeletonColumn + .skeletonColumn {
+  border-inline-start: var(--border-width) solid var(--color-border-subtle);
 }
