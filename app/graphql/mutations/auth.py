@@ -3,6 +3,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from strawberry.types import Info
 
+from app.config import get_settings
 from app.domain.auth import Authentication
 from app.domain.errors import AuthenticationError, ValidationError, ValidationIssue
 from app.graphql.inputs.auth import LoginInput, RegisterInput
@@ -145,7 +146,10 @@ def _client_ip(info: Info) -> str | None:
     # nothing at all -- the same reason `_response` below annotates.
     request: Request | None = info.context.request
 
-    return read_client_ip(request)
+    # The hop count is a fact about the deployment, not about this request, so
+    # it comes from settings rather than from anything a caller can influence.
+    # `get_settings` is lru_cached, so this is a dictionary lookup.
+    return read_client_ip(request, trusted_hops=get_settings().trusted_proxy_hops)
 
 
 def _response(info: Info) -> Response:

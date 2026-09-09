@@ -68,3 +68,25 @@ data:
   # The value below is what `minikube service web --url` hands out on a
   # single-node cluster. A real deployment replaces it with its own origin.
   PUBLIC_BASE_URL: http://vector.local
+
+  # How many proxies in front of the api pod are trusted to have appended to
+  # `X-Forwarded-For`. One: the `web` nginx, whose
+  # `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` appends the
+  # address it accepted the connection from, so the client is the last
+  # element.
+  #
+  # This is what the auth rate limiter's IP bucket is keyed on, and it is the
+  # only thing stopping a caller from choosing their own bucket. Raising it
+  # above the number of proxies actually in front of the pod hands that choice
+  # away: every extra hop moves the trusted position further left, into the
+  # part of the list the caller wrote.
+  #
+  # If an Ingress or LoadBalancer is put in front of `web` and it also appends
+  # to the header, this becomes 2. Count the hops that APPEND, not the hops
+  # that exist -- a load balancer operating at L4 adds nothing to it.
+  #
+  # 30-api.yaml publishes `api` as ClusterIP, so nothing outside the cluster
+  # reaches it directly. A workload already inside can still forge the header,
+  # and that is accepted: it evades a backstop, not the per-address budget and
+  # not the argon2 semaphore.
+  TRUSTED_PROXY_HOPS: "1"

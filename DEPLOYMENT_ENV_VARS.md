@@ -50,7 +50,8 @@ instead of running with a protection silently off.
 |---|---|
 | `PUBLIC_BASE_URL` | This deployment's origin, `https://<render-host>`, with no trailing path. Used for exactly one thing: the deep link in a Slack message, which is built by a background loop that is serving no request and so has no `Host` header to infer an origin from. Unset means messages go out **without** a link rather than with a guessed one. Not knowable until Render has assigned the host, so it is filled in after the first deploy. |
 | `EMBEDDING_WORKER_ENABLED` | `true` on this deployment, and already committed in `render.yaml` because it is a decision rather than a credential. Read **The 512 MB verdict** before changing it. Must be `true` or `false` — never blank, which pydantic rejects and which would stop the boot. |
-| `FORWARDED_ALLOW_IPS` | `*`, committed in `render.yaml`. Read by **uvicorn**, not by `app/config.py`. Render terminates TLS at its edge and forwards plain HTTP with `X-Forwarded-Proto: https`; uvicorn believes that header only from a peer in this list, which defaults to `127.0.0.1`. Without it `request.url.scheme` stays `http` and **no `Strict-Transport-Security` header is sent at all**. `*` is safe only because the container publishes no port and is reachable solely through Render's proxy. |
+| `FORWARDED_ALLOW_IPS` | `*`, committed in `render.yaml`. Read by **uvicorn**, not by `app/config.py`. Render terminates TLS at its edge and forwards plain HTTP with `X-Forwarded-Proto: https`; uvicorn believes that header only from a peer in this list, which defaults to `127.0.0.1`. Without it `request.url.scheme` stays `http` and **no `Strict-Transport-Security` header is sent at all**. `*` is safe only because the container publishes no port and is reachable solely through Render's proxy — and note it also makes uvicorn rewrite `request.client` from the leftmost, caller-written `X-Forwarded-For` entry, which is why `TRUSTED_PROXY_HOPS` below exists rather than the app reading `request.client`. |
+| `TRUSTED_PROXY_HOPS` | `1`, committed in `render.yaml`. How many proxies in front are trusted to have **appended** to `X-Forwarded-For`; the client is that many elements from the right. Render's edge is one such hop. See **Client IP and the rate-limit bucket** below — this is the only thing stopping a public caller from choosing their own rate-limit identity, and setting it too high hands that choice back. |
 
 ## OPTIONAL — GitHub App
 
@@ -338,29 +339,54 @@ Confirmed against the code rather than assumed:
 * **HSTS**: sent, because `FORWARDED_ALLOW_IPS` is set. See above — without
   it the header is silently absent.
 
-### One property that does NOT carry over — known, and accepted for staging
+### Client IP and the rate-limit bucket — FIXED, and worth reading
 
-`app/http_client_ip.py` reads `X-Real-IP` and trusts it, and its own docstring
-says exactly why that is safe in the deployments this repository ships:
-`frontend/nginx.conf` **overwrites** that header with `$remote_addr`, and the
-API is reachable only through nginx, so an outside caller cannot choose the
-value.
+An earlier revision of this document described this as a known, accepted
+weakness. It is not accepted any more; it is fixed, and it was worse than that
+description said.
 
-**There is no nginx here.** Render's proxy adds `X-Forwarded-For` and does not
-scrub a client-supplied `X-Real-IP`, so on this deployment a caller can pick
-their own IP rate-limit bucket.
+**What was wrong.** `app/http_client_ip.py` read `X-Real-IP` and trusted it,
+because `frontend/nginx.conf` **overwrites** that header with `$remote_addr`
+and the API is reachable only through nginx. Sound reasoning, local premise —
+there is no nginx on Render, Render does not scrub a client-supplied
+`X-Real-IP`, and so any caller could choose which rate-limit bucket their
+login attempts landed in.
 
-What that does and does not cost, from `app/services/auth.py`: the IP budget
-is the *loose backstop*, not the primary control. The per-email-address budget
-and the argon2 semaphore in `app/services/passwords.py` are unaffected and are
-what actually bound a credential-stuffing attempt. So this is a weakened
-backstop on a staging deployment, not an open login endpoint.
+**And the fallback was compromised too**, which the earlier note missed.
+`FORWARDED_ALLOW_IPS: "*"` is set so uvicorn honours `X-Forwarded-Proto` and
+HSTS is sent at all. Under `*`, uvicorn's `ProxyHeadersMiddleware` trusts every
+peer and takes the **leftmost** `X-Forwarded-For` element — the one the client
+wrote — into `scope["client"]`. So `request.client` was forgeable on exactly
+the deployment where the header was.
 
-The fix is the one already recorded as a `ponytail:` note in that module — a
-trusted-proxy setting, so `X-Real-IP` is read only when a proxy is known to
-set it — and it is deliberately not made here, because that function is shared
-with the compose and Kubernetes stacks where the header *is* trustworthy and
-changing it blind would degrade them.
+**The fix.** The module no longer picks a header. Whether a forwarding header
+can be believed is a fact about the deployment, so the deployment states it:
+
+| Setting | Value here | Meaning |
+|---|---|---|
+| `TRUSTED_PROXY_HOPS` | `1` | one proxy in front appends to `X-Forwarded-For` |
+
+`X-Forwarded-For` is a list every proxy **appends** to, so with N trusted hops
+the client is the Nth element **from the right**; everything to the left is
+hearsay. Both shapes this repository deploys append exactly once — nginx's
+`$proxy_add_x_forwarded_for` and Render's edge — so both are `1`, and both read
+the same value nginx used to put in `X-Real-IP`. `X-Real-IP` is now never read
+at any hop count.
+
+Padding cannot defeat it: extra entries a caller adds push their own values
+*further* from the position that is read. The way to break it is setting the
+number **higher** than the proxies actually in front, which moves the trusted
+position left into the part of the list the caller controls — so never raise it
+without counting the hops that genuinely append.
+
+The default is `0` (trust nothing, use the TCP peer), so a deployment that
+says nothing gets the safe answer rather than a guess written for somebody
+else's topology.
+
+Unchanged, and still the reason this is a backstop rather than the primary
+control: the IP budget is loose by design, and the per-email-address budget
+plus the argon2 semaphore in `app/services/passwords.py` are what actually
+bound a credential-stuffing attempt.
 
 ---
 

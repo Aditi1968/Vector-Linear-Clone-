@@ -144,6 +144,25 @@ services:
       - key: FORWARDED_ALLOW_IPS
         value: "*"
 
+      # Render's edge is ONE proxy and it appends to `X-Forwarded-For`, so the
+      # client is the last element. Anything further left was sent by the
+      # caller.
+      #
+      # This exists because `FORWARDED_ALLOW_IPS: "*"` above is not free.
+      # Under `*`, uvicorn's ProxyHeadersMiddleware takes the LEFTMOST
+      # `X-Forwarded-For` element -- the one the client chose -- and writes it
+      # into `scope["client"]`. That is fine for the header it is there for
+      # (`X-Forwarded-Proto`, without which no HSTS is ever sent) and wrong for
+      # the address. So `app/http_client_ip.py` reads the header itself, from
+      # the right, and this is the number of elements it may trust.
+      #
+      # Raising this above the number of proxies actually in front of the
+      # service is how a caller gets to choose their own rate-limit bucket:
+      # every extra hop moves the trusted position further left, into the part
+      # of the list they control.
+      - key: TRUSTED_PROXY_HOPS
+        value: "1"
+
       # GITHUB_* and SLACK_* are deliberately absent from this file, and their
       # absence is load-bearing rather than an omission. Both integrations are
       # optional and every one of their settings defaults to None, which is

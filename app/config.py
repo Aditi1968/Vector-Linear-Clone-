@@ -71,6 +71,29 @@ class Settings(BaseSettings):
     # domain that is not theirs. See `app.domain.events.message_for`.
     public_base_url: str | None = None
 
+    # How many proxies in front of this process are TRUSTED to have appended
+    # to `X-Forwarded-For`. Zero means none, and zero is the default because
+    # the safe answer is the one a deployment has to opt out of.
+    #
+    # This is the only thing standing between the auth rate limiter's IP
+    # bucket and a caller who picks their own bucket. `X-Forwarded-For` is a
+    # list each proxy APPENDS to, so its leftmost element is whatever the
+    # client sent and its rightmost was written by the proxy nearest this
+    # process. With N trusted hops the client is the Nth element from the
+    # right; every element to the left of that is hearsay.
+    #
+    #   0  no proxy. The TCP peer is the client. Development, and any
+    #      deployment reached directly.
+    #   1  exactly one trusted proxy appends the address it accepted the
+    #      connection from. Render's edge; `frontend/nginx.conf`, which sets
+    #      `$proxy_add_x_forwarded_for`. This is the value both use.
+    #
+    # Set it too HIGH and a client can inject entries to push their forgery
+    # into the trusted position, so this is deliberately not "trust the whole
+    # chain". Set it too LOW and the bucket collapses onto the proxy, which
+    # costs accuracy and no security -- which is the right way round.
+    trusted_proxy_hops: int = 0
+
     # --- GitHub App -----------------------------------------------------
     #
     # Every field below is optional, and that is the whole design. Vector is
