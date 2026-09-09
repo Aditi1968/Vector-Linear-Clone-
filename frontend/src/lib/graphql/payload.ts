@@ -67,3 +67,61 @@ export function readPayload<TValue, TError>(
 
   return { status: 'ok', value }
 }
+
+/** One entry of a payload's `errors`, as every form reads it. */
+interface FieldError {
+  field: string
+  message: string
+}
+
+/** Where a form puts a `rejected` outcome's errors. */
+export interface PartitionedErrors {
+  /** The first message per field the form draws a control for. */
+  byField: ReadonlyMap<string, string>
+  /** Everything that named a field the form has no control for. */
+  unattached: readonly string[]
+}
+
+/**
+ * Sort a rejection into the two places a form can show it.
+ *
+ * ## Nothing may be dropped
+ *
+ * The obvious implementation -- build a `Map` of field to message and read the
+ * three keys the form has inputs for -- loses every error naming anything
+ * else, and loses it *silently*: the request visibly fails, the dialog stays
+ * open, and no message appears anywhere. The person is left clicking Save on a
+ * form that will never save.
+ *
+ * That is not a hypothetical. `app/services/saved_views.py` refuses
+ * `savedViewCreate` with `{field: "workspaceSlug", code: "NOT_MEMBER"}` when
+ * the caller has been removed from the workspace mid-session, and no form
+ * anywhere draws a control for `workspaceSlug`. Seven forms each carried a
+ * private copy of the lossy version; this is the one they share.
+ *
+ * Anything unattached goes to `unattached`, which the caller renders in the
+ * form-level alert it already has for `failed`. Both are "the server refused
+ * and no input on this screen is at fault", which is exactly one place.
+ *
+ * Only the first message per field is kept: the backend reports at most one
+ * per field, and a stack of messages under one input is not something a form
+ * can lay out sensibly anyway. Unattached messages are all kept, because there
+ * is no control whose space they are competing for.
+ */
+export function partitionFieldErrors(
+  errors: readonly FieldError[],
+  knownFields: readonly string[],
+): PartitionedErrors {
+  const byField = new Map<string, string>()
+  const unattached: string[] = []
+
+  for (const error of errors) {
+    if (!knownFields.includes(error.field)) {
+      unattached.push(error.message)
+    } else if (!byField.has(error.field)) {
+      byField.set(error.field, error.message)
+    }
+  }
+
+  return { byField, unattached }
+}

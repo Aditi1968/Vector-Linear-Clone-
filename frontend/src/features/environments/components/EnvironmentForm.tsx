@@ -2,9 +2,19 @@ import { useId, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { Button, Input, Select } from '../../../components'
+import { partitionFieldErrors } from '../../../lib/graphql'
 import type { EnvironmentDraft, EnvironmentKind, EnvironmentValidationError } from '../api'
 import { ENVIRONMENT_KINDS, environmentKindLabel } from '../lib/environments'
 import styles from '../environments.module.css'
+
+/**
+ * The fields this form draws a control for.
+ *
+ * Module scope so the memo below keys on a stable array. Anything the server
+ * names that is not in here has nowhere to sit, and goes to the form-level
+ * alert rather than being dropped -- see `partitionFieldErrors`.
+ */
+const FIELDS = ['name', 'kind'] as const
 
 export interface EnvironmentFormProps {
   isSaving: boolean
@@ -40,17 +50,10 @@ export function EnvironmentForm({
   const [name, setName] = useState('')
   const [kind, setKind] = useState<EnvironmentKind>('DEVELOPMENT')
 
-  const errorByField = useMemo(() => {
-    const map = new Map<string, string>()
-
-    for (const entry of errors) {
-      if (!map.has(entry.field)) {
-        map.set(entry.field, entry.message)
-      }
-    }
-
-    return map
-  }, [errors])
+  const { byField: errorByField, unattached } = useMemo(
+    () => partitionFieldErrors(errors, FIELDS),
+    [errors],
+  )
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -61,11 +64,15 @@ export function EnvironmentForm({
   const nameError = errorByField.get('name')
   const kindError = errorByField.get('kind')
 
+  // A transport failure and a refusal no control on this form owns are the
+  // same thing to the reader: the server said no, and no input is at fault.
+  const formMessages = errorMessage === null ? unattached : [errorMessage, ...unattached]
+
   return (
     <form className={styles.form} noValidate onSubmit={handleSubmit}>
-      {errorMessage !== null && (
+      {formMessages.length > 0 && (
         <p className={styles.formError} role="alert">
-          {errorMessage}
+          {formMessages.join(' ')}
         </p>
       )}
 

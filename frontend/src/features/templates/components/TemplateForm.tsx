@@ -2,10 +2,21 @@ import { useId, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { Button, Input, Select, Textarea } from '../../../components'
+import { partitionFieldErrors } from '../../../lib/graphql'
 import type { WorkspaceTeam } from '../../issues/api'
 import { PRIORITY_VALUES, describePriority } from '../../issues/lib/priority'
 import type { IssueTemplate, IssueTemplateDraft, TemplateValidationError } from '../api'
 import styles from '../templates.module.css'
+
+/**
+ * The one field this form draws an error slot for.
+ *
+ * Module scope so the memo below keys on a stable array. A refusal naming
+ * `teamId`, `title`, `priority`, `estimate` or anything else this form sends
+ * without an error slot goes to the form-level alert rather than being
+ * dropped -- see `partitionFieldErrors`.
+ */
+const FIELDS = ['name'] as const
 
 export interface TemplateFormProps {
   /** The template being edited, or null when composing a new one. */
@@ -67,17 +78,10 @@ export function TemplateForm({
   )
 
   /** Errors the server named, by the field it named them on. */
-  const errorByField = useMemo(() => {
-    const map = new Map<string, string>()
-
-    for (const entry of errors) {
-      if (!map.has(entry.field)) {
-        map.set(entry.field, entry.message)
-      }
-    }
-
-    return map
-  }, [errors])
+  const { byField: errorByField, unattached } = useMemo(
+    () => partitionFieldErrors(errors, FIELDS),
+    [errors],
+  )
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -114,11 +118,15 @@ export function TemplateForm({
           (value) => value !== null,
         ).length + (template.labelIds.length > 0 ? 1 : 0)
 
+  // A transport failure and a refusal no control on this form owns are the
+  // same thing to the reader: the server said no, and no input is at fault.
+  const formMessages = errorMessage === null ? unattached : [errorMessage, ...unattached]
+
   return (
     <form className={styles.form} noValidate onSubmit={handleSubmit}>
-      {errorMessage !== null && (
+      {formMessages.length > 0 && (
         <p className={styles.formError} role="alert">
-          {errorMessage}
+          {formMessages.join(' ')}
         </p>
       )}
 
