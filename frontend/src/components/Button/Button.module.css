@@ -85,10 +85,16 @@
  * is cleared there explicitly for the same reason. Gradients do not animate,
  * so the hover swap is instant -- imperceptible at these durations, and not
  * worth a pseudo-element cross-fade to avoid.
+ *
+ * The white top edge is the other half of the material. A machined face
+ * catches the light along its top edge and nowhere else, and that one
+ * hairline is the whole difference between "a silver fill" and "a milled
+ * control" -- the design draws it on every silver button it shows.
  */
 .primary {
   background-image: var(--gradient-primary);
   border-color: var(--color-primary-border);
+  border-top-color: var(--color-primary-border-top);
   color: var(--color-text-on-primary);
   font-weight: var(--weight-semibold);
 }
@@ -174,6 +180,11 @@
    * primary button keeps its silver and only the ink goes grey. */
   background-image: none;
   background-color: var(--color-surface-subtle);
+  /* The shorthand is what clears `.primary`'s lit top edge, and it is not an
+   * accident that it does: `border-color` expands to four longhands, and this
+   * selector outranks `.primary` on every one of them. Stating
+   * `border-top-color` again here would be dead code that reads as load
+   * bearing. A disabled control has no light on it. */
   border-color: var(--color-border);
   color: var(--color-text-disabled);
 }

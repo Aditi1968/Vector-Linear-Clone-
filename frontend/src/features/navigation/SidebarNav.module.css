@@ -33,6 +33,16 @@
 /**
  * One row. 28px tall, 13px type, 8px gutters -- the density of a tool
  * somebody keeps open all day rather than a page they visit.
+ *
+ * The left 2px is a reserved gutter, transparent on every row that is not the
+ * current one, so becoming active paints a mark instead of shifting the whole
+ * label two pixels sideways. Rounded on the trailing corners only: the mark is
+ * struck against the rail's edge, and a radius on the left would round it back
+ * into the pill this stopped being.
+ *
+ * `calc(var(--border-width) * 2)` rather than a literal `2px` -- the mark is
+ * twice a hairline, which is the relationship worth recording. There is no 2px
+ * border token and this file does not get to invent one.
  */
 .link {
   display: flex;
@@ -42,7 +52,8 @@
   min-width: 0;
   height: var(--control-height-sm);
   padding-inline: var(--space-4);
-  border-radius: var(--radius-md);
+  border-left: calc(var(--border-width) * 2) solid transparent;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 
   color: var(--color-text-secondary);
   font-size: var(--text-sm);
@@ -61,26 +72,29 @@
 }
 
 /**
- * The current page.
+ * The current page: a mark, a wash and a weight.
  *
- * Three signals, not one: a tinted background, a colour change and a heavier
- * weight. Colour alone would fail WCAG 1.4.1, and in a rail of a dozen rows
- * the weight change is what makes the active row findable at a glance rather
- * than by comparison.
+ * Still three signals, not one -- colour alone would fail WCAG 1.4.1 -- but
+ * the colour has moved off the word and onto the edge. A cyan label spends the
+ * accent across a whole run of text and leaves the row arguing with every
+ * other cyan thing in the rail; a 2px rule spends it on the one pixel column
+ * whose entire job is to say "here", and the label goes to heading brightness,
+ * which is the change a reader actually registers at rail width.
  *
  * The programmatic half is `aria-current="page"`, which `NavLink` sets -- see
  * ./NavRow.tsx. A screen-reader user is told which row is current by that
  * attribute and by none of these three.
  */
 .linkActive {
+  border-left-color: var(--color-text-accent);
   background-color: var(--color-surface-selected);
-  color: var(--color-text-accent);
+  color: var(--color-text-heading);
   font-weight: var(--weight-semibold);
 }
 
 .linkActive:hover {
   background-color: var(--color-surface-selected);
-  color: var(--color-text-accent);
+  color: var(--color-text-heading);
 }
 
 /** A team's own sections, indented to the icon column above them. */
@@ -107,26 +121,30 @@
 }
 
 /**
- * The unread count on Inbox.
+ * The unread count on Inbox: mono figures at the trailing edge, not a pill.
  *
- * A real number from `notificationUnreadCount` or nothing at all -- the
- * component does not render this at zero, so there is no empty pill claiming
- * to be a count. The digits are followed by a visually hidden "unread", so
- * the link's accessible name reads "Inbox 3 unread" rather than "Inbox 3".
+ * A solid cyan capsule put a second cyan signal in the same 26px row as the
+ * active mark, and in a rail where cyan means "here" a filled badge on a row
+ * you are *not* on says the opposite. As plain monospace it reads as part of
+ * the row -- the same column of figures the design runs down every nav row --
+ * and it inherits the accent only when the row it sits on is the current one.
+ *
+ * Nothing changed in the markup, and nothing had to: a real number from
+ * `notificationUnreadCount` or no element at all, with the digits
+ * `aria-hidden` beside a visually hidden ", 3 unread". The link is still
+ * announced as "Inbox, 3 unread"; only the paint moved.
  */
 .badge {
   flex: none;
-  min-width: 1.25rem;
-  padding-inline: var(--space-3);
-  border-radius: var(--radius-full);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  line-height: var(--leading-none);
+}
 
-  background-color: var(--color-accent);
-  color: var(--color-text-on-accent);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
-  font-variant-numeric: tabular-nums;
-  line-height: 1.25rem;
-  text-align: center;
+.linkActive .badge {
+  color: var(--color-text-accent);
 }
 
 /* ------------------------------------------------------------------ */
@@ -147,15 +165,25 @@
  * would put a level-2 heading above the only level-1 on the page. The name is
  * carried programmatically instead: the list below is labelled by this
  * paragraph's id, so a reader announces "Teams, list, 3 items".
+ *
+ * Set as the mono micro-label -- the direction's structural voice, and the
+ * same one the column headers and property names wear. The tracking is what
+ * does the work: unspaced 9.5px capitals set solid and read as damage, where
+ * 0.2em of it reads as an instrument legend. The sans-serif small-caps this
+ * replaced read as a heading somebody had shrunk.
+ *
+ * `--space-4` of padding rather than `--space-4` plus the rows' 2px gutter:
+ * the label is meant to hang a hair left of the row text, which is what marks
+ * it as a legend rather than a row you failed to click.
  */
 .sectionLabel {
   margin: 0;
   padding-inline: var(--space-4);
 
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  letter-spacing: var(--label-mono-tracking-sm);
   line-height: var(--leading-none);
   text-transform: uppercase;
 }

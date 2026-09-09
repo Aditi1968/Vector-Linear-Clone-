@@ -73,6 +73,15 @@
  * can never be reached. It sits above the viewport and slides in when
  * focused.
  */
+/* Painted as the design's secondary control -- an edge, a surface and a plain
+ * label -- and not in the accent.
+ *
+ * Cyan in this product marks where you are and what is live; it is never what
+ * a control is made of. The skip link is a control, and one wearing the
+ * accent read as a status chip that happened to be clickable. It loses nothing
+ * by being silver-grey: it is the only thing on screen when it is on screen,
+ * and the focus ring -- which IS cyan, because that one is "where you are" --
+ * is what announces it. */
 .skipLink {
   position: absolute;
   top: var(--space-4);
@@ -80,11 +89,11 @@
   z-index: var(--z-skip-link);
 
   padding: var(--space-4) var(--space-5);
-  border: var(--border-width) solid var(--color-accent-border);
+  border: var(--border-width) solid var(--color-border-strong);
   border-radius: var(--radius-md);
 
   background-color: var(--color-surface-raised);
-  color: var(--color-text-accent);
+  color: var(--color-text-primary);
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   text-decoration: none;
@@ -192,6 +201,11 @@
   max-width: 32rem;
 }
 
+/* The same engraved plate the rail's workspace mark wears -- see `.mark` in
+ * Sidebar.module.css, which argues the case at length. A solid cyan tile was
+ * the brightest object on a screen whose whole message is "there is nothing
+ * here for you", which is the accent pointing at the one element that is not
+ * a destination. */
 .notFoundMark {
   display: inline-flex;
   align-items: center;
@@ -199,10 +213,11 @@
 
   width: 2rem;
   height: 2rem;
+  border: var(--border-width) solid var(--color-border-strong);
   border-radius: var(--radius-lg);
 
-  background-color: var(--color-accent);
-  color: var(--color-text-on-accent);
+  background: var(--gradient-mark);
+  color: var(--color-text-secondary);
   font-size: 1.125rem;
 }
 
@@ -236,12 +251,16 @@
   gap: var(--space-3);
 }
 
+/* The mono micro-label: the direction's structural voice, and the same one
+ * the rail's section names now use. Mono at 9.5px with 0.2em of tracking
+ * reads as an instrument legend; the sans-serif small-caps it replaced read
+ * as a heading that had been shrunk. */
 .notFoundListLabel {
   margin: 0;
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  letter-spacing: var(--label-mono-tracking-sm);
   text-transform: uppercase;
 }
 

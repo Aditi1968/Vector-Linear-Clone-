@@ -170,6 +170,19 @@
   min-width: 0;
 }
 
+/**
+ * A rail row, and the left edge is reserved.
+ *
+ * Every row carries the 2px gutter whether or not it is the current one --
+ * transparent when it is not -- so becoming active paints a mark rather than
+ * shifting the label two pixels sideways. The rounding is on the trailing
+ * corners only: the mark is meant to read as struck against the rail's edge,
+ * and a radius on the left would round it off into a pill again.
+ *
+ * `calc(var(--border-width) * 2)` rather than a literal `2px`: the design's
+ * mark is twice a hairline, which is the relationship worth recording. There
+ * is no 2px border token and this file does not get to invent one.
+ */
 .action {
   display: flex;
   align-items: center;
@@ -180,7 +193,8 @@
   height: var(--control-height-sm);
   padding-inline: var(--space-4);
   border: 0;
-  border-radius: var(--radius-md);
+  border-left: calc(var(--border-width) * 2) solid transparent;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 
   background-color: transparent;
   color: var(--color-text-secondary);
@@ -200,9 +214,19 @@
   color: var(--color-text-primary);
 }
 
+/**
+ * The current row: a mark, a wash and a weight.
+ *
+ * The cyan is on the *edge*, not on the word. Painting the label cyan spends
+ * the accent on a whole run of text and leaves the row competing with every
+ * other cyan thing on the screen; a 2px rule spends it on the one pixel column
+ * whose entire job is to say "here", and the label goes to heading brightness
+ * instead -- which is the change a reader actually notices at rail width.
+ */
 .actionActive {
+  border-left-color: var(--color-text-accent);
   background-color: var(--color-surface-selected);
-  color: var(--color-text-accent);
+  color: var(--color-text-heading);
   font-weight: var(--weight-semibold);
 }
 

@@ -7,6 +7,20 @@ export interface PageHeaderProps {
   title: ReactNode
   /** Optional one-line subtitle. Truncates; it is not a place for prose. */
   description?: ReactNode
+  /**
+   * A mono readout beside the title -- `24 OPEN · 7 DONE`.
+   *
+   * The screen's own state, said in numbers, in the instrument voice: the
+   * shell paints it uppercase mono and the page supplies the words. It is
+   * deliberately not a `counts` object the header formats itself; a header
+   * that knows what "open" means is a header that has to be taught what
+   * every future screen counts.
+   *
+   * Not `aria-hidden`. "24 open, 7 done" is information, not decoration, and
+   * it sits beside the `<h1>` rather than inside it, so the heading's
+   * accessible name is unchanged.
+   */
+  readout?: ReactNode
   /** Page-scoped controls, rendered at the trailing edge. */
   actions?: ReactNode
 }
@@ -35,11 +49,17 @@ export interface PageHeaderProps {
  *     precisely this reason -- level is structure, size is styling, and a
  *     level must never be picked for how big it looks.
  */
-export function PageHeader({ title, description, actions }: PageHeaderProps) {
+export function PageHeader({
+  title,
+  description,
+  readout,
+  actions,
+}: PageHeaderProps) {
   return (
     <header className={styles.header}>
       <div className={styles.titleBlock}>
         <h1 className={styles.title}>{title}</h1>
+        {readout !== undefined && <span className={styles.readout}>{readout}</span>}
         {description !== undefined && (
           <p className={styles.description}>{description}</p>
         )}
