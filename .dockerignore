@@ -7,21 +7,72 @@
 # root already holds a .env, is the wrong default to pick.
 *
 
+# The five paths the runtime image cannot be built without, and the reason
+# each one is here rather than mounted. Render has NO BIND MOUNTS: whatever
+# the container needs at run time has to be inside it, so the three entries
+# below `requirements.txt` are the ones docker-compose.yml used to supply
+# from the host and no longer can.
+#
+#   app                the application package
+#   requirements.txt   the pinned, hashed runtime lock the builder installs
+#   migrations         the schema itself, applied at boot from an empty
+#                      database -- the deployment target is a brand new Neon
+#                      project, so 001 onwards has to be in the image
+#   scripts            `python -m scripts.apply_migration`, which owns the
+#                      ledger, the advisory lock and the per-file checksum.
+#                      Nothing else may apply a migration, so nothing else
+#                      would be safe to bake in instead
+#   frontend           the sources the Node stage builds the bundle from, so
+#                      that FastAPI can serve the SPA and the API on ONE
+#                      origin. Two origins is what broke OAuth state before
+#                      (see app/rest/oauth_origin.py) and is not repeated
 !app
 !requirements.txt
+!migrations
+!scripts
+!frontend
 
 # Re-excluded inside the allowed paths above: build artefacts are rebuilt
 # by the interpreter and would otherwise bust the layer cache on every
 # build and ship stale bytecode compiled by a different interpreter.
 app/**/__pycache__
+scripts/**/__pycache__
 **/*.pyc
 
-# Named explicitly for the reader, though `*` above already excludes them.
-# These are the paths that must never reach an image: local secrets, the
+# Re-excluded inside `frontend`, and this list is `frontend/.dockerignore`
+# restated. That file governs a build whose context is `frontend/`; this
+# build's context is the repository root, so Docker never reads it and every
+# exclusion it makes has to be made again here.
+#
+#   node_modules  installed by `npm ci` in the builder. A host copy would
+#                 ship Windows-resolved esbuild and rollup binaries
+#   dist          the previous build's output; copying a stale one in would
+#                 let a successful-looking image serve last week's bundle
+#   e2e           in no tsconfig, so `tsc -b && vite build` never reads it.
+#                 Excluded for the layer cache: without this, editing a spec
+#                 forces a full rebuild of a bundle that cannot have changed
+frontend/node_modules
+frontend/dist
+frontend/e2e
+frontend/playwright-report
+frontend/test-results
+
+# The paths that must never reach an image: local secrets, private keys, the
 # developer virtualenv (Windows binaries, useless and large in a Linux
 # image), version control history and test caches.
+#
+# `.env` and `.env.*` alone were enough while the allowlist was two files and
+# `*` covered everything else. It is not enough now. Three of the five
+# entries above are whole DIRECTORIES, so `*` no longer protects anything
+# inside them -- a `.env` or a downloaded GitHub App `.pem` dropped into
+# `scripts/` or `frontend/` would be copied into the image by a `COPY` that
+# looks entirely innocent. The `**/` spellings are what close that, and
+# tests/test_phase1a2_gates.py asserts every line in this block.
 .env
 .env.*
+**/.env
+**/.env.*
+**/*.pem
 .venv
 .git
 .pytest_cache

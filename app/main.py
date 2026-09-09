@@ -40,6 +40,7 @@ from app.services.schedule import ScheduleWorker
 from app.services.slack import DatabaseTokenStore, SlackWebClient
 from app.services.teams import TeamService
 from app.services.templates import TemplateService
+from app.spa import add_spa
 
 
 def _start_embedding_worker(settings: Settings) -> "asyncio.Task[None] | None":
@@ -355,5 +356,17 @@ def create_app() -> FastAPI:
     # it, so both spellings resolve rather than one of them 404ing an OAuth
     # callback that has already left the user's browser.
     app.include_router(slack_router, prefix="/integrations")
+
+    # LAST, and the ordering is the whole of the correctness argument.
+    #
+    # `add_spa` registers a `/{path:path}` catch-all so that a deep link
+    # reloaded in the browser is answered with index.html rather than 404.
+    # Starlette matches routes in registration order and stops at the first
+    # hit, so every route above already wins: adding this before them would
+    # answer /graphql with the HTML page -- HTTP 200, `content-type:
+    # text/html`, and an Apollo parse error that names nothing.
+    #
+    # A no-op unless the image was built with the bundle in it; see app/spa.py.
+    add_spa(app)
 
     return app
