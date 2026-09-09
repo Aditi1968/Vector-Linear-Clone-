@@ -287,9 +287,10 @@
   border-top: var(--border-width) solid var(--color-border-subtle);
 }
 
-.theme {
-  width: 100%;
-}
+/* `.theme` was here, sizing the Auto/Light/Dark control in the account block.
+ * The control is gone -- it wrote `data-theme` onto `<html>` and no stylesheet
+ * read it, so all three options rendered the same navy. See the comment in
+ * AccountMenu.tsx. The compact-width rule that hid it is gone too. */
 
 .accountRow {
   display: flex;
@@ -436,13 +437,6 @@
     margin-top: 0;
     padding-top: 0;
     border-top: none;
-  }
-
-  /* The theme control is a third row's worth of width in a bar that has none.
-   * It is reachable from the same place it always was once the window is
-   * wide enough; nothing else in the shell is lost. */
-  .account .theme {
-    display: none;
   }
 
   /* The navigation is the second row, spanning the bar, and it is what the

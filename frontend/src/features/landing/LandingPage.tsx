@@ -100,21 +100,28 @@ export function LandingPage() {
           </nav>
 
           {/*
-           * A readout, not a tagline: the machine reporting its own state.
+           * A statement about the product, not a claim about the servers.
            *
-           * ponytail: the state is a constant. Nothing on this page asks the
-           * server whether it is true, so this is a claim rather than a
-           * measurement, and the day it is wrong is the day it matters most.
-           * The upgrade is one fetch of the REST health endpoint behind a
-           * three-state readout (operational / degraded / unreachable); it is
-           * not here because a signed-out page that pings the API on every
-           * visit is a decision worth making deliberately rather than as a
-           * side effect of styling the front door.
+           * This said "All systems operational" beside a green dot, which is
+           * the visual grammar of a status page -- and it was a hardcoded
+           * string. Nothing on this page asked the server anything, so the
+           * words were true only by luck, and they would go on being green
+           * through an outage, which is the one moment they would be read.
+           *
+           * The honest fix is not a better constant, it is to stop making a
+           * claim this page cannot support. `/healthz` and `/readyz` exist and
+           * a three-state readout is maybe twenty lines -- but a signed-out
+           * page that pings the API on every visit is a real decision (it is
+           * an unauthenticated endpoint anyone can drive by loading the front
+           * door), and it should be made deliberately rather than as a side
+           * effect of wanting a green dot. Until then this describes the
+           * product, which needs no measurement.
+           *
+           * The dot went with the sentence. A coloured dot IS the claim, so
+           * keeping it beside neutral copy would have moved the lie rather
+           * than removed it.
            */}
-          <p className={styles.readout}>
-            <span aria-hidden="true" className={styles.readoutDot} />
-            All systems operational
-          </p>
+          <p className={styles.readout}>Keyboard-first &#183; Built for teams who ship</p>
         </div>
       </main>
     </div>

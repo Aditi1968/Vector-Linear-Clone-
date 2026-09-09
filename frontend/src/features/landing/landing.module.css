@@ -286,9 +286,8 @@
   text-transform: uppercase;
 }
 
-.readoutDot {
-  width: var(--space-3);
-  height: var(--space-3);
-  border-radius: var(--radius-full);
-  background-color: var(--color-success);
-}
+/* `.readoutDot` was here: a green dot beside "All systems operational".
+ * Both are gone. See the comment at the readout in LandingPage.tsx -- the
+ * sentence was a hardcoded claim about servers this page never asked, and a
+ * coloured status dot is that same claim in one element, so removing the words
+ * and keeping the dot would have moved the lie rather than removed it. */

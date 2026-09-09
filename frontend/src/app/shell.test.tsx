@@ -391,17 +391,52 @@ describe('application shell', () => {
       expect(screen.getByRole('menuitem', { name: 'Sign out' })).toBeInTheDocument()
     })
 
-    it('sets and clears `data-theme` on the document element', async () => {
-      const { user } = await renderShell()
+    /*
+      This replaces a test that asserted the theme control wrote `data-theme`
+      onto `<html>`. It did, faithfully -- and nothing in the product read it.
+      `tokens.css` pins `color-scheme: dark` on bare `:root` and declares no
+      `prefers-color-scheme` block and no `:root[data-theme='light']` rule, so
+      all three options rendered the same navy and the only observable effect
+      of choosing one was that the segment moved.
 
-      const theme = screen.getByRole('radiogroup', { name: 'Theme' })
+      The old test passed the whole time. That is the point: it asserted the
+      mechanism and never the outcome, so it certified a control a user could
+      operate and could not affect. A control that visibly does nothing is
+      worse than an absent one -- it teaches that this product's settings are
+      decorative -- so the control is gone until there is a palette to switch
+      to, and this asserts it stays gone.
 
-      await user.click(within(theme).getByRole('radio', { name: 'Dark' }))
-      expect(document.documentElement).toHaveAttribute('data-theme', 'dark')
+      `preferences.ts` keeps `useTheme` and its storage: it is a correct
+      implementation of persistence, `matchMedia` tracking and the
+      system-versus-explicit distinction, all of which a light theme needs on
+      the day it arrives, and deleting it would also discard the choice
+      already stored in the browser of anyone who used the control.
 
-      // `system` removes the attribute rather than setting it to "system":
-      // its absence is what lets `prefers-color-scheme` through.
-      await user.click(within(theme).getByRole('radio', { name: 'Auto' }))
+      When an authenticated light palette lands, this test is what fails, and
+      that failure is the reminder to delete it.
+    */
+    it('offers no appearance control while the product ships one palette', async () => {
+      await renderShell()
+
+      // By role and name rather than by component: this must fail for a theme
+      // picker however it is built. A test pinned to `radiogroup` would pass
+      // while a decorative `<select>` shipped beside it.
+      for (const name of [/theme/i, /appearance/i, /dark mode/i]) {
+        expect(screen.queryByRole('radiogroup', { name })).toBeNull()
+        expect(screen.queryByRole('group', { name })).toBeNull()
+        expect(screen.queryByRole('combobox', { name })).toBeNull()
+        expect(screen.queryByRole('switch', { name })).toBeNull()
+      }
+
+      // And the option labels, since a control could be unlabelled and still
+      // be operable. `Dark` is deliberately not among them: it is a plausible
+      // word elsewhere in a product this colour, and a test that fails on the
+      // wrong thing is worse than one fewer assertion.
+      expect(screen.queryByRole('radio', { name: 'Auto' })).toBeNull()
+      expect(screen.queryByRole('radio', { name: 'Light' })).toBeNull()
+
+      // The attribute the removed control used to write. Absent because
+      // nothing writes it now -- not because something cleared it.
       expect(document.documentElement.hasAttribute('data-theme')).toBe(false)
     })
   })
