@@ -15,23 +15,29 @@
 
 # One row of the queue.
 #
-# `TriageIssue.issue` is `IssueSummary!`, NOT `Issue` -- so what a triage row
-# can show is fixed by the schema and not by taste. `IssueSummary` carries
-# `id, identifier, title, description, priority, completedAt, createdAt,
-# updatedAt` and nothing else: there is no `assigneeId`, no
-# `workflowStateId`, no `labels`, no `dueDate`.
+# `TriageIssue.issue` is `IssueSummary!`, NOT `Issue`. `IssueSummary` has
+# since been widened and now DOES carry `workflowStateId`, `assigneeId`,
+# `dueDate`, `teamId`, `estimate` and the rest -- so the old note here, that
+# the type had none of them, is no longer true and the selection set below is
+# now the only thing that decides what a row can draw.
 #
-# That is why ../components/TriageRow.tsx draws a priority glyph, a key, a
-# title and an age, and why it draws no status glyph and no avatar. The
-# alternative -- resolving each row's full `Issue` by id -- is an N+1 across
-# the queue, and the complexity rule prices fan-out deliberately; defeating
-# that guard to fill in two columns would be the wrong trade. The row's
-# action menu can still *set* an assignee and a priority, because a write
-# does not need to read the current value first.
+# It selects five fields, and ../components/TriageRow.tsx draws exactly
+# those: a priority glyph, a key, a title and an age. No status glyph and no
+# avatar, because this document does not ask for a state or an assignee. That
+# is the honest rendering -- a cell reading "Unassigned" because the field was
+# never fetched is indistinguishable from a genuinely empty one, and it would
+# be a lie the row could not detect.
 #
-# `description` is selected and `completedAt` is not: the first is what the
-# duplicate picker shows to tell two similar issues apart, and the second is
-# meaningless in a queue whose whole population is un-accepted work.
+# Widening the selection to draw those columns is a real option and costs
+# little (25 x 8 = 200 of 1000, against 175 today). It is a query change plus
+# codegen plus two more lookups per row, and it belongs in a pass that is
+# changing what the screen says -- not in one changing how it looks.
+#
+# `description` is selected and nothing renders it -- the duplicate picker
+# shows `identifier · title`. It was selected for that picker and the picker
+# never used it. Left in rather than trimmed here, because dropping a field
+# means regenerating `src/generated/operations.ts`, which is not a thing a
+# restyle should be doing to a file every feature imports.
 fragment TriageRowFields on TriageIssue {
   issue {
     id

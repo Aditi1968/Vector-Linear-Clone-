@@ -221,9 +221,17 @@ export function TemplatesPage() {
 
   return (
     <>
+      {/*
+        The header's mono readout, the way every artboard puts one beside a
+        screen title. `issueTemplates` takes no page-size argument and returns
+        the whole list, so this length really is the total -- which is the
+        only reason it is stated as one. Withheld while loading rather than
+        shown as `0 templates`, which is a claim and not a placeholder.
+      */}
       <PageHeader
         title="Templates"
         description="Pre-filled issues, so recurring work is filed the same way each time."
+        readout={isBusy ? undefined : `${String(templates.length)} templates`}
         actions={
           <Button
             onClick={() => {
@@ -258,8 +266,11 @@ export function TemplatesPage() {
         {isBusy && (
           <div className={styles.skeletonStack} role="status" aria-busy="true">
             <VisuallyHidden as="div">Loading templates</VisuallyHidden>
+            {/* `--row-height` and not a literal: the placeholder is a picture
+                of the rows that replace it, and the shell re-points that
+                token when density changes. */}
             {Array.from({ length: 4 }, (_unused, index) => (
-              <Skeleton key={index} width="100%" height="2.5rem" />
+              <Skeleton key={index} width="100%" height="var(--row-height)" />
             ))}
           </div>
         )}

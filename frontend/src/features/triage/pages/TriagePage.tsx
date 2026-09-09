@@ -173,16 +173,31 @@ export function TriagePage() {
 
   return (
     <>
+      {/*
+        The header's mono readout carries the queue's whole length -- the same
+        `24 OPEN · 7 DONE` the artboards put beside every screen title.
+        `triageCount` and not `rows.length`: this screen loads one page, and a
+        readout counting what happens to be on screen would say 25 for a queue
+        of 200. Withheld while the queue is loading, and withheld again when
+        there is no team to have a queue -- `0 waiting` beside "no teams in
+        this workspace" is a measurement of nothing, and both cases are a
+        claim rather than a placeholder.
+      */}
       <PageHeader
         title="Triage"
         description={team === undefined ? undefined : `${team.key} · ${team.name}`}
+        readout={
+          isBusy || team === undefined ? undefined : `${String(totalCount)} waiting`
+        }
       />
 
       <PageContent>
         {isLoadingContext && (
           <div className={styles.skeletonStack} role="status" aria-busy="true">
             <VisuallyHidden as="div">Loading teams</VisuallyHidden>
-            <Skeleton width="14rem" height="2rem" />
+            {/* The shape of the control it stands in for, not a number that
+                happens to match one today. */}
+            <Skeleton width="14rem" height="var(--control-height-md)" />
           </div>
         )}
 
@@ -230,8 +245,12 @@ export function TriagePage() {
             {isBusy && (
               <div className={styles.skeletonStack} role="status" aria-busy="true">
                 <VisuallyHidden as="div">Loading the triage queue</VisuallyHidden>
+                {/* `--row-height` and not a literal: the placeholder is a
+                    picture of the rows that replace it, and density moves
+                    that token. A 36px bar in front of a 34px row is a list
+                    that shifts as it loads. */}
                 {Array.from({ length: 5 }, (_unused, index) => (
-                  <Skeleton key={index} width="100%" height="2.25rem" />
+                  <Skeleton key={index} width="100%" height="var(--row-height)" />
                 ))}
               </div>
             )}
