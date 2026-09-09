@@ -1,0 +1,142 @@
+/*
+ * The inbox, in the Instrument direction.
+ *
+ * `design/instrument/Inbox.dc.html` is the authority. What it draws is a
+ * measured log: a dot column, an initials tile, the sentence, and a mono
+ * timestamp right-aligned in a column of its own, one hairline between rows.
+ *
+ * Geometry only. The row's hairline, its hover and its minimum height come
+ * from `components/List`, which every list in the product shares; restating
+ * them here is how one list ends up a pixel off the other six.
+ *
+ * Two rules from the direction are load-bearing below:
+ *
+ *   1. Cyan marks where you are and what is live, and does nothing else. The
+ *      unread dot is the whole of cyan on this screen -- it is the one thing
+ *      here that means "live". The badge it replaced was a cyan-tinted,
+ *      cyan-bordered, cyan-texted capsule reading "Unread", which is cyan
+ *      doing a badge's job on rows the reader is not even on.
+ *   2. No `--pattern-grid`. The rows are already a ruled surface, and ruled
+ *      rows over ruled ground is two grids arguing.
+ *
+ * Every value is a `var(--*)`; there is not one literal hex or pixel below.
+ */
+
+/*
+ * The screen's readout: "3 unread notifications."
+ *
+ * A mono micro-label rather than the sans footnote it used to be, because
+ * this is a count and the direction gives every count, timestamp and readout
+ * the same voice. The sentence itself is untouched -- it is a `role="status"`
+ * live region and the words are what gets announced.
+ *
+ * `--color-text-faint` is 5.0:1 and the artboard's own `#626c7d` is 3.7:1.
+ * The brighter value is deliberate: no word in this product is painted below
+ * 4.5:1, and a readout is a word.
+ */
+.readout {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
+  text-transform: uppercase;
+}
+
+/*
+ * Read and unread.
+ *
+ * Two classes, not one, and not because the row needs two selectors: a single
+ * class here ties with `List.module.css`'s own `.row`, and which of the two
+ * wins would then depend on the order the bundler happened to concatenate two
+ * stylesheets. The doubled selector settles it in the file rather than in the
+ * build.
+ */
+.row.unread {
+  /* `--vector-navy-900` by its semantic name -- the token file describes it
+   * as "an unread row, a hair off ground", which is exactly this. A raised
+   * ground plus a dot, rather than a filled capsule. */
+  background-color: var(--color-surface-subtle);
+  color: var(--color-text-heading);
+}
+
+/* Hover still wins over the raised ground; otherwise the row you are pointing
+ * at is the one row that gives no feedback. */
+.row.unread:hover {
+  background-color: var(--color-surface-hover);
+}
+
+.row.read {
+  color: var(--color-text-muted);
+}
+
+/*
+ * The live mark.
+ *
+ * Always in the DOM and transparent when the row is read, so the sentences
+ * down the list all start on the same x. A conditional element here would
+ * shift every read row six pixels left of its unread neighbours, which is the
+ * one thing a scannable list cannot survive.
+ *
+ * `aria-hidden` in the markup: the word "Unread" is still in the row's text,
+ * so the dot is a second rendering of a fact already stated.
+ */
+.dot {
+  flex: none;
+  /* 6px. The space ramp's smallest real step, used as a size because the
+   * token file has no diameter scale and one dot does not earn one. */
+  width: var(--space-3);
+  height: var(--space-3);
+  border-radius: var(--radius-full);
+  background-color: transparent;
+}
+
+.row.unread .dot {
+  background-color: var(--color-accent);
+}
+
+/* The initials tile, in the direction's voice. The hue still comes from the
+ * name -- that system is the product's and predates this screen -- and only
+ * the letterforms change. */
+.actor {
+  font-family: var(--font-mono);
+  letter-spacing: var(--label-mono-tracking-md);
+}
+
+/*
+ * No actor, by construction rather than by accident: DUE_SOON is written by
+ * the schedule worker because a date arrived, not because a person acted.
+ *
+ * A dashed empty ring is what the token file already says an unfilled person
+ * slot looks like. Sized to `Avatar`'s `md` -- 24px -- which lives inside
+ * `Avatar.module.css` and has no token of its own, so this borrows the
+ * control ramp's matching step rather than writing the number down again.
+ */
+.actorEmpty {
+  flex: none;
+  width: var(--control-height-xs);
+  height: var(--control-height-xs);
+  border: var(--avatar-empty-border);
+  border-radius: var(--radius-md);
+}
+
+/*
+ * The timestamp column.
+ *
+ * `--key-column` is named for the mono issue-key column, and this is the same
+ * measurement doing the same job: a fixed floor under a mono column so the
+ * values line up down the list instead of ragging against the right edge. It
+ * is a floor and not a width, because `formatRelative` produces anything from
+ * "now" to "2 months ago".
+ */
+.time {
+  min-width: var(--key-column);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-align: end;
+  text-transform: uppercase;
+  white-space: nowrap;
+}

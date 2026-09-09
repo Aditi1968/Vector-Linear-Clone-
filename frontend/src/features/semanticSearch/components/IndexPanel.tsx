@@ -50,8 +50,15 @@ export function IndexPanel({
         <h2 className={styles.indexTitle} id="semantic-index-title">
           Index
         </h2>
+        {/* Neutral and not `info` for the enabled case. `info` is the cyan
+            tone, and cyan in this product marks where you are and what is
+            live -- it is never a badge. Spending it on a steady-state fact
+            would put a second claim on the one signal that only works while
+            it makes one. The warning tone stays: "Not available" is the half
+            a reader has to notice, and amber is doing a different job. Neither
+            badge rests on its colour anyway; the words differ entirely. */}
         {state !== null && (
-          <Badge tone={state.enabled ? 'info' : 'warning'}>
+          <Badge tone={state.enabled ? 'neutral' : 'warning'}>
             {state.enabled ? 'Enabled' : 'Not available'}
           </Badge>
         )}

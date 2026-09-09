@@ -16,12 +16,17 @@ import {
   ListRowMeta,
   Menu,
   PlusIcon,
-  ProgressIndicator,
   Skeleton,
   Spinner,
   VisuallyHidden,
 } from '../../../components'
 import type { MenuItem } from '../../../components'
+// The flat bar every progress reading outside a project's health dial uses.
+// It lives under `features/projects` because that is where three of its four
+// call sites are and because `components/` was not this change's to add to;
+// the same cross-feature import the board already makes of `issues`.
+// ponytail: promote to `components/` when someone owns that directory.
+import { ProgressBar } from '../../projects/components/ProgressBar'
 import {
   useCycleActions,
   useCycleDetail,
@@ -258,22 +263,32 @@ export function CycleDetailPage() {
             <div className={styles.panelBody}>
               <dl className={styles.facts}>
                 <dt className={styles.factTerm}>Number</dt>
-                <dd className={styles.factValue}>{cycle.number}</dd>
+                <dd className={styles.factValue}>
+                  <span className={styles.factFigure}>{cycle.number}</span>
+                </dd>
 
                 <dt className={styles.factTerm}>Starts</dt>
                 <dd className={styles.factValue}>
-                  <time dateTime={cycle.startsAt}>{formatCycleDate(cycle.startsAt)}</time>
+                  <time className={styles.factFigure} dateTime={cycle.startsAt}>
+                    {formatCycleDate(cycle.startsAt)}
+                  </time>
                 </dd>
 
                 <dt className={styles.factTerm}>Ends</dt>
                 <dd className={styles.factValue}>
-                  <time dateTime={cycle.endsAt}>{formatCycleDate(cycle.endsAt)}</time>
+                  <time className={styles.factFigure} dateTime={cycle.endsAt}>
+                    {formatCycleDate(cycle.endsAt)}
+                  </time>
                 </dd>
 
                 <dt className={styles.factTerm}>Progress</dt>
                 <dd className={styles.factValue}>
                   <span className={styles.progressRow}>
-                    <ProgressIndicator
+                    {/* A flat bar, not a dial. The one ring in this product
+                        is a project's health, where a single number stands
+                        for a whole thing; a cycle's completion is a fraction
+                        and reads as one. */}
+                    <ProgressBar
                       value={closed}
                       total={cycleIssues.length}
                       label={
@@ -281,7 +296,6 @@ export function CycleDetailPage() {
                           ? `${title}: closed issues among those loaded`
                           : `${title}: closed issues`
                       }
-                      showLabel
                     />
                     <span>closed &middot; completed or canceled</span>
                   </span>
@@ -336,9 +350,17 @@ export function CycleDetailPage() {
                             {issue.completedAt !== null && (
                               <Badge tone="success">Closed</Badge>
                             )}
+                            {/* One "Remove" per row, so the visible word is
+                                not a name -- a screen-reader user asking for
+                                the buttons on this screen would hear
+                                "Remove, Remove, Remove" and have no way to
+                                tell which issue each one drops. The label
+                                names the issue; the visible text stays the
+                                one word the column has room for. */}
                             <Button
                               size="sm"
                               variant="ghost"
+                              aria-label={`Remove ${issue.identifier} from this cycle`}
                               disabled={actions.isSaving}
                               onClick={() => {
                                 handleSetCycle(issue.id, null)

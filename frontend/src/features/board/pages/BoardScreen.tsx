@@ -248,8 +248,12 @@ export function BoardScreen() {
 
   return (
     <>
+      {/* The team is a readout and not a subtitle: `ENG · Engineering` is the
+        * scope this screen is measuring, said in numbers and keys, which is
+        * exactly what the shell's mono legend beside the title is for. As a
+        * description it was a sentence that is not one. */}
       <PageHeader
-        description={team === undefined ? undefined : `${team.key} · ${team.name}`}
+        readout={team === undefined ? undefined : `${team.key} · ${team.name}`}
         title="Board"
       />
 

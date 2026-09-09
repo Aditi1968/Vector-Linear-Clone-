@@ -35,17 +35,20 @@ export interface TriageRowProps {
  *
  * ## What this row can and cannot show
  *
- * `TriageIssue.issue` is an `IssueSummary`, which carries `id`,
- * `identifier`, `title`, `description` and `priority` and nothing else. There
- * is no `assigneeId`, no `workflowStateId`, no `labels` and no `dueDate` on
- * it, so this row draws a priority glyph, a key, a title and an age -- and
- * draws no status glyph and no avatar, because it has no way to know them.
+ * `TriageRowFields` selects `id`, `identifier`, `title`, `description` and
+ * `priority`. So this row draws a priority glyph, a key, a title and an age
+ * -- and draws no status glyph and no avatar, because it has no way to know
+ * them.
  *
- * That is a schema fact rather than a design choice, and it is deliberately
- * not papered over: a row rendering "Unassigned" because the field was
- * absent would be stating something it does not know. `IssueRow` leaves the
- * status column empty when `status` is omitted, which is the honest
- * rendering.
+ * The limit is the *selection set*, not the type. `IssueSummary` has been
+ * widened and now carries `workflowStateId`, `assigneeId` and `dueDate`;
+ * ../api/operations.graphql still does not ask for them, so they are absent
+ * here and the generated type says so. Whichever way round it is, the row's
+ * job is the same and it is deliberately not papered over: rendering
+ * "Unassigned" because the field was never fetched states something this row
+ * does not know, and it is indistinguishable from a genuinely empty value.
+ * `IssueRow` leaves the status column empty when `status` is omitted, which
+ * is the honest rendering.
  *
  * The action menus can still *set* an assignee and a priority. Writing does
  * not require reading the current value first, so triage can do its job --
@@ -146,7 +149,7 @@ export function TriageRow({
 
     /*
       Offered unconditionally, unlike the priority items which disable the
-      value already set: an `IssueSummary` does not carry `assigneeId`, so
+      value already set: the queue document does not select `assigneeId`, so
       this row genuinely does not know whether the issue has an assignee to
       clear. Disabling it on a guess would be worse than a no-op.
     */

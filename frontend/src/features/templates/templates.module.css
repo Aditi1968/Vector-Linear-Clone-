@@ -26,17 +26,34 @@
   margin-block-end: var(--space-4);
 }
 
-/* A heading level, not a size: `base.css` decouples the two. */
+/*
+ * A heading level, not a size: `base.css` decouples the two, which is what
+ * lets a real `<h2>` be set as the column header it is doing the job of.
+ *
+ * Mono, uppercase, 0.2em of tracking -- the same legend the rail's section
+ * names wear and the same one the Settings artboard puts over each group.
+ * The 14px semibold sans this replaced read as a document heading; these are
+ * dividers in a list of rows, and a group of two templates does not deserve
+ * a title bigger than the names inside it.
+ */
 .groupTitle {
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-tight);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--label-mono-tracking-sm);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
 }
 
+/* Mono and tabular, so the counts down a stack of groups form a column --
+ * the same treatment `GroupHeader` gives its own. */
 .groupCount {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  line-height: var(--leading-none);
 }
 
 /* ----------------------------------------------------------------- rows */
@@ -50,12 +67,21 @@
   white-space: nowrap;
 }
 
-/* The line under a template's name: the issue title it produces. */
+/*
+ * The line under a template's name: the issue title it produces.
+ *
+ * The Inbox artboard's second line -- mono at 10.5px with a hair of tracking,
+ * under a sans name. Not uppercased: this is a sentence somebody wrote, and
+ * capitalising a title is editing it. `--color-text-faint` where the artboard
+ * paints `#626c7d` (3.7:1), because no word here goes under 4.5:1.
+ */
 .templateTitle {
   display: block;
   overflow: hidden;
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--tracking-caps);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -135,10 +161,21 @@
   }
 }
 
+/*
+ * A property label, in the direction's structural voice: mono, uppercase,
+ * widely tracked -- the legend the artboards put over every property row.
+ *
+ * `--color-text-muted` (7.9:1) rather than the `--color-text-faint` a column
+ * header gets: this one names a control somebody is about to operate, and it
+ * is the only thing saying what the field underneath it sets.
+ */
 .label {
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
 }
 
 /* The message an `aria-describedby` points at. Never the only signal -- the

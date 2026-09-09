@@ -198,8 +198,12 @@ export function SavedViewsPage() {
         {isBusy && (
           <div className={styles.skeletonStack} role="status" aria-busy="true">
             <VisuallyHidden as="div">Loading saved views</VisuallyHidden>
+            {/* `--row-height` and not a literal: the placeholder is a picture
+                of the rows that replace it, and the shell re-points that
+                token when density changes. A bar sized 2.75rem because 2.75rem
+                looked right once does not follow. */}
             {Array.from({ length: 4 }, (_unused, index) => (
-              <Skeleton key={index} width="100%" height="2.75rem" />
+              <Skeleton key={index} width="100%" height="var(--row-height)" />
             ))}
           </div>
         )}
@@ -262,9 +266,17 @@ export function SavedViewsPage() {
 
                       <ListRowMeta>
                         <span className={styles.rowActions}>
-                          <Badge
-                            tone={view.visibility === 'SHARED' ? 'accent' : 'neutral'}
-                          >
+                          {/*
+                            Neutral either way. A shared view wore the accent
+                            tone -- a cyan-tinted, cyan-lettered pill -- on a
+                            row you were not even on, which put a second cyan
+                            signal beside the one thing cyan means here: the
+                            2px mark down the selected row's leading edge. The
+                            badge already says the word "Shared"; it did not
+                            need the product's only "you are here" colour to
+                            say it twice.
+                          */}
+                          <Badge tone="neutral">
                             {visibilityLabel(view.visibility)}
                           </Badge>
                           <Menu
@@ -327,7 +339,7 @@ export function SavedViewsPage() {
                     <div className={styles.skeletonStack} role="status" aria-busy="true">
                       <VisuallyHidden as="div">Loading the view's issues</VisuallyHidden>
                       {Array.from({ length: 4 }, (_unused, index) => (
-                        <Skeleton key={index} width="100%" height="2.25rem" />
+                        <Skeleton key={index} width="100%" height="var(--row-height)" />
                       ))}
                     </div>
                   )}

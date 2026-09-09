@@ -4,7 +4,6 @@ import type { KeyboardEvent as ReactKeyboardEvent } from 'react'
 import {
   Dialog,
   Input,
-  Kbd,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -172,6 +171,15 @@ export function CommandPalette({
    * an element that is not there. */
   const activeItem: PaletteItem | null =
     items.length === 0 ? null : (items[Math.min(activeIndex, items.length - 1)] ?? null)
+
+  /* What the palette currently holds, in words, computed once. Read by the
+   * live region and drawn in the footer -- see the note at the status region
+   * for why those two must not be two expressions. */
+  const resultSummary = search.loading
+    ? 'Searching'
+    : items.length === 0
+      ? 'No results'
+      : `${String(items.length)} ${items.length === 1 ? 'result' : 'results'}`
 
   /**
    * Vector's product-wide keys, bound once, here.
@@ -452,34 +460,29 @@ export function CommandPalette({
             />
 
             {/*
-              The count, announced but not drawn.
+              The count, announced and drawn.
 
               `role="status"` is polite: it waits for the screen reader to
               finish its sentence rather than cutting across the letter the
               user just typed. Without it, a sighted user watches the list
               change and everyone else gets silence.
+
+              One string for both, and that is not tidiness. The footer's
+              count is `aria-hidden` decoration sitting beside a live region
+              saying the same thing, and the two computing it separately is
+              how the drawn one ends up reading "0 results" over a search
+              that is still out -- which is the same lie the list itself
+              refuses to tell.
             */}
             <div role="status" aria-live="polite">
-              <VisuallyHidden as="div">
-                {search.loading
-                  ? 'Searching'
-                  : items.length === 0
-                    ? 'No results'
-                    : `${String(items.length)} ${items.length === 1 ? 'result' : 'results'}`}
-              </VisuallyHidden>
+              <VisuallyHidden as="div">{resultSummary}</VisuallyHidden>
             </div>
 
             <div className={styles.footer} aria-hidden="true">
-              <span>
-                <Kbd>↑</Kbd>
-                <Kbd>↓</Kbd> to move
-              </span>
-              <span>
-                <Kbd>↵</Kbd> to run
-              </span>
-              <span>
-                <Kbd>Esc</Kbd> to close
-              </span>
+              <span>↑↓ to move</span>
+              <span>↵ to run</span>
+              <span>Esc to close</span>
+              <span className={styles.footerCount}>{resultSummary}</span>
             </div>
           </>
         )}

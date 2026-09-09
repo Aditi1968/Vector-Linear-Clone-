@@ -18,32 +18,123 @@
 /* ----------------------------------------------------------------- frame */
 
 /*
- * Setup renders outside `AppLayout`, so this is the whole viewport rather
- * than a pane inside a shell. There is no sidebar to leave room for: the
- * sidebar's links are built from a workspace slug that does not exist yet.
+ * Setup renders outside `AppLayout`, so `.shell` is the whole viewport rather
+ * than a pane inside one. Two columns, per
+ * `design/instrument/InstrumentOnboarding.dc.html`: a rail carrying the
+ * progress scale, and the step itself on measured ground.
+ *
+ * The rail borrows `--layout-sidebar-width`, which is what the product's own
+ * rail is, rather than restating the artboard's 300px. It is the same object
+ * doing the same job on a screen the sidebar cannot appear on -- its links
+ * are built from a workspace slug that does not exist yet.
+ */
+.shell {
+  display: grid;
+  grid-template-columns: var(--layout-sidebar-width) minmax(0, 1fr);
+  min-height: 100vh;
+  background-color: var(--color-bg-app);
+}
+
+/*
+ * One column below the shell's breakpoint. The literal `48rem` is
+ * `--layout-breakpoint-compact`, repeated because a media query cannot read a
+ * custom property; change both together.
+ */
+@media (max-width: 48rem) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.rail {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  justify-content: space-between;
+  padding: var(--space-8) var(--space-8) var(--space-7);
+  border-right: var(--border-width) solid var(--color-border-subtle);
+  background-color: var(--color-bg-sunken);
+}
+
+@media (max-width: 48rem) {
+  .rail {
+    border-right: none;
+    border-bottom: var(--border-width) solid var(--color-border-subtle);
+  }
+}
+
+/*
+ * The step, on the measured surface. The grid and the fade that dissolves it
+ * are pseudo-elements: painted, never in the accessibility tree, no extra
+ * DOM. Always the pair -- an unfaded grid running to the edges reads as a
+ * texture applied to the page, where one dissolving toward the middle reads
+ * as a surface the form is sitting on.
+ */
+.content {
+  position: relative;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  padding: var(--space-9) var(--space-8);
+}
+
+.content::before,
+.content::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.content::before {
+  background-image: var(--pattern-grid);
+  background-size: var(--pattern-grid-size) var(--pattern-grid-size);
+}
+
+.content::after {
+  background-image: var(--pattern-grid-fade);
+}
+
+/*
+ * The plain ground, for the states that stand in for a whole screen rather
+ * than sitting on one: the layout's own loading and error branches, and the
+ * invitation-acceptance page, which has no progress to draw.
  */
 .page {
   display: flex;
   min-height: 100vh;
   justify-content: center;
   padding: var(--space-9) var(--space-5);
-  background-color: var(--color-bg-sunken);
+  background-color: var(--color-bg-app);
 }
 
 .frame {
+  position: relative;
+  z-index: var(--z-raised);
   width: 100%;
   max-width: 34rem;
 }
 
 .brand {
   display: flex;
-  gap: var(--space-3);
+  gap: var(--space-3-5);
   align-items: center;
-  margin-bottom: var(--space-7);
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-tight);
+}
+
+/* Icons size themselves in `em` and stroke themselves in `currentColor`. */
+.brandMark {
+  color: var(--color-text-accent);
+  font-size: var(--text-lg);
+}
+
+/* `.page` still stacks, so the brand there needs the gap it used to get from
+ * the old flow. In the rail, `.rail`'s own `justify-content` does that job. */
+.page .brand {
+  margin-bottom: var(--space-7);
 }
 
 .loading {
@@ -53,93 +144,136 @@
   color: var(--color-text-muted);
 }
 
-/* ------------------------------------------------------------ step meter */
+/* ------------------------------------------------------- calibrated scale */
 
+/*
+ * Not a meter and not a breadcrumb: a scale, with one row per graduation and
+ * a hairline between each. The rules close top and bottom -- `border-top` per
+ * item plus a `border-bottom` on the list -- so the scale reads as a bounded
+ * instrument rather than as four floating rows.
+ */
 .steps {
   display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2) var(--space-5);
-  margin-bottom: var(--space-7);
+  flex-direction: column;
   padding: 0;
+  border-bottom: var(--border-width) solid var(--color-border-subtle);
   list-style: none;
 }
 
 .stepItem {
-  display: flex;
-  gap: var(--space-3);
+  display: grid;
+  grid-template-columns: var(--space-8) minmax(0, 1fr) auto;
+  gap: var(--space-5-5);
   align-items: center;
-  color: var(--color-text-faint);
-  font-size: var(--text-xs);
+  padding: var(--space-6) 0;
+  border-top: var(--border-width) solid var(--color-border-subtle);
 }
 
 /*
- * Keyed off `data-state`, which the component sets from the same comparison
- * that sets `aria-current`. One source for both, so the dot a sighted user
- * sees and the state a screen reader announces cannot disagree.
+ * Every rule below is keyed off `data-state`, which the component sets from
+ * the same comparison that sets `aria-current`. One source for both, so the
+ * dot a sighted user sees and the state a screen reader announces cannot
+ * disagree.
  */
 .stepItem[data-state='current'] {
-  color: var(--color-text-primary);
-  font-weight: var(--weight-medium);
+  border-top-color: var(--color-border-strong);
 }
 
-.stepItem[data-state='done'] {
+.stepIndex {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
+}
+
+.stepItem[data-state='current'] .stepIndex,
+.stepItem[data-state='done'] .stepIndex {
+  color: var(--color-text-accent);
+}
+
+.stepLabel {
+  color: var(--color-text-faint);
+  font-size: var(--text-sm);
+}
+
+.stepItem[data-state='current'] .stepLabel {
+  color: var(--color-text-heading);
+  font-weight: var(--weight-semibold);
+}
+
+.stepItem[data-state='done'] .stepLabel {
   color: var(--color-text-muted);
 }
 
-.stepMarker {
+.stepMark {
   display: inline-flex;
-  width: var(--glyph-column);
-  height: var(--glyph-column);
   align-items: center;
-  justify-content: center;
-  border: var(--border-width) solid var(--color-border);
+  justify-content: flex-end;
+}
+
+.stepDot {
+  width: var(--space-3);
+  height: var(--space-3);
   border-radius: var(--radius-full);
-  font-size: var(--text-2xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.stepItem[data-state='current'] .stepMarker {
-  border-color: var(--color-accent-border);
   background-color: var(--color-accent);
-  color: var(--color-text-on-accent);
 }
 
-.stepItem[data-state='done'] .stepMarker {
-  border-color: var(--color-success-border);
-  background-color: var(--color-success-subtle);
+.stepTick {
   color: var(--color-text-success);
+  font-size: var(--text-xs);
 }
 
-/* ------------------------------------------------------------------ card */
+.counter {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
+}
 
+/* ------------------------------------------------------------------ step */
+
+/*
+ * No card. The step sits directly on the measured ground, because a panel
+ * floating over a grid is two surfaces where the design draws one -- and the
+ * grid is only worth having on ground the eye can actually see.
+ */
 .step {
   display: flex;
   flex-direction: column;
-  gap: var(--space-5);
-  padding: var(--space-7);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background-color: var(--color-surface);
-  box-shadow: var(--shadow-sm);
+  gap: var(--space-6-5);
 }
 
+/*
+ * DERIVED: 44px, by the same rule as the entry screen's wordmark --
+ * `--text-3xl` (26px) is the top of the scale, which is built for a dense
+ * product surface, so the two display sizes on the signed-out screens are
+ * derived from `--text-lg` rather than written as literals. `clamp` against a
+ * viewport unit keeps it from swamping a phone.
+ */
 .title {
-  font-size: var(--text-xl);
+  font-size: clamp(var(--text-xl), 7vw, calc(var(--text-lg) * 2.75));
   font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-tight);
+  letter-spacing: var(--tracking-tighter);
   line-height: var(--leading-tight);
 }
 
 .subtitle {
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
   font-weight: var(--weight-semibold);
 }
 
+/* Pulled up under the title: the lede belongs to the heading, not to the
+ * field below it, and the column's own gap would set it adrift between the
+ * two. */
 .lede {
-  margin-top: calc(-1 * var(--space-3));
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
+  margin-top: calc(-1 * var(--space-5));
+  max-width: 30rem;
+  color: var(--color-text-muted);
+  font-size: var(--text-lg);
   line-height: var(--leading-relaxed);
+  text-wrap: pretty;
 }
 
 /* ----------------------------------------------------------------- forms */
@@ -147,12 +281,23 @@
 .field {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
+  gap: var(--space-4);
 }
 
+/*
+ * The mono micro-label, as on the auth screens: uppercase, widely tracked,
+ * and transformed in CSS rather than written in capitals -- the accessible
+ * name is computed from the DOM, so "Workspace name" is what a screen reader
+ * announces and what the E2E suite's `getByLabel` finds, whatever the glyphs
+ * are doing.
+ */
 .label {
-  font-size: var(--text-sm);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
   font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
 }
 
 .hint {
@@ -220,21 +365,31 @@
  */
 .advance {
   display: inline-flex;
-  height: var(--control-height-md);
+  /* DERIVED: 46px, and the same arithmetic the entry screen uses. The
+   * signed-out controls stand a spacing step above the shell's tallest, and
+   * nothing in the token file names that height -- the scale is built for a
+   * surface where a 46px button sits in a list of 34px rows. */
+  height: calc(var(--control-height-lg) + var(--space-3-5));
   align-items: center;
-  padding: 0 var(--space-5);
-  border: var(--border-width) solid var(--color-accent-border);
+  padding: 0 var(--space-7);
+  /* Brushed silver, lit along its top edge only -- the product's one
+   * inverted control, and the same face the entry screen's "Sign in" wears.
+   * A machined surface catches the light on one edge and nowhere else, and
+   * that white hairline is the whole difference between a silver fill and a
+   * milled control. */
+  border: var(--border-width) solid var(--color-primary-border);
+  border-top-color: var(--color-primary-border-top);
   border-radius: var(--radius-md);
-  background-color: var(--color-accent);
-  color: var(--color-text-on-accent);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
+  background-image: var(--gradient-primary);
+  color: var(--color-text-on-primary);
+  font-size: var(--text-md);
+  font-weight: var(--weight-semibold);
   text-decoration: none;
   transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
 .advance:hover {
-  background-color: var(--color-accent-hover);
+  background-image: var(--gradient-primary-hover);
 }
 
 /* ---------------------------------------------------------------- invite */

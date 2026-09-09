@@ -1,0 +1,45 @@
+/*
+ * What the search screen says that `screens.module.css` cannot.
+ *
+ * The geometry -- the stack, the panel, the rows, the footnotes -- is shared
+ * with six other screens and stays there; duplicating it here is how six
+ * panels end up with five different paddings. Only the two things the
+ * Instrument direction reads differently live in this file: the name of a
+ * group of results, and how many are in it.
+ *
+ * Every value comes from `src/styles/tokens.css`. No literal hex, no literal
+ * pixel.
+ */
+
+/**
+ * "Issues", "Projects" -- the mono micro-label, uppercase and widely tracked.
+ *
+ * Still an `<h2>`, and still the accessible name of the section it heads: the
+ * markup did not move, only the face. The tracking is what does the work here.
+ * Unspaced 10.5px capitals set solid and read as damage, where 0.14em of them
+ * reads as an instrument legend rather than as a heading somebody shrank.
+ *
+ * `--color-text-faint` where the artboard draws `#626c7d`. That value is 3.7:1
+ * and this is a word; the token file states no word in the product goes below
+ * 4.5:1, and one step brighter is cheaper than an exception to that rule.
+ */
+.sectionTitle {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+}
+
+/* The count beside it. Tabular figures, so a two-digit count does not shove
+ * the heading it sits beside when a keystroke changes the results. */
+.sectionCount {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+}

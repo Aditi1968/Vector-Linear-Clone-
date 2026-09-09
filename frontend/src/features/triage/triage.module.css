@@ -27,10 +27,25 @@
   min-width: 14rem;
 }
 
+/*
+ * A property label, in the direction's structural voice: mono, uppercase,
+ * widely tracked. The same legend the rail's section names wear and the same
+ * one the artboards put over every property row.
+ *
+ * `--color-text-muted` (7.9:1) rather than the `--color-text-faint` a column
+ * header gets. A column header is glanced at; this one names a control
+ * somebody is about to operate, and it is the only thing saying what the
+ * select underneath it sets. The artboard paints property labels `#626c7d`
+ * (3.7:1) -- below this codebase's 4.5:1 floor for a word, so the token moves
+ * up rather than the floor moving down.
+ */
 .label {
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
 }
 
 /*
@@ -47,8 +62,11 @@
   line-height: var(--leading-normal);
 }
 
+/* The figures inside that sentence, set as the readout they are: mono and
+ * tabular, so "1 of 41" reads as two measurements rather than two words. */
 .count {
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--numeric-tabular);
 }
 
 /* ----------------------------------------------------------------- rows */
@@ -60,9 +78,18 @@
   align-items: center;
 }
 
-/* How long the issue has been waiting. Tabular so the column lines up. */
+/*
+ * How long the issue has been waiting.
+ *
+ * The artboard's trailing column is mono at 11px, and an age is exactly what
+ * that column carries -- a measurement, down a column, that has to line up.
+ * Colour is inherited from `IssueRow`'s `.meta`, which already paints it
+ * `--color-text-faint`; restating it here would be a second place to change.
+ */
 .age {
-  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
   white-space: nowrap;
 }
 

@@ -1,233 +1,294 @@
 /*
- * Styles for the public landing page.
+ * The entry screen.
  *
- * Every value is a token from `src/styles/tokens.css`; there is no literal
- * colour and no magic measurement, so dark mode needs nothing here and a
- * palette change is a change to one file.
+ * `design/instrument/Main.dc.html` is the specification and this file is its
+ * translation: an engineering grid dissolving toward the centre, a ruler
+ * across the top, the mark between two hairlines, the wordmark in brushed
+ * silver, one mono line, and the two ways in.
  *
- * Motion is confined to the hover/focus transitions below. `base.css`
+ * Every value is a token from `src/styles/tokens.css` with two exceptions,
+ * both marked DERIVED where they are used. The scale in that file is built
+ * for a dense product surface -- it tops out at 26px of type and 36px of
+ * control -- and this is the one screen in Vector drawn at display size, so
+ * the wordmark and the two doors are derived from tokens by arithmetic rather
+ * than written as literals.
+ *
+ * Motion is confined to the hover and focus transitions below; `base.css`
  * collapses those under `prefers-reduced-motion: reduce`, and there is no
- * scroll-triggered animation, parallax or autoplay on this page to switch off.
+ * scroll-triggered animation, parallax or autoplay on this page to switch
+ * off.
  */
 
 .page {
+  position: relative;
+  display: flex;
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-10) var(--layout-content-padding-inline) var(--space-9);
+  overflow: hidden;
+  background-color: var(--color-bg-app);
+
+  /* DERIVED: the signed-out doors stand at 46px, against the shell's tallest
+   * control at 36px. Nothing names that height, because a 46px button inside
+   * a list of 34px rows would be enormous and the scale is built for the
+   * list. Derived from the tallest control token plus one spacing step, in
+   * one place, so the two buttons cannot drift apart. */
+  --entry-control-height: calc(var(--control-height-lg) + var(--space-3-5));
+}
+
+/*
+ * The measured ground: the grid, and the fade that dissolves it.
+ *
+ * Two pseudo-elements rather than two more divs -- they are painted, they are
+ * never in the accessibility tree, and there is nothing for `aria-hidden` to
+ * do. `--pattern-grid` without `--pattern-grid-fade` reads as a texture
+ * applied to the page; the pair reads as a surface the content is sitting on,
+ * which is the entire reason the direction has a grid at all.
+ */
+.page::before,
+.page::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.page::before {
+  background-image: var(--pattern-grid);
+  background-size: var(--pattern-grid-size) var(--pattern-grid-size);
+}
+
+.page::after {
+  background-image: var(--pattern-grid-fade);
+}
+
+/* ----------------------------------------------------------------- ruler */
+
+/*
+ * Ticks, not decoration. The design draws 24 of them at a fixed 60px on a
+ * 1440px board; here they flex, so a phone gets the same 24 marks across a
+ * narrower ruler rather than the first six and then the edge of the screen.
+ */
+.ruler {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  height: var(--space-7);
+  align-items: flex-end;
+  border-bottom: var(--border-width) solid var(--color-border-subtle);
+}
+
+.tick,
+.tickMajor {
+  flex: 1 1 0;
+  border-left: var(--border-width) solid var(--color-border-subtle);
+}
+
+.tick {
+  height: var(--space-3);
+}
+
+.tickMajor {
+  height: var(--space-5);
+  border-left-color: var(--color-border-strong);
+}
+
+/* ----------------------------------------------------------------- entry */
+
+.entry {
+  position: relative;
+  z-index: var(--z-raised);
   display: flex;
   flex-direction: column;
-  min-height: 100dvh;
-  background-color: var(--color-bg-app);
-}
-
-/* ---------------------------------------------------------------- header */
-
-.header {
-  display: flex;
-  gap: var(--space-6);
+  gap: var(--space-9);
   align-items: center;
-  justify-content: space-between;
-  max-width: var(--layout-content-max-width);
-  width: 100%;
-  margin: 0 auto;
-  padding: var(--space-6) var(--layout-content-padding-inline);
-}
-
-.brand {
-  display: inline-flex;
-  gap: var(--space-4);
-  align-items: center;
-  color: var(--color-text-primary);
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-tight);
-  text-decoration: none;
-}
-
-.brandMark {
-  font-size: var(--text-lg);
-  color: var(--color-text-accent);
-}
-
-.headerActions {
-  display: flex;
-  gap: var(--space-5);
-  align-items: center;
-}
-
-.headerLink {
-  color: var(--color-text-secondary);
-  font-weight: var(--weight-medium);
-  text-decoration: none;
-  transition: color var(--duration-fast) var(--ease-standard);
-}
-
-.headerLink:hover {
-  color: var(--color-text-primary);
-}
-
-/* ------------------------------------------------------------------ hero */
-
-.hero {
-  max-width: 46rem;
-  margin: 0 auto;
-  padding: var(--space-10) var(--layout-content-padding-inline) var(--space-9);
   text-align: center;
 }
 
-.eyebrow {
-  color: var(--color-text-accent);
-  font-size: var(--text-xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  align-items: center;
+}
+
+.mark {
+  display: inline-flex;
+  gap: var(--space-5-5);
+  align-items: center;
+  color: var(--color-accent-glyph);
+  text-decoration: none;
+}
+
+/*
+ * Hairlines that dissolve outward, so the mark reads as a datum on a scale
+ * rather than as a logo in a box. One class, mirrored on the right-hand copy:
+ * a second gradient written the other way round is a second value to keep in
+ * step for no gain.
+ */
+.markRule {
+  width: var(--space-9);
+  height: var(--border-width);
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-border-strong)
+  );
+}
+
+.markRule:last-child {
+  transform: scaleX(-1);
+}
+
+/* Icons size themselves in `em`, so this is how big the mark is. */
+.markGlyph {
+  font-size: var(--text-3xl);
+}
+
+/*
+ * The wordmark, in brushed metal.
+ *
+ * DERIVED: 96px. `--text-3xl` (26px) is the top of the scale, so the display
+ * size is six steps of `--text-lg` rather than a literal. `clamp` against a
+ * viewport unit is safe here in a way it would not be for a sentence -- this
+ * is one word, so there is no line break to protect and nothing reflows
+ * mid-thought as the window is dragged.
+ *
+ * The metal stops at the wordmark. Body copy stays on its token colour: flat
+ * silver is a mid-tone, and a paragraph painted in it would fall below the
+ * contrast the palette is built to guarantee. One glyph-height headline can
+ * carry a gradient; a page of prose cannot.
+ *
+ * `color` is set before the `@supports` block and not inside it, because the
+ * fallback is not a nicety: without `background-clip: text` a transparent
+ * `color` makes the product's own name an invisible rectangle.
+ */
+.wordmark {
+  color: var(--color-text-bright);
+  font-size: clamp(var(--text-2xl), 13vw, calc(var(--text-lg) * 6));
+  font-weight: var(--weight-bold);
+  letter-spacing: var(--tracking-tighter);
+  line-height: var(--leading-none);
+}
+
+@supports (background-clip: text) or (-webkit-background-clip: text) {
+  .wordmark {
+    background-image: var(--gradient-primary);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+/*
+ * `--tracking-brand` and not one of the `--label-mono-tracking-*` pairs: this
+ * line is the wordmark's extension rather than a label on something, and the
+ * mono label tokens track tighter than the design draws it.
+ */
+.tagline {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-brand);
   text-transform: uppercase;
 }
 
-/* Set in rem against the type scale's top end rather than a viewport unit: a
- * `clamp()` on `vw` reflows the headline mid-sentence as a window is resized,
- * and this line has to break in the right place at every width. */
-.heroTitle {
-  margin-top: var(--space-6);
-  font-size: var(--text-2xl);
-  line-height: var(--leading-tight);
+/* ----------------------------------------------------------------- doors */
+
+.ways {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6-5);
+  align-items: center;
 }
 
-.heroLead {
-  margin-top: var(--space-6);
-  color: var(--color-text-secondary);
-  font-size: var(--text-md);
-  line-height: var(--leading-relaxed);
-}
-
-.heroActions {
+.doors {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-5);
   justify-content: center;
-  margin-top: var(--space-8);
-}
-
-.heroNote {
-  margin-top: var(--space-7);
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
 }
 
 /*
- * The calls to action are anchors dressed as buttons, so they are styled here
- * rather than by `components/Button` -- that component is a real `<button>`
- * and navigation belongs to a link.
+ * The two calls to action are anchors dressed as buttons, so they are styled
+ * here rather than by `components/Button` -- that component is a real
+ * `<button>`, and navigation belongs to a link.
  */
 .primaryCta,
 .secondaryCta {
   display: inline-flex;
+  height: var(--entry-control-height);
   align-items: center;
-  min-height: var(--control-height-md);
-  padding: var(--space-4) var(--space-7);
+  justify-content: center;
+  padding: 0 var(--space-8);
+  border: var(--border-width) solid transparent;
   border-radius: var(--radius-md);
-  font-weight: var(--weight-medium);
+  font-size: var(--text-md);
   text-decoration: none;
   transition:
     background-color var(--duration-fast) var(--ease-standard),
     border-color var(--duration-fast) var(--ease-standard);
 }
 
+/*
+ * The one inverted control in the product: dark ink on brushed metal, lit
+ * along its top edge only. A machined face catches the light on one edge and
+ * nowhere else, and that white hairline is the whole difference between "a
+ * silver fill" and "a milled control".
+ */
 .primaryCta {
-  border: var(--border-width) solid var(--color-accent-border);
-  background-color: var(--color-accent);
-  color: var(--color-text-on-accent);
+  border-color: var(--color-primary-border);
+  border-top-color: var(--color-primary-border-top);
+  background-image: var(--gradient-primary);
+  color: var(--color-text-on-primary);
+  font-weight: var(--weight-semibold);
 }
 
 .primaryCta:hover {
-  background-color: var(--color-accent-hover);
+  background-image: var(--gradient-primary-hover);
 }
 
+/*
+ * `--color-border-control` rather than the design's softer card edge. This is
+ * a control a visitor operates, and WCAG 1.4.11 puts its visible boundary at
+ * 3:1 where the design's value is 1.5:1 on this ground.
+ */
 .secondaryCta {
-  border: var(--border-width) solid var(--color-border-control);
+  border-color: var(--color-border-control);
   background-color: var(--color-surface);
   color: var(--color-text-primary);
+  font-weight: var(--weight-medium);
 }
 
 .secondaryCta:hover {
   background-color: var(--color-surface-hover);
 }
 
-/* ---------------------------------------------------------- capabilities */
+/* --------------------------------------------------------------- readout */
 
-.capabilities,
-.closing {
-  max-width: var(--layout-content-max-width);
-  width: 100%;
-  margin: 0 auto;
-  padding: var(--space-9) var(--layout-content-padding-inline);
-}
-
-.sectionTitle {
-  font-size: var(--text-xl);
-  text-align: center;
-}
-
-/* `auto-fit` with a minimum, so the grid reflows from three columns to one
- * without a media query and without a breakpoint to keep in step with the
- * shell's. */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(17rem, 1fr));
-  gap: var(--space-6);
-  margin-top: var(--space-8);
-}
-
-.capability {
-  padding: var(--space-7);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background-color: var(--color-surface);
-}
-
-.capabilityIcon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--space-9);
-  height: var(--space-9);
-  border-radius: var(--radius-md);
-  background-color: var(--color-accent-subtle);
-  color: var(--color-text-accent);
-  font-size: var(--text-lg);
-}
-
-.capabilityTitle {
-  margin-top: var(--space-6);
-  font-size: var(--text-md);
-}
-
-.capabilityBody {
-  margin-top: var(--space-4);
-  color: var(--color-text-secondary);
-  line-height: var(--leading-relaxed);
-}
-
-/* --------------------------------------------------------------- closing */
-
-.closing {
+/*
+ * `--color-text-faint` and not the design's #626c7d: that value is 3.7:1 on
+ * ground and this is a sentence. The palette has no text token below AA on
+ * purpose, so the readout takes the next one up.
+ */
+.readout {
   display: flex;
-  flex-direction: column;
-  gap: var(--space-6);
+  gap: var(--space-3-5);
   align-items: center;
-  text-align: center;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  letter-spacing: var(--label-mono-tracking-lg);
+  text-transform: uppercase;
 }
 
-.closingLead {
-  max-width: 34rem;
-  color: var(--color-text-secondary);
-  line-height: var(--leading-relaxed);
-}
-
-/* ---------------------------------------------------------------- footer */
-
-.footer {
-  max-width: var(--layout-content-max-width);
-  width: 100%;
-  margin: auto auto 0;
-  padding: var(--space-7) var(--layout-content-padding-inline);
-  border-top: var(--border-width) solid var(--color-border-subtle);
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
+.readoutDot {
+  width: var(--space-3);
+  height: var(--space-3);
+  border-radius: var(--radius-full);
+  background-color: var(--color-success);
 }

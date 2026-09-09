@@ -24,6 +24,7 @@ import { memberLabel, useWorkspaceContext } from '../issues/api'
 import { describePriority, priorityLevel } from '../issues/lib/priority'
 import { formatDay, projectStateLabel, projectStateTone } from '../projects/lib/projects'
 import styles from '../screens.module.css'
+import legend from './search.module.css'
 import { useSearch } from './api'
 
 /** The URL parameter the query lives in. `?q=` is what a user expects to see. */
@@ -203,10 +204,10 @@ export function SearchPage() {
           {showResults && issues.length > 0 && (
             <section className={styles.panel} aria-labelledby="search-issues">
               <div className={styles.panelHeader}>
-                <h2 className={styles.panelTitle} id="search-issues">
+                <h2 className={legend.sectionTitle} id="search-issues">
                   Issues
                 </h2>
-                <span className={styles.footnote}>{issues.length}</span>
+                <span className={legend.sectionCount}>{issues.length}</span>
               </div>
 
               <div className={styles.panelBody}>
@@ -268,10 +269,10 @@ export function SearchPage() {
           {showResults && projects.length > 0 && (
             <section className={styles.panel} aria-labelledby="search-projects">
               <div className={styles.panelHeader}>
-                <h2 className={styles.panelTitle} id="search-projects">
+                <h2 className={legend.sectionTitle} id="search-projects">
                   Projects
                 </h2>
-                <span className={styles.footnote}>{projects.length}</span>
+                <span className={legend.sectionCount}>{projects.length}</span>
               </div>
 
               <div className={styles.panelBody}>

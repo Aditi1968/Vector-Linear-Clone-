@@ -95,6 +95,12 @@ export function BoardColumn({
     <section
       aria-labelledby={headingId}
       className={styles.column}
+      // The channel bar under the legend is tinted from this, in CSS. The
+      // category and not a colour: a component that computed the hue would
+      // have to be taught the palette, and a column grouped by assignee has
+      // no category to state -- so it states nothing and keeps the neutral
+      // rule rather than picking a status it is not.
+      data-category={category ?? undefined}
       data-droppable={isDroppable ? '' : undefined}
       onDragOver={handleDragOver}
       onDrop={handleDrop}

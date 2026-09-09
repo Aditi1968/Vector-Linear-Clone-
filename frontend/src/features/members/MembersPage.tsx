@@ -4,7 +4,6 @@ import { PageContent, PageHeader } from '../../app/layout'
 import { useWorkspace } from '../../app/workspace'
 import {
   Avatar,
-  Badge,
   Button,
   Dialog,
   EmptyState,
@@ -20,10 +19,11 @@ import {
   TeamIcon,
   VisuallyHidden,
 } from '../../components'
-import type { BadgeTone, MenuItem } from '../../components'
+import type { MenuItem } from '../../components'
 import { formatAbsolute } from '../issues/lib/dates'
 import { onboardingPaths } from '../onboarding/lib/progress'
-import styles from '../screens.module.css'
+import shared from '../screens.module.css'
+import styles from './Members.module.css'
 import {
   useInvitations,
   useMemberActions,
@@ -50,12 +50,6 @@ const ROLES: readonly { value: WorkspaceRole; label: string; short: string }[] =
   { value: 'ADMIN', label: 'Admin -- can also manage teams and people', short: 'Admin' },
   { value: 'OWNER', label: 'Owner -- full control of the workspace', short: 'Owner' },
 ]
-
-const ROLE_TONE: Record<WorkspaceRole, BadgeTone> = {
-  MEMBER: 'neutral',
-  ADMIN: 'info',
-  OWNER: 'success',
-}
 
 function roleLabel(role: WorkspaceRole): string {
   return ROLES.find((entry) => entry.value === role)?.short ?? role
@@ -219,9 +213,9 @@ export function MembersPage() {
       />
 
       <PageContent>
-        <div className={styles.stack}>
+        <div className={shared.stack}>
           {actionError !== null && (
-            <p className={styles.formError} role="alert">
+            <p className={shared.formError} role="alert">
               {actionError}
             </p>
           )}
@@ -229,19 +223,19 @@ export function MembersPage() {
             <VisuallyHidden as="div">{status ?? ''}</VisuallyHidden>
           </div>
 
-          <section className={styles.panel} aria-labelledby="members-people">
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle} id="members-people">
+          <section className={shared.panel} aria-labelledby="members-people">
+            <div className={shared.panelHeader}>
+              <h2 className={styles.sectionLabel} id="members-people">
                 People
               </h2>
               {!canManage && (
-                <span className={styles.footnote}>
+                <span className={shared.footnote}>
                   Only admins and owners can change roles or remove people.
                 </span>
               )}
             </div>
 
-            <div className={styles.panelBody}>
+            <div className={shared.panelBody}>
               {isLoading && <Spinner label="Loading members" />}
 
               {!isLoading && errorMessage !== null && members.length === 0 && (
@@ -311,17 +305,21 @@ export function MembersPage() {
                               back to the email for an account that never set
                               a name, and printing it twice reads as a bug. */}
                           {member.name !== null && (
-                            <span className={styles.rowSub}>{member.email}</span>
+                            <span className={shared.rowSub}>{member.email}</span>
                           )}
                         </ListRowMain>
 
                         <ListRowMeta>
-                          <Badge tone={ROLE_TONE[member.role]}>
+                          {/* Readouts, not pills. `roleLabel` still returns
+                              "Admin" rather than "ADMIN" -- the capitals are
+                              CSS, so what a screen reader receives is a word
+                              and not an acronym it may spell out. */}
+                          <span className={styles.role}>
                             {roleLabel(member.role)}
-                          </Badge>
+                          </span>
 
                           <time
-                            className={styles.rowSub}
+                            className={styles.joined}
                             dateTime={member.createdAt}
                             title={member.createdAt}
                           >
@@ -346,25 +344,25 @@ export function MembersPage() {
           </section>
 
           {canManage && (
-            <section className={styles.panel} aria-labelledby="members-invites">
-              <div className={styles.panelHeader}>
-                <h2 className={styles.panelTitle} id="members-invites">
+            <section className={shared.panel} aria-labelledby="members-invites">
+              <div className={shared.panelHeader}>
+                <h2 className={styles.sectionLabel} id="members-invites">
                   Invitations
                 </h2>
               </div>
 
-              <div className={styles.panelBody}>
+              <div className={shared.panelBody}>
                 {/* Stated before anyone submits, not after. Discovering that
                     no email was sent *after* closing the page is discovering
                     it too late. */}
-                <p className={styles.notice}>
+                <p className={shared.notice}>
                   <strong>Vector cannot send email.</strong> Creating an
                   invitation gives you a link, shown here once and never again.
                   You send it to the person yourself.
                 </p>
 
                 <form
-                  className={styles.form}
+                  className={shared.form}
                   noValidate
                   onSubmit={(event) => {
                     event.preventDefault()
@@ -372,14 +370,14 @@ export function MembersPage() {
                   }}
                 >
                   {otherErrors.length > 0 && (
-                    <p className={styles.fieldError} role="alert">
+                    <p className={shared.fieldError} role="alert">
                       {otherErrors.map((entry) => entry.message).join(' ')}
                     </p>
                   )}
 
-                  <div className={styles.fieldRow}>
-                    <div className={styles.field}>
-                      <label className={styles.label} htmlFor={emailId}>
+                  <div className={shared.fieldRow}>
+                    <div className={shared.field}>
+                      <label className={shared.label} htmlFor={emailId}>
                         Email address
                       </label>
                       <Input
@@ -399,14 +397,14 @@ export function MembersPage() {
                         }}
                       />
                       {emailErrors.length > 0 && (
-                        <p className={styles.fieldError} id={emailErrorId}>
+                        <p className={shared.fieldError} id={emailErrorId}>
                           {emailErrors.map((entry) => entry.message).join(' ')}
                         </p>
                       )}
                     </div>
 
-                    <div className={styles.field}>
-                      <label className={styles.label} htmlFor={roleId}>
+                    <div className={shared.field}>
+                      <label className={shared.label} htmlFor={roleId}>
                         Role
                       </label>
                       <Select
@@ -441,18 +439,18 @@ export function MembersPage() {
 
                 {issued.length > 0 && (
                   <>
-                    <h3 className={styles.label}>Links to send</h3>
-                    <ul className={styles.stack}>
+                    <h3 className={styles.sectionLabel}>Links to send</h3>
+                    <ul className={shared.stack}>
                       {issued.map((invitation) => (
-                        <li className={styles.tight} key={invitation.invitation.id}>
-                          <p className={styles.footnote}>
+                        <li className={styles.issuedInvite} key={invitation.invitation.id}>
+                          <p className={shared.footnote}>
                             {invitation.invitation.email} &middot;{' '}
                             {roleLabel(invitation.invitation.role)}
                           </p>
                           {/* The link as selectable text and not only behind
                               a button, because the clipboard can be refused
                               and this string cannot be fetched again. */}
-                          <p className={styles.secret}>{invitation.link}</p>
+                          <p className={shared.secret}>{invitation.link}</p>
                           {/*
                             `aria-label` rather than appended hidden text.
                             An accessible name concatenates each node's
@@ -482,7 +480,7 @@ export function MembersPage() {
                      Rendered rather than swallowed: a demotion in another tab
                      lands exactly here, and an empty panel would read as "no
                      invitations". */
-                  <p className={styles.formError} role="alert">
+                  <p className={shared.formError} role="alert">
                     {invitationsQuery.errorMessage}
                   </p>
                 )}
@@ -490,7 +488,7 @@ export function MembersPage() {
                 {!invitationsQuery.isLoading &&
                   invitationsQuery.errorMessage === null &&
                   invitationsQuery.invitations.length === 0 && (
-                    <p className={styles.footnote}>
+                    <p className={shared.footnote}>
                       No invitations are outstanding.
                     </p>
                   )}
@@ -501,15 +499,15 @@ export function MembersPage() {
                       <ListRow key={invitation.id}>
                         <ListRowMain>
                           {invitation.email}
-                          <span className={styles.rowSub}>
+                          <span className={shared.rowSub}>
                             Expires {formatAbsolute(invitation.expiresAt)}
                           </span>
                         </ListRowMain>
 
                         <ListRowMeta>
-                          <Badge tone={ROLE_TONE[invitation.role]}>
+                          <span className={styles.role}>
                             {roleLabel(invitation.role)}
-                          </Badge>
+                          </span>
 
                           <Button
                             size="sm"
@@ -550,7 +548,7 @@ export function MembersPage() {
             : `${memberName(pendingRemoval)} will lose access to ${workspace.name}. They can be invited back, but this cannot be undone from here.`
         }
         footer={
-          <div className={styles.rowActions}>
+          <div className={shared.rowActions}>
             <Button
               onClick={() => {
                 setPendingRemoval(null)

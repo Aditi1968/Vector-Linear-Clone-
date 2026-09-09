@@ -4,8 +4,10 @@ import {
   availableTeams,
   closedCount,
   formatDay,
+  isTargetLate,
   issuesInMilestone,
   leadLabel,
+  projectHealth,
   resolveTeams,
 } from './projects'
 import type { ProjectIssue, ProjectMember, ProjectTeam } from '../api'
@@ -131,5 +133,72 @@ describe('the derivations the server does not do', () => {
     // caller of this says "closed" rather than "done".
     expect(closedCount([mine, alsoMine])).toBe(1)
     expect(closedCount([])).toBe(0)
+  })
+})
+
+describe('a late target date', () => {
+  // Mid-afternoon on the 14th, in the timezone the suite happens to run in.
+  // The instant matters: the comparison is day-against-day, and the bug this
+  // pins is comparing a UTC midnight against a local `now`.
+  const afternoonOfThe14th = new Date(2026, 2, 14, 15, 30).getTime()
+
+  it('is not late on the day it is due, at any hour of that day', () => {
+    const dawn = new Date(2026, 2, 14, 0, 1).getTime()
+
+    expect(isTargetLate({ state: 'STARTED', targetDate: '2026-03-14' }, dawn)).toBe(false)
+    expect(
+      isTargetLate({ state: 'STARTED', targetDate: '2026-03-14' }, afternoonOfThe14th),
+    ).toBe(false)
+  })
+
+  it('is late the day after', () => {
+    expect(
+      isTargetLate({ state: 'STARTED', targetDate: '2026-03-13' }, afternoonOfThe14th),
+    ).toBe(true)
+  })
+
+  it('is never late once the project is closed', () => {
+    // A project that finished after its target is a fact about the past. An
+    // alarm nobody can act on is not a reading.
+    expect(
+      isTargetLate({ state: 'COMPLETED', targetDate: '2026-01-01' }, afternoonOfThe14th),
+    ).toBe(false)
+    expect(
+      isTargetLate({ state: 'CANCELED', targetDate: '2026-01-01' }, afternoonOfThe14th),
+    ).toBe(false)
+  })
+
+  it('says nothing about a project with no target, or an unparseable one', () => {
+    expect(isTargetLate({ state: 'STARTED', targetDate: null }, afternoonOfThe14th)).toBe(false)
+    expect(isTargetLate({ state: 'STARTED', targetDate: 'someday' }, afternoonOfThe14th)).toBe(
+      false,
+    )
+  })
+})
+
+describe('projectHealth', () => {
+  const now = new Date(2026, 2, 14, 15, 30).getTime()
+
+  it('reads a running project on its date as on track', () => {
+    expect(projectHealth({ state: 'STARTED', targetDate: '2026-03-14' }, now)).toBe('on-track')
+  })
+
+  it('reads a paused project as at risk', () => {
+    expect(projectHealth({ state: 'PAUSED', targetDate: '2026-04-01' }, now)).toBe('at-risk')
+  })
+
+  it('reads a running project past its date as off track', () => {
+    // The one thing that makes `off-track` mean something. There is no health
+    // field in the schema, so without this the hue would never be reached.
+    expect(projectHealth({ state: 'STARTED', targetDate: '2026-03-01' }, now)).toBe('off-track')
+  })
+
+  it('reads a project that has not begun, and one that was called off, as planned', () => {
+    expect(projectHealth({ state: 'PLANNED', targetDate: '2026-03-01' }, now)).toBe('planned')
+    expect(projectHealth({ state: 'CANCELED', targetDate: '2026-03-01' }, now)).toBe('planned')
+  })
+
+  it('does not call a finished project late', () => {
+    expect(projectHealth({ state: 'COMPLETED', targetDate: '2026-01-01' }, now)).toBe('on-track')
   })
 })

@@ -52,18 +52,33 @@
   margin-block-end: var(--space-4);
 }
 
-/* A heading level, not a size: `base.css` decouples the two so a level can be
- * chosen for structure and a size for emphasis. */
+/*
+ * A heading level, not a size -- `base.css` decouples the two so a level can
+ * be chosen for structure and a size for emphasis.
+ *
+ * Set as the direction's mono micro-label: CURRENT, UPCOMING, PAST are column
+ * headers over a run of ruled rows, not titles on three documents. The
+ * tracking is what makes tracked capitals read as an instrument legend rather
+ * than as shouting.
+ *
+ * `--color-text-faint` (5.0:1) where the artboards paint `#626c7d` (3.7:1).
+ * This is a word, and no word in this product goes below 4.5:1.
+ */
 .phaseTitle {
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-tight);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
 }
 
 .phaseCount {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-md);
 }
 
 /* ----------------------------------------------------------------- rows */
@@ -99,19 +114,47 @@
   gap: var(--space-3);
 }
 
+/*
+ * The cycle's number at the trailing edge.
+ *
+ * Mono figures rather than a pill. `#12` inside a bordered capsule is a box
+ * drawn around two characters, and the direction is hairlines -- the number
+ * is already the most legible thing it could be as plain tracked mono.
+ */
+.rowNumber {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
+}
+
+/* A date range is a figure. Mono so the column reads down the list, tabular
+ * on top of it because a machine without IBM Plex Mono falls through to a
+ * stack whose digits are not guaranteed to be one width. */
 .dates {
-  font-variant-numeric: tabular-nums;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
+  white-space: nowrap;
 }
 
 /* --------------------------------------------------------------- detail */
 
+/*
+ * Sections ruled off, not cards. Hairlines rather than boxes is the whole of
+ * the direction's third rule, and a bordered, rounded, tinted panel wrapped
+ * around a run of ruled rows is two frames doing one frame's job.
+ */
 .panel {
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background-color: var(--color-surface);
-  overflow: hidden;
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
 }
 
+/* The inline padding stays: `List` insets its own rows by `--space-5`, and a
+ * section title flush to the column edge over rows that are not is a 12px
+ * stagger down the whole screen. */
 .panelHeader {
   display: flex;
   gap: var(--space-5);
@@ -120,14 +163,18 @@
   padding: var(--space-5) var(--space-5) var(--space-4);
 }
 
+/* A section name is a legend on an instrument, so it is set as one. */
 .panelTitle {
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-tight);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
 }
 
 .panelBody {
-  padding: 0 var(--space-5) var(--space-5);
+  padding: 0 var(--space-5) var(--space-6);
 }
 
 .stack {
@@ -145,15 +192,27 @@
   align-items: baseline;
 }
 
+/* The property name, in the same mono legend the section names wear. */
 .factTerm {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  letter-spacing: var(--label-mono-tracking-sm);
+  text-transform: uppercase;
 }
 
 .factValue {
   min-width: 0;
   color: var(--color-text-primary);
   font-size: var(--text-sm);
+}
+
+/* A cycle's number and its two boundaries: figures, so mono and tabular. */
+.factFigure {
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
 }
 
 .factEmpty {

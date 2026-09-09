@@ -49,15 +49,29 @@
   min-width: 0;
 }
 
-/* ---------------------------------------------------------------- panels */
+/* --------------------------------------------------------------- panels */
 
+/*
+ * Sections ruled off, not cards.
+ *
+ * The direction's third rule is hairlines rather than boxes, and a detail
+ * screen made of four bordered, rounded, tinted panels is four boxes arguing
+ * with the ruled rows inside them. One hairline above the section is enough
+ * to say where it starts, and it costs no horizontal padding -- so the
+ * milestone rules below line up with the facts above them instead of being
+ * inset by a card's gutter.
+ *
+ * `overflow: hidden` went with the radius it was clipping; nothing here has
+ * corners to cut any more.
+ */
 .panel {
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background-color: var(--color-surface);
-  overflow: hidden;
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
 }
 
+/* The inline padding stays, and it is not the card's gutter come back: the
+ * `List` primitive insets its own rows by `--space-5`, and a section title
+ * flush to the column edge over rows that are not is a 12px stagger down the
+ * whole screen. */
 .panelHeader {
   display: flex;
   gap: var(--space-5);
@@ -66,16 +80,26 @@
   padding: var(--space-5) var(--space-5) var(--space-4);
 }
 
-/* A heading level, not a size. `base.css` decouples the two on purpose, so a
- * panel title can be an h2 inside the page's single h1 without being large. */
+/*
+ * A heading level, not a size -- `base.css` decouples the two on purpose, so
+ * an h2 can sit inside the page's single h1 without being large.
+ *
+ * Set as the direction's mono micro-label: a section name is a legend on an
+ * instrument, not a title on a document. `--color-text-faint` (5.0:1) where
+ * the artboards paint `#626c7d` (3.7:1); this is a word, and no word in this
+ * product goes below 4.5:1.
+ */
 .panelTitle {
-  font-size: var(--text-md);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-tight);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
 }
 
 .panelBody {
-  padding: 0 var(--space-5) var(--space-5);
+  padding: 0 var(--space-5) var(--space-6);
 }
 
 /* ------------------------------------------------------------- the facts */
@@ -94,15 +118,29 @@
   align-items: baseline;
 }
 
+/* The property name, in the same mono legend the section names wear. */
 .factTerm {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  letter-spacing: var(--label-mono-tracking-sm);
+  text-transform: uppercase;
 }
 
 .factValue {
   min-width: 0;
   color: var(--color-text-primary);
   font-size: var(--text-sm);
+}
+
+/* A date is a figure, and figures are set in mono so a column of them lines
+ * up. Tabular on top of the mono face because a proportional-figure mono
+ * fallback is a real possibility on a machine without IBM Plex Mono. */
+.factDate {
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
 }
 
 /* A value the API did not supply. Distinguished from a real one by weight and
@@ -151,10 +189,148 @@
  * a reader's eye already is. Overriding it to draw around the whole row would
  * mean writing `outline: none` first, and this stylesheet does not. */
 
+/*
+ * The row's title column: the project's name over its state.
+ *
+ * The artboard sets the state as a mono micro-label under the name rather
+ * than as a pill at the trailing edge, and that is not only a place change.
+ * A badge is a box, the direction is hairlines, and the tone this badge wore
+ * for `STARTED` was the cyan one -- the same signal the rail uses for "you
+ * are here". Two words of tracked mono say the same thing and give the cyan
+ * back its single job.
+ */
+.rowStack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.rowState {
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+}
+
 .rowTeams {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+}
+
+/*
+ * A date on a row. Mono and tabular, so the target column reads down the
+ * list rather than jittering with the width of each month's name.
+ */
+.rowDate {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
+  white-space: nowrap;
+}
+
+/* A target that has gone by on a project still running. Never the only
+ * signal: the row also states its health in words beside it. */
+.late {
+  color: var(--color-text-danger);
+}
+
+/* -------------------------------------------------------------- health */
+
+/*
+ * The four readings. Set as `color` rather than as `stroke` so the arc can
+ * take `currentColor` and one class paints the ring wherever it is used.
+ *
+ * `planned` is `--color-text-faint` where the artboard draws `#626c7d`. An
+ * arc is a glyph and would clear the 3:1 bar at the artboard's value, but the
+ * same class also paints the state *word* on a list row, and that word is
+ * held to 4.5:1 like every other word in the product.
+ */
+.onTrack {
+  color: var(--color-success);
+}
+
+.atRisk {
+  color: var(--color-warning);
+}
+
+.offTrack {
+  color: var(--color-danger);
+}
+
+.planned {
+  color: var(--color-text-faint);
+}
+
+.ringRow {
+  display: inline-flex;
+  gap: var(--space-4);
+  align-items: center;
+}
+
+/* `--glyph-column` is the width every status glyph is drawn into, and the
+ * dial is one. The stroke width is a viewBox coordinate rather than a length,
+ * so it belongs on the element with the geometry and not in a token. */
+.ring {
+  flex: none;
+  inline-size: var(--glyph-column);
+  block-size: var(--glyph-column);
+}
+
+.ringTrack {
+  stroke: var(--color-border);
+}
+
+.ringArc {
+  stroke: currentColor;
+}
+
+.ringValue {
+  color: var(--color-text-body);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
+}
+
+/* ------------------------------------------------------------- progress */
+
+.barRow {
+  display: flex;
+  flex: 1 1 auto;
+  gap: var(--space-4);
+  align-items: center;
+  min-width: 0;
+}
+
+/* `--space-3` is 6px, which is the artboard's bar. There is no size token for
+ * a bar's thickness and this stylesheet is not allowed to invent one, so the
+ * spacing step that happens to be the right measure is used and named here. */
+.barTrack {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  block-size: var(--space-3);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-border-subtle);
+  overflow: hidden;
+}
+
+.barDone {
+  background-color: var(--color-success);
+}
+
+.barValue {
+  flex: none;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-lg);
 }
 
 /* Sits above the stretched link so its own controls stay clickable. */
@@ -278,6 +454,22 @@
   padding-block: var(--space-6);
   color: var(--color-text-muted);
   font-size: var(--text-xs);
+}
+
+/*
+ * The end of the list, said as a legend rather than a sentence.
+ *
+ * Its own class rather than the treatment on `.listFooter`, because the
+ * footer's other branches hold a button, and `text-transform: uppercase`
+ * inherits straight into it -- a "TRY AGAIN" button is how a stylesheet ends
+ * up shouting at the one person it is apologising to.
+ */
+.endOfList {
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
 }
 
 .inlineError {

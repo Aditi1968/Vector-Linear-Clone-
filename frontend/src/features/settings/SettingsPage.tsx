@@ -4,7 +4,6 @@ import type { ReactNode } from 'react'
 import { PageContent, PageHeader } from '../../app/layout'
 import { useWorkspace } from '../../app/workspace'
 import {
-  Badge,
   Button,
   Checkbox,
   Dialog,
@@ -13,8 +12,10 @@ import {
   Spinner,
   Tag,
   VisuallyHidden,
+  cx,
 } from '../../components'
-import styles from '../screens.module.css'
+import shared from '../screens.module.css'
+import styles from './Settings.module.css'
 import { useIntegrations } from './api'
 import type {
   GithubAutomation,
@@ -45,6 +46,13 @@ const START_PATHS = {
 
 interface IntegrationPanelProps {
   name: string
+  /**
+   * The provider's initials, engraved on the plate at the head of the panel.
+   *
+   * A prop rather than `name.slice(0, 2)`, which reads "GI" for GitHub. Two
+   * call sites is cheaper than a mapping table nobody would think to update.
+   */
+  glyph: string
   /** What connecting it buys, in one sentence. */
   purpose: string
   status: IntegrationStatus
@@ -93,9 +101,25 @@ interface IntegrationPanelProps {
  * The browser has to leave the SPA entirely: these are backend endpoints, not
  * routes in this application. A `<Link>` would ask the router for a route
  * that does not exist and render the not-found page.
+ *
+ * ## Why the state is a dot and a word, and Connect is silver
+ *
+ * The connection state was a `Badge`, and for `PENDING` a cyan one. Cyan in
+ * this product marks where you are and what is live; spending it on a status
+ * pill is a third claim on a signal that only works while it has one. So the
+ * state is now a mono readout with a dot taking `currentColor` -- the word
+ * carries the meaning and the dot is redundant -- and cyan is left to the
+ * rail.
+ *
+ * Connect is the primary action on this panel, so it wears the silver
+ * gradient and its lit top edge rather than the accent. Disconnect is a
+ * hairline box: it opens a confirmation, and putting the destructive paint on
+ * the thing that *asks* rather than on the thing that *does* spends the
+ * warning a step early. The dialog's own Disconnect is still `danger`.
  */
 function IntegrationPanel({
   name,
+  glyph,
   purpose,
   status,
   connectedTo,
@@ -108,21 +132,58 @@ function IntegrationPanel({
   const [confirming, setConfirming] = useState(false)
   const headingId = `integration-${name.toLowerCase()}`
 
+  // The workspace is named in the query string because the endpoint
+  // authorizes against it before it issues a state -- an ordinary member gets
+  // nothing to carry through the consent screen.
+  const startHref = `${startPath}?workspace=${encodeURIComponent(workspaceSlug)}`
+
+  const state =
+    status === 'CONNECTED'
+      ? { word: 'Connected', tone: styles.stateOk }
+      : status === 'PENDING'
+        ? { word: `Waiting for ${name}`, tone: styles.statePending }
+        : status === 'DISCONNECTED'
+          ? { word: 'Not connected', tone: styles.stateOff }
+          : { word: 'Unavailable', tone: styles.stateOff }
+
   return (
     <section className={styles.panel} aria-labelledby={headingId}>
-      <div className={styles.panelHeader}>
-        <h2 className={styles.panelTitle} id={headingId}>
-          {name}
-        </h2>
+      <div className={styles.panelHead}>
+        {/* The name printed beside it, so announcing it would say the
+            provider twice. */}
+        <span className={styles.glyph} aria-hidden="true">
+          {glyph}
+        </span>
 
-        {status === 'CONNECTED' ? (
-          <Badge tone="success">Connected</Badge>
-        ) : status === 'PENDING' ? (
-          <Badge tone="info">Waiting for {name}</Badge>
-        ) : status === 'DISCONNECTED' ? (
-          <Badge>Not connected</Badge>
-        ) : (
-          <Badge tone="warning">Unavailable</Badge>
+        <div className={styles.identity}>
+          <h2 className={styles.panelTitle} id={headingId}>
+            {name}
+          </h2>
+          <p className={cx(styles.state, state.tone)}>
+            <span className={styles.dot} aria-hidden="true" />
+            {state.word}
+          </p>
+        </div>
+
+        {status === 'DISCONNECTED' && (
+          <a className={styles.connect} href={startHref}>
+            Connect {name}
+          </a>
+        )}
+
+        {(status === 'CONNECTED' || status === 'PENDING') && (
+          /* One control for both, because cancelling an unconfirmed claim is
+             the same mutation as disconnecting a live one -- it is
+             idempotent about which state it is ending -- and only the wording
+             differs. */
+          <Button
+            loading={isDisconnecting}
+            onClick={() => {
+              setConfirming(true)
+            }}
+          >
+            {status === 'CONNECTED' ? `Disconnect ${name}` : `Cancel ${name} claim`}
+          </Button>
         )}
       </div>
 
@@ -135,17 +196,6 @@ function IntegrationPanel({
                 : `Connected to ${connectedTo}.`}
             </p>
             {details}
-            <div className={styles.rowActions}>
-              <Button
-                variant="danger"
-                loading={isDisconnecting}
-                onClick={() => {
-                  setConfirming(true)
-                }}
-              >
-                Disconnect {name}
-              </Button>
-            </div>
           </>
         )}
 
@@ -160,42 +210,13 @@ function IntegrationPanel({
               that is what makes {name} send the confirmation afresh.
             </p>
             <p>
-              <a href={`${startPath}?workspace=${encodeURIComponent(workspaceSlug)}`}>
-                Run the {name} installation again
-              </a>
+              <a href={startHref}>Run the {name} installation again</a>
             </p>
-            <div className={styles.rowActions}>
-              {/* The same Disconnect the connected state offers, because
-                  cancelling a claim is the other way out and the mutation is
-                  idempotent about which state it is ending. */}
-              <Button
-                variant="danger"
-                loading={isDisconnecting}
-                onClick={() => {
-                  setConfirming(true)
-                }}
-              >
-                Cancel {name} claim
-              </Button>
-            </div>
           </>
         )}
 
         {status === 'DISCONNECTED' && (
-          <>
-            <p className={styles.panelNote}>{purpose}</p>
-            <p>
-              {/*
-                The workspace is named in the query string because the
-                endpoint authorizes against it before it issues a state -- an
-                ordinary member gets nothing to carry through the consent
-                screen.
-              */}
-              <a href={`${startPath}?workspace=${encodeURIComponent(workspaceSlug)}`}>
-                Connect {name}
-              </a>
-            </p>
-          </>
+          <p className={styles.panelNote}>{purpose}</p>
         )}
 
         {status === 'UNCONFIGURED' && (
@@ -215,7 +236,7 @@ function IntegrationPanel({
         title={`Disconnect ${name}?`}
         description={`This workspace will stop receiving ${name} activity. You can connect it again afterwards.`}
         footer={
-          <div className={styles.rowActions}>
+          <div className={shared.rowActions}>
             <Button
               onClick={() => {
                 setConfirming(false)
@@ -301,21 +322,21 @@ function GithubDetails({
 
   return (
     <>
-      <fieldset className={styles.field}>
-        <legend className={styles.label}>Repositories</legend>
+      <fieldset className={styles.group}>
+        <legend className={styles.groupLabel}>Repositories</legend>
 
         {github.repositories.length === 0 ? (
-          <p className={styles.footnote}>
+          <p className={shared.footnote}>
             No repositories are visible to this installation yet.
           </p>
         ) : (
           <>
-            <p className={styles.footnote}>
+            <p className={shared.footnote}>
               Vector applies pull requests and pushes only from the repositories
               ticked here. Unticking one keeps the activity already collected.
             </p>
             {github.repositories.map((repository) => (
-              <label className={styles.fieldRow} key={repository.repositoryId}>
+              <label className={styles.settingRow} key={repository.repositoryId}>
                 <Checkbox
                   checked={repository.tracked}
                   disabled={isSaving}
@@ -329,7 +350,7 @@ function GithubDetails({
                     onTrackedChange(next)
                   }}
                 />
-                <span>{repository.fullName}</span>
+                <span className={styles.settingLabel}>{repository.fullName}</span>
               </label>
             ))}
           </>
@@ -346,12 +367,12 @@ function GithubDetails({
         )
 
         return (
-          <fieldset className={styles.field} key={team.id}>
-            <legend className={styles.label}>
+          <fieldset className={styles.group} key={team.id}>
+            <legend className={styles.groupLabel}>
               Pull request automation — {team.name}
             </legend>
 
-            <label className={styles.fieldRow}>
+            <label className={styles.settingRow}>
               <Checkbox
                 checked={automation !== undefined}
                 disabled={isSaving}
@@ -362,7 +383,7 @@ function GithubDetails({
                   })
                 }}
               />
-              <span>
+              <span className={styles.settingLabel}>
                 Move {team.key} issues when a pull request that names them opens
                 or merges
               </span>
@@ -370,8 +391,18 @@ function GithubDetails({
 
             {automation !== undefined && (
               <>
-                <label className={styles.fieldRow}>
-                  <span>Pull request opened</span>
+                {/*
+                  The team's key is in the label and not only in the legend
+                  above it. A workspace with two automated teams otherwise
+                  puts two controls called "Pull request opened" on one
+                  screen, which is ambiguous to anyone driving this by voice
+                  or by a rotor list -- neither of which reads the legend
+                  first.
+                */}
+                <label className={styles.settingRow}>
+                  <span className={styles.settingLabel}>
+                    Pull request opened — {team.key}
+                  </span>
                   <Select
                     value={automation.startedStateId ?? ''}
                     disabled={isSaving}
@@ -393,8 +424,10 @@ function GithubDetails({
                   </Select>
                 </label>
 
-                <label className={styles.fieldRow}>
-                  <span>Pull request merged</span>
+                <label className={styles.settingRow}>
+                  <span className={styles.settingLabel}>
+                    Pull request merged — {team.key}
+                  </span>
                   <Select
                     value={automation.completedStateId ?? ''}
                     disabled={isSaving}
@@ -416,7 +449,7 @@ function GithubDetails({
                   </Select>
                 </label>
 
-                <p className={styles.footnote}>
+                <p className={shared.footnote}>
                   A draft pull request moves nothing until it is marked ready
                   for review, and one closed without merging is not a
                   completion. An issue somebody has already moved on is left
@@ -469,16 +502,16 @@ export function SettingsPage() {
       />
 
       <PageContent>
-        <div className={styles.stack}>
+        <div className={shared.stack}>
           {actionErrorMessage !== null && (
-            <p className={styles.formError} role="alert">
+            <p className={shared.formError} role="alert">
               {actionErrorMessage}
             </p>
           )}
 
           <section className={styles.panel} aria-labelledby="settings-identity">
-            <div className={styles.panelHeader}>
-              <h2 className={styles.panelTitle} id="settings-identity">
+            <div className={styles.panelHead}>
+              <h2 className={styles.sectionLabel} id="settings-identity">
                 Workspace
               </h2>
             </div>
@@ -493,14 +526,20 @@ export function SettingsPage() {
                   {/* The slug from the address bar and not the one on the
                       membership: they are the same string, and the address
                       bar is what a user would copy. */}
-                  <span className={styles.identifier}>/{slug}</span>
+                  <span className={shared.identifier}>/{slug}</span>
                 </dd>
 
                 <dt className={styles.factTerm}>Your role</dt>
                 <dd className={styles.factValue}>
-                  <Badge tone={role === 'MEMBER' ? 'neutral' : 'info'}>
+                  {/* A readout, not a pill. It was a cyan `Badge` for
+                      anything above MEMBER, which is cyan doing a badge's
+                      job -- and the word was always what carried it.
+                      Uppercased in CSS rather than in the string, so what a
+                      screen reader receives is the word "Owner" and not an
+                      acronym it may decide to spell out. */}
+                  <span className={styles.roleValue}>
                     {role.charAt(0) + role.slice(1).toLowerCase()}
-                  </Badge>
+                  </span>
                 </dd>
               </dl>
 
@@ -530,6 +569,7 @@ export function SettingsPage() {
           {github !== null && (
             <IntegrationPanel
               name="GitHub"
+              glyph="GH"
               purpose="Link pull requests and commits to Vector issues."
               status={github.status}
               connectedTo={github.accountLogin}
@@ -552,6 +592,7 @@ export function SettingsPage() {
           {slack !== null && (
             <IntegrationPanel
               name="Slack"
+              glyph="SL"
               purpose="Post issue updates into a Slack channel."
               status={slack.status}
               connectedTo={slack.teamName}
@@ -561,11 +602,11 @@ export function SettingsPage() {
               onDisconnect={disconnectSlack}
               details={
                 slack.scopes.length > 0 ? (
-                  <div className={styles.rowActions}>
+                  <div className={shared.rowActions}>
                     {/* Shown because a connection granted fewer scopes than
                         Vector needs is a real state, and "Connected" alone
                         would not distinguish it. */}
-                    <span className={styles.footnote}>Granted scopes:</span>
+                    <span className={styles.sectionLabel}>Granted scopes</span>
                     {slack.scopes.map((scope) => (
                       <Tag key={scope} name={scope} />
                     ))}

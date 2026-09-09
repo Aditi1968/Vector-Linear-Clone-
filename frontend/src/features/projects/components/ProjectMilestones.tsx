@@ -1,15 +1,10 @@
 import { useCallback, useId, useState } from 'react'
 
-import {
-  Button,
-  EmptyState,
-  Input,
-  Menu,
-  ProgressIndicator,
-} from '../../../components'
+import { Button, EmptyState, Input, Menu } from '../../../components'
 import type { MenuItem } from '../../../components'
 import type { MilestoneDraft, ProjectIssue, ProjectMilestone } from '../api'
 import { closedCount, formatDay, issuesInMilestone } from '../lib/projects'
+import { ProgressBar } from './ProgressBar'
 import styles from '../projects.module.css'
 
 interface MilestoneFormProps {
@@ -253,7 +248,7 @@ export function ProjectMilestones({
               ) : (
                 <div className={styles.milestoneMeta}>
                   {milestone.targetDate !== null && (
-                    <span>
+                    <span className={styles.rowDate}>
                       Target{' '}
                       <time dateTime={milestone.targetDate}>
                         {formatDay(milestone.targetDate)}
@@ -269,7 +264,7 @@ export function ProjectMilestones({
                     <span>Counting issues...</span>
                   ) : (
                     <>
-                      <ProgressIndicator
+                      <ProgressBar
                         value={closed}
                         total={inMilestone.length}
                         label={
@@ -277,7 +272,6 @@ export function ProjectMilestones({
                             ? `${milestone.name}: closed issues among those loaded`
                             : `${milestone.name}: closed issues`
                         }
-                        showLabel
                       />
                       <span>
                         {inMilestone.length === 1 ? 'issue' : 'issues'} closed
