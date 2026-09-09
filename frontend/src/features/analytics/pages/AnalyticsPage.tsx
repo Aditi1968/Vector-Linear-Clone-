@@ -99,6 +99,18 @@ export function AnalyticsPage() {
       <PageHeader
         title="Analytics"
         description="Throughput, cycle time, and how the workspace is actually moving."
+        /* The screen's own state, in the shell's mono readout -- and two counts
+           that can be stated without a caveat, which is not true of most
+           figures below. `workspaceAnalytics` answers these from a GROUP BY
+           over the whole tenant inside the window, so they are the workspace's
+           and not a page's. Withheld until they are known, because a header
+           reading "0 CREATED" while the query is in flight is a wrong answer
+           rather than a loading state. */
+        readout={
+          isLoadingFirstPage || errorMessage !== null || analytics === null
+            ? undefined
+            : `${analytics.totals.created} created · ${analytics.totals.completed} completed`
+        }
         actions={rangePicker}
       />
 

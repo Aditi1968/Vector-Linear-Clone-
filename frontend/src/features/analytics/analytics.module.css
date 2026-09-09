@@ -80,24 +80,35 @@
   background-color: var(--color-surface);
 }
 
+/* What the figure under it measures, as an instrument legend rather than as a
+ * louder version of the body face. */
 .tileLabel {
   color: var(--color-text-muted);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-caps);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
   text-transform: uppercase;
 }
 
+/*
+ * The figure itself: a gauge readout, so it is set in the face this direction
+ * gives every number.
+ *
+ * `--tracking-normal` and not `--tracking-tight`. Negative tracking is a fix
+ * for proportional display type setting too loose; a mono face is already
+ * fixed-pitch, and pulling it tighter only overlaps the digits.
+ */
 .tileValue {
   margin: 0;
   color: var(--color-text-bright);
+  font-family: var(--font-mono);
   font-size: var(--text-2xl);
   font-weight: var(--weight-semibold);
 
   /* Tabular figures, so a column of numbers lines up and a value changing
    * from 9 to 10 does not shift everything beside it. */
   font-variant-numeric: var(--numeric-tabular);
-  letter-spacing: var(--tracking-tight);
+  letter-spacing: var(--tracking-normal);
   line-height: var(--leading-none);
 }
 
@@ -139,8 +150,22 @@
   fill: var(--color-status-canceled);
 }
 
+/*
+ * The created series, as a bright trace over the stack.
+ *
+ * It was cyan, and cyan in this direction marks one thing: where you are and
+ * what is live. A line redrawn on every window and a swatch in the legend
+ * beside it are neither, and an accent spent on a third data series is an
+ * accent that no longer marks anything.
+ *
+ * Silver instead of one of the status hues, deliberately. Amber and red mean
+ * "started" and "urgent" everywhere else in this product, and a chart is the
+ * last place to give one of them a second meaning. Bright silver is the
+ * highest-contrast ink available and reads as the trace laid over the bars,
+ * which is exactly what it is.
+ */
 .chartCreated {
-  stroke: var(--color-accent);
+  stroke: var(--color-text-bright);
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
@@ -179,8 +204,9 @@
   background-color: var(--color-status-canceled);
 }
 
+/* Matches `.chartCreated`. A legend that does not is worse than no legend. */
 .swatchCreated {
-  background-color: var(--color-accent);
+  background-color: var(--color-text-bright);
 }
 
 /* ----------------------------------------------------------------- tables */
@@ -207,11 +233,22 @@
   text-align: start;
 }
 
+/*
+ * Column headers, in the artboard's own voice: mono, uppercase, at the widest
+ * tracking in the scale. The tracking is what makes 9.5px capitals read as a
+ * legend rather than as small shouting.
+ *
+ * `--color-text-faint` (5.0:1) where this was `--color-text-muted`. The
+ * artboard paints its column headers `#626c7d`, which is 3.7:1 and below the
+ * floor this codebase holds for a word; faint is one step brighter than the
+ * artboard and still clearly subordinate to the values under it.
+ */
 .table thead th {
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
   font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-caps);
+  letter-spacing: var(--label-mono-tracking-sm);
   text-transform: uppercase;
 }
 
@@ -220,8 +257,13 @@
   font-weight: var(--weight-regular);
 }
 
+/* A figure in a column of figures. Mono as well as tabular: the values in
+ * these tables are "4", "12 of 30" and "21 points", and only a fixed pitch
+ * makes the second and third line up with each other. */
 .rowValue {
   color: var(--color-text-bright);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
   font-variant-numeric: var(--numeric-tabular);
   white-space: nowrap;
 }
@@ -247,8 +289,17 @@
   fill: var(--color-bg-sunken);
 }
 
+/*
+ * The magnitude bar in a breakdown row.
+ *
+ * Neutral ink, not the accent. This bar is `aria-hidden` decoration beside a
+ * number the row already prints -- four tables of it is dozens of cyan bars,
+ * and an accent repeated that many times stops marking anything. Muted slate
+ * is 7.9:1 on ground and higher again on the sunken track it sits in, so the
+ * comparison it exists to support is still legible.
+ */
 .barValue {
-  fill: var(--color-accent);
+  fill: var(--color-text-muted);
 }
 
 /*
