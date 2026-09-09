@@ -73,12 +73,24 @@
   white-space: nowrap;
 }
 
+/*
+ * Row meta is figures: how many projects, how many nested, a target date.
+ *
+ * Mono, which is the voice this direction gives every count and date -- and
+ * which is what makes a column of dates read as a column rather than as five
+ * strings of different widths.
+ *
+ * NOT uppercased, unlike the property names and section heads below. This span
+ * also carries "Nested under an initiative not shown here", and a sentence set
+ * in tracked capitals is the direction applied where it does not belong.
+ */
 .rowMeta {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
   font-variant-numeric: var(--numeric-tabular);
 }
 
@@ -92,9 +104,14 @@
  * A value the screen has but cannot name, or a value that is genuinely
  * absent. Muted and italic rather than hidden: the thing is really there, and
  * a row that quietly dropped it would misstate what the initiative contains.
+ *
+ * The face is restated rather than inherited. This appears inside `.rowMeta`,
+ * which is mono, and every one of these is a sentence -- prose belongs in the
+ * body face whatever it is sitting in.
  */
 .unresolved {
   color: var(--color-text-muted);
+  font-family: var(--font-sans);
   font-style: italic;
 }
 
@@ -138,12 +155,15 @@
   margin: 0 0 var(--space-7);
 }
 
+/* The property name, as an instrument legend: mono, uppercase, widely tracked.
+ * `--color-text-faint` is 5.0:1; the artboard paints these at 3.7:1 and these
+ * are words. */
 .fact dt {
   margin-block-end: var(--space-2);
   color: var(--color-text-faint);
-  font-size: var(--text-3xs);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-caps);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
   text-transform: uppercase;
 }
 
@@ -164,12 +184,15 @@
   margin-block-start: var(--space-6);
 }
 
+/* Same legend voice as the property names, one step brighter because it heads
+ * a section rather than labelling a value beside it. */
 .sectionTitle {
   margin: 0 0 var(--space-4);
   color: var(--color-text-secondary);
-  font-size: var(--text-3xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-md);
   text-transform: uppercase;
 }
 
@@ -235,9 +258,15 @@
   color: var(--color-text-accent);
 }
 
+/* A project's state beside its name. The Projects artboard sets exactly this
+ * as a mono uppercase micro-label under the project title; a chip is the same
+ * fact in less room. */
 .chipMeta {
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
 }
 
 /* -------------------------------------------------------------- updates */
@@ -273,9 +302,13 @@
   margin-block-end: var(--space-3);
 }
 
+/* Who reported, and when. Mono for the instant; not uppercased, because the
+ * other half of it is a person's name. */
 .updateMeta {
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: var(--numeric-tabular);
 }
 
 .updateBody {
@@ -335,7 +368,10 @@
   line-height: var(--leading-normal);
 }
 
+/* A figure inside a sentence. Mono carries every count in this direction, so
+ * the number keeps its shape whatever face surrounds it. */
 .count {
+  font-family: var(--font-mono);
   font-variant-numeric: var(--numeric-tabular);
 }
 

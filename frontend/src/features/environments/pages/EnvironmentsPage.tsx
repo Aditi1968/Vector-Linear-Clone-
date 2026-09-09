@@ -123,6 +123,16 @@ export function EnvironmentsPage() {
       <PageHeader
         title="Environments"
         description="Where the product runs, and what is deployed to each."
+        /* `environments` is a plain list and not a connection, so this count is
+           the whole of it -- unlike releases or documents, where the header
+           could only ever say how much had been fetched. Withheld until it is
+           known: a readout that says "0 DECLARED" while the query is in flight
+           is a wrong answer, not a loading state. */
+        readout={
+          isLoading || errorMessage !== null
+            ? undefined
+            : `${environments.length} declared`
+        }
         actions={
           /* "New environment" and not "Add environment", which is what the
              composer's submit button says. Both are on the page at once while
@@ -187,12 +197,14 @@ export function EnvironmentsPage() {
                           </span>
                         ) : (
                           <>
-                            <span>{deploy.name}</span>
+                            {/* A version and an instant: both figures, both
+                                mono, so a column of them lines up. */}
+                            <span className={styles.mono}>{deploy.name}</span>
                             <Badge tone={releaseStatusTone(deploy.status)}>
                               {releaseStatusLabel(deploy.status)}
                             </Badge>
                             {deploy.deployedAt !== null && (
-                              <time dateTime={deploy.deployedAt}>
+                              <time className={styles.mono} dateTime={deploy.deployedAt}>
                                 {formatInstant(deploy.deployedAt)}
                               </time>
                             )}

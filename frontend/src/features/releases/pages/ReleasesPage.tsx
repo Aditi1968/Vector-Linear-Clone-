@@ -267,7 +267,9 @@ export function ReleasesPage() {
                         <span className={styles.rowName}>{release.name}</span>
                         <span className={styles.rowMeta}>
                           <span>{environmentName(byEnvironment, release)}</span>
-                          <span className={styles.mono}>{commitRange(release)}</span>
+                          {/* `.rowMeta` is already mono; the SHA range and the
+                              instant need no class of their own. */}
+                          <span>{commitRange(release)}</span>
                           {/* The instant, not the day: the same version ships
                               twice in one day often enough that two rows
                               reading "7 Sep 2026" would be two different

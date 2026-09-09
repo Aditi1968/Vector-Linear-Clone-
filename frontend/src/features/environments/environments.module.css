@@ -43,6 +43,21 @@
   font-size: var(--text-meta);
 }
 
+/*
+ * The figures inside a row's meta: the version that is on this target, and
+ * when it landed.
+ *
+ * Marked span by span rather than by setting the mono face on `.rowMeta`
+ * itself, which is what the other screens in this direction do. This row's
+ * meta also holds a `Badge`, and `font-family` inherits -- a mono face pushed
+ * down from the row would silently repaint a shared component on this one
+ * screen and nowhere else.
+ */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--numeric-tabular);
+}
+
 /* A value that is genuinely absent, or one this screen holds and cannot name.
  * Muted and italic rather than hidden. */
 .unresolved {

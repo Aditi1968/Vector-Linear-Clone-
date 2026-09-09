@@ -24,10 +24,17 @@ import type { Environment, EnvironmentKind } from '../api'
  * Production is toned `danger` and that is not an error state: it is the one
  * kind where a deploy is irreversible in the way that matters, and the design
  * has no fifth tone that means "handle with care".
+ *
+ * Staging was toned `info`, which is the cyan chip. Cyan in this direction
+ * marks one thing -- where you are and what is live -- and a chip repeated
+ * down a list is neither; four cyan "Staging" pills on a screen is the accent
+ * spent on the least consequential of the four kinds. It is neutral now, and
+ * the word "Staging" still says which kind it is. Production keeps its hue
+ * because that one is a warning.
  */
 const KIND_PRESENTATION: Record<EnvironmentKind, { label: string; tone: BadgeTone }> = {
   DEVELOPMENT: { label: 'Development', tone: 'neutral' },
-  STAGING: { label: 'Staging', tone: 'info' },
+  STAGING: { label: 'Staging', tone: 'neutral' },
   PRODUCTION: { label: 'Production', tone: 'danger' },
   CUSTOM: { label: 'Custom', tone: 'neutral' },
 }

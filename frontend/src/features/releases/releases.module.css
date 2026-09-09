@@ -55,20 +55,43 @@
   cursor: pointer;
 }
 
+/*
+ * A release's name is a version, and a version is an identifier.
+ *
+ * Mono and tabular, so `v1.9.0` and `v1.10.0` sort visually the way they sort
+ * semantically -- in a proportional face the second is the narrower string,
+ * and a column of versions that does not line up is a column you re-read.
+ */
 .rowName {
   overflow: hidden;
   color: var(--color-text-body);
+  font-family: var(--font-mono);
+  font-variant-numeric: var(--numeric-tabular);
   font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/*
+ * Row meta is figures: an environment, a SHA range, an instant.
+ *
+ * Mono, because that is the voice this direction gives every count, date and
+ * version -- and because a column of instants under each other only reads as a
+ * column when the digits are one width.
+ *
+ * NOT uppercased, unlike the column headers and property names. The artboard's
+ * row meta is synthetic data that is always a figure; this one also carries
+ * "Unknown environment", and a sentence set in tracked capitals is the
+ * direction applied where it does not fit.
+ */
 .rowMeta {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: var(--numeric-tabular);
 }
 
 /* --------------------------------------------------------------- panel */
@@ -102,15 +125,24 @@
   text-overflow: ellipsis;
 }
 
+/*
+ * A section head, in the direction's mono legend voice.
+ *
+ * Uppercase sans at semibold was the same words in the body face, which puts a
+ * heading and the prose under it in one register and leaves the reader
+ * separating them by weight alone. Mono and widely tracked reads as a legend
+ * stamped on the panel rather than as a louder sentence.
+ */
 .sectionTitle {
   display: flex;
   gap: var(--space-4);
   align-items: baseline;
   margin: var(--space-4) 0 0;
   color: var(--color-text-secondary);
-  font-size: var(--text-body-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-md);
   text-transform: uppercase;
 }
 
@@ -136,9 +168,15 @@
   }
 }
 
+/* The property name, as an instrument legend. `--color-text-faint` is 5.0:1;
+ * the artboard paints these `#626c7d` at 3.7:1 and these are words. */
 .facts dt {
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-normal);
+  text-transform: uppercase;
 }
 
 .facts dd {
@@ -200,8 +238,12 @@
   font-variant-numeric: var(--numeric-tabular);
 }
 
+/* A figure, wherever it appears -- beside a section head or inside a sentence.
+ * Mono carries every count in this direction, so the number is the same shape
+ * whichever face surrounds it. */
 .count {
   color: var(--color-text-body);
+  font-family: var(--font-mono);
   font-variant-numeric: var(--numeric-tabular);
 }
 
