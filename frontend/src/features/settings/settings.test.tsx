@@ -23,6 +23,10 @@ const PATH = `/${WORKSPACE_SLUG}/settings`
 // Ids rather than names everywhere they are compared, because the automation
 // stores ids -- a team owns its state NAMES and may change them.
 const TEAM_ID = '00000000-0000-7000-8000-0000000000d1'
+// A second board, for the one test that needs two automations on screen at
+// once -- which is the arrangement that used to produce duplicate control
+// names.
+const DESIGN_TEAM_ID = '00000000-0000-7000-8000-0000000000d2'
 const IN_PROGRESS_STATE_ID = '00000000-0000-7000-8000-0000000000f2'
 const DONE_STATE_ID = '00000000-0000-7000-8000-0000000000f4'
 
@@ -275,7 +279,7 @@ describe('the pull request automation', () => {
     // The opt-in. An issue that changed status because somebody opened a pull
     // request, in a workspace that never asked for it, is a bug report.
     expect(screen.getByRole('checkbox', { name: AUTOMATION })).not.toBeChecked()
-    expect(screen.queryByLabelText('Pull request merged')).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/Pull request merged/)).not.toBeInTheDocument()
   })
 
   it('asks the server for the default rather than naming a state itself', async () => {
@@ -315,12 +319,12 @@ describe('the pull request automation', () => {
     })
 
     expect(screen.getByRole('checkbox', { name: AUTOMATION })).toBeChecked()
-    expect(screen.getByLabelText('Pull request merged')).toHaveValue(DONE_STATE_ID)
+    expect(screen.getByLabelText('Pull request merged — ENG')).toHaveValue(DONE_STATE_ID)
 
     // "Do nothing" is a real configuration: a team may automate the merge and
     // leave starting to whoever is doing the work.
     await view.user.selectOptions(
-      screen.getByLabelText('Pull request opened'),
+      screen.getByLabelText('Pull request opened — ENG'),
       '',
     )
 
@@ -334,5 +338,40 @@ describe('the pull request automation', () => {
         completedStateId: DONE_STATE_ID,
       },
     })
+  })
+
+  it('names every select for its own team, so two of them cannot collide', async () => {
+    const view = renderApp({ initialPath: PATH })
+    const data = integrations('CONNECTED', 'DISCONNECTED')
+    const engineering = data.teams[0]!
+
+    const automation = (teamId: string) => ({
+      __typename: 'GithubIssueAutomation' as const,
+      teamId,
+      startedStateId: IN_PROGRESS_STATE_ID,
+      completedStateId: DONE_STATE_ID,
+    })
+
+    await view.link.resolve('WorkspaceIntegrations', {
+      data: {
+        ...data,
+        githubIntegration: {
+          ...data.githubIntegration,
+          automations: [automation(TEAM_ID), automation(DESIGN_TEAM_ID)],
+        },
+        teams: [
+          engineering,
+          { ...engineering, id: DESIGN_TEAM_ID, key: 'DES', name: 'Design' },
+        ],
+      },
+    })
+
+    // `getByLabelText` throws when two controls answer to one name, which is
+    // the whole guard here: a second automated team used to add a second
+    // select called "Pull request opened", and the legend that told them
+    // apart is not read by anyone driving this by voice or by a rotor list.
+    expect(screen.getByLabelText('Pull request opened — ENG')).toBeInTheDocument()
+    expect(screen.getByLabelText('Pull request opened — DES')).toBeInTheDocument()
+    expect(screen.getByLabelText('Pull request merged — DES')).toBeInTheDocument()
   })
 })

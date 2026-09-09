@@ -1,0 +1,76 @@
+/*
+ * The team screens' own paint.
+ *
+ * `../screens.module.css` owns the split, the panels and the rows; this file
+ * owns the three things the team screens draw that the shared sheet has no
+ * business knowing about.
+ *
+ * Every value is a `var(--*)` from `src/styles/tokens.css`.
+ */
+
+/*
+ * A panel heading, set as the mono micro-label the direction speaks in.
+ *
+ * Still an `<h2>`: level is structure and size is styling, and `base.css`
+ * decouples the two so a heading can be small without lying about the
+ * document outline.
+ */
+.sectionLabel {
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+}
+
+/*
+ * The screen's own action, in the header's trailing slot.
+ *
+ * It was a bare link, which `base.css` paints in the accent -- so the one
+ * control at the top of the screen was cyan, and cyan in this product means
+ * "here" and "live", not "press this". Every other screen puts a `<Button>`
+ * in this slot; this one cannot, because it navigates and `components/Button`
+ * renders a `<button>`. So it borrows `Button`'s secondary geometry to the
+ * pixel: an edge and a label, which is what keeps a secondary control from
+ * competing with the silver primary.
+ */
+.headerAction {
+  display: inline-flex;
+  align-items: center;
+  height: var(--control-height-md);
+  padding-inline: var(--space-5);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-none);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.headerAction:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-primary);
+}
+
+/*
+ * A state's place in the board order.
+ *
+ * A `Badge` before -- a bordered pill around a single digit, which is a lot of
+ * box for one character. It is a figure on an instrument now: mono, tabular so
+ * the column lines up, and faint because the order is context for the name
+ * beside it rather than the answer to anything.
+ */
+.position {
+  flex: none;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
+}

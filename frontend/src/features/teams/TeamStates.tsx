@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { PageContent, PageHeader } from '../../app/layout'
 import { useAppPaths } from '../../app/routes'
 import { ErrorState, Skeleton, VisuallyHidden } from '../../components'
-import styles from '../screens.module.css'
+import shared from '../screens.module.css'
 import type { TeamResolution } from './api'
 
 export interface TeamStateScreenProps {
@@ -38,7 +38,7 @@ export function TeamStateScreen({ resolution }: TeamStateScreenProps) {
       <>
         <PageHeader title="Team" />
         <PageContent>
-          <div className={styles.skeletonStack} role="status" aria-busy="true">
+          <div className={shared.skeletonStack} role="status" aria-busy="true">
             {/* `Skeleton` is `aria-hidden` by design, so the announcement
                 belongs on the live region around it. */}
             <VisuallyHidden as="div">Loading team</VisuallyHidden>
@@ -69,10 +69,10 @@ export function TeamStateScreen({ resolution }: TeamStateScreenProps) {
     <>
       <PageHeader title="Team not found" />
       <PageContent constrained>
-        <div className={styles.stack}>
+        <div className={shared.stack}>
           <p>
             No team in this workspace has the key{' '}
-            <span className={styles.identifier}>{resolution.key}</span>. It may
+            <span className={shared.identifier}>{resolution.key}</span>. It may
             have been renamed, or the address may have been mistyped.
           </p>
           <p>
