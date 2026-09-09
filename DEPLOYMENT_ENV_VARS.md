@@ -97,6 +97,36 @@ the same reason.
 
 ## Neon
 
+### Already provisioned — this deployment reuses an existing database
+
+The staging service points at the Neon database this project has been using
+all along (`neondb`, PostgreSQL **18.6**), not a new project. Its state was
+verified before anything was applied to it, and the schema is now current:
+
+* it held **one** table, `issues` — migration 001's, matching that file's
+  columns, primary key, `issues_priority_range` check and keyset index — and
+  nothing belonging to any other project: one schema (`public`), no foreign
+  tables, no extensions beyond `plpgsql`;
+* it had **no `schema_migrations` ledger**, because 001 was applied by hand
+  before the runner existed. `--status` adopted 001 after fingerprinting the
+  live table against the file, which is the one path that writes that row
+  without taking the claim on trust;
+* migrations **002 through 032 were then applied forward, in order**, each
+  through `python -m scripts.apply_migration`. `--status` now reports 32
+  applied, every checksum `ok`, `Pending: none`.
+
+**Nothing was dropped, reset or recreated.** Across all 32 migrations there is
+no `DROP TABLE`, no `TRUNCATE`, no `DELETE FROM` and no `DROP COLUMN` — the
+only `DROP` is `002`'s of `issues_created_at_id_idx`, replaced two statements
+later by the workspace-leading index that supersedes it. The two rows that
+were in `issues` are still there; `002` backfilled them into the bootstrap
+tenant it creates (workspace `vector`, team `Core`), which is exactly what
+that migration was written to do.
+
+**So the first container boot is a no-op.** The image's CMD applies every
+`migrations/*.sql` before exec'ing uvicorn; with the ledger complete the
+runner skips all 32 and starts the server.
+
 **PostgreSQL 18 is mandatory, not preferred.** `migrations/001_issues.sql`
 defaults its primary keys to `uuidv7()`, which is native to 18 and does not
 exist in 17. A project created on 17 fails on the very first migration.
@@ -152,9 +182,29 @@ Neon's certificate is signed by a public CA, so that path is all the trust
 store needed and the hostname is genuinely checked. Neon's copy-paste
 connection string ends in `?sslmode=require`; replace that suffix.
 
-`?channel_binding=require` may also appear in what Neon hands you. asyncpg
-does not accept it and the connection fails with an unhelpful message —
-remove it.
+`?channel_binding=require` may also appear in what Neon hands you. **Remove
+it — but not for the reason previously written here.** An earlier draft of
+this file said asyncpg rejects it and the connection fails. That was wrong,
+and it was corrected by connecting rather than by re-reading the changelog:
+the real `.env` DSN carries `sslmode=require&channel_binding=require` and
+connects fine — all 31 forward migrations were applied to Neon through it.
+
+What actually happens: `connect_utils.py` pops the parameters it knows and
+sweeps whatever is left into `server_settings`, which are sent as startup
+parameters. Neon's proxy strips `channel_binding` there, so it never reaches
+PostgreSQL — `SELECT current_setting('channel_binding')` raises
+`UndefinedObjectError` on a connection that carried it.
+
+So it is inert on Neon, not fatal. Remove it anyway, because inert is the
+problem: asyncpg applies no channel-binding requirement of any kind, so the
+parameter reads like a security control while enforcing nothing, and on a
+PostgreSQL endpoint without Neon's proxy in front the same sweep would send
+an unrecognised startup parameter to the server.
+
+The one claim above that IS verified against the live server: `verify-full`
+with no `sslrootcert` really does fail, with
+`root certificate file "...\.postgresql\root.crt" does not exist`, before
+any socket is opened — and `verify-full` **with** a CA bundle connects.
 
 ### Pool sizing
 
