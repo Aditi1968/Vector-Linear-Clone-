@@ -240,6 +240,11 @@
     var(--vector-silver-500)
   );
   --color-primary-border: var(--vector-navy-450);
+  /* The lit edge. A machined face catches the light along its top edge and
+   * nowhere else, and one white hairline there is what separates "a silver
+   * fill" from "a milled control". Its own token rather than a hardcoded
+   * white, because the disabled state has to be able to clear it. */
+  --color-primary-border-top: var(--vector-silver-100);
   /* The flat sibling: the selected segment of a segmented control, which is
    * too small to read a gradient. */
   --color-primary-flat: var(--vector-silver-300);
@@ -501,7 +506,7 @@
    * content varies and a future virtualised list can compute offsets without
    * measuring. `--row-height` is the live value: the shell re-points it when
    * density changes, and everything downstream follows. */
-  --row-height-dense: 2.25rem; /* 36px */
+  --row-height-dense: 2.125rem; /* 34px */
   --row-height-comfortable: 2.875rem; /* 46px */
   --row-height: var(--row-height-dense);
   /* The column every status/priority glyph is drawn into. A fixed width means
@@ -511,6 +516,43 @@
   --glyph-column: 1.25rem; /* 20px */
   /* The mono issue key column, wide enough for `ENG-1234`. */
   --key-column: 4.25rem; /* 68px */
+
+  /* --- The measured surface ----------------------------------------- */
+  /* An engineering grid for ground that would otherwise be empty: the
+   * signed-out screens and onboarding. NOT for screens that hold a list --
+   * ruled rows over a ruled ground is two grids arguing, and the rows win.
+   *
+   * Paired with `--pattern-grid-fade`, which is not decoration either: an
+   * unfaded grid running to the edges reads as a texture applied to the page,
+   * where a grid dissolving toward the centre reads as a surface the content
+   * is sitting on. Use both or neither.
+   */
+  --pattern-grid: linear-gradient(var(--vector-navy-850) 1px, transparent 1px),
+    linear-gradient(90deg, var(--vector-navy-850) 1px, transparent 1px);
+  --pattern-grid-size: 3rem; /* 48px */
+  --pattern-grid-fade: radial-gradient(
+    ellipse 60% 45% at 50% 34%,
+    transparent 0%,
+    var(--color-bg-app) 100%
+  );
+
+  /* --- The mono micro-label ----------------------------------------- */
+  /* The direction's structural voice: column headers, property names, step
+   * counters, status readouts. Every one of them is IBM Plex Mono, uppercase,
+   * and widely tracked, and the tracking is what makes it read as an
+   * instrument legend rather than as shouting.
+   *
+   * Three sizes because the label appears at three scales and picking one
+   * would make column headers either too loud or property names too faint.
+   * Tracking loosens as the size drops, which is what keeps the smallest one
+   * legible.
+   */
+  --label-mono-lg: 0.6875rem; /* 11px   -- screen-level readouts */
+  --label-mono-md: 0.65625rem; /* 10.5px -- property and step labels */
+  --label-mono-sm: 0.59375rem; /* 9.5px  -- column headers */
+  --label-mono-tracking-lg: 0.1em;
+  --label-mono-tracking-md: 0.14em;
+  --label-mono-tracking-sm: 0.2em;
 
   /* The single viewport width at which the shell stops being a two-column
    * layout. Recorded here as the one source of truth -- but note that CSS
