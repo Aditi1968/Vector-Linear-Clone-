@@ -19,18 +19,27 @@ import type { Comment } from './types'
 const NO_COMMENTS: readonly Comment[] = []
 
 /**
- * How a comment's author is named when the workspace has never heard of them.
+ * How a comment's author is named when the member list does not contain them.
  *
- * Reachable, and not a bug: `workspaceMembers` lists who is in the workspace
- * *now*, and a comment outlives its author's membership. Naming them
- * "Unknown" would read as an error; naming them "Former member" says the true
- * thing, which is that the comment is real and the person has gone.
+ * This used to say "Former member", on the reasoning that `workspaceMembers`
+ * listed who was in the workspace *now* while a comment outlives its author's
+ * membership. Since 026 that is no longer the reasoning available: a removal
+ * stamps the membership rather than deleting it, `workspaceMembers` returns
+ * the people who have left alongside the ones who are here, and somebody who
+ * left therefore resolves to their own name -- which is the entire reason the
+ * row is kept.
+ *
+ * So this branch no longer means "they left". It means the id resolved to
+ * nothing, which is a lookup that failed or a response that was short, and
+ * calling that "Former member" would put a specific, true-sounding claim on an
+ * unknown -- the same words the members screen uses for people it can name.
+ * Saying the honest thing keeps the two apart.
  */
-const FORMER_MEMBER = 'Former member'
+const UNKNOWN_AUTHOR = 'Unknown author'
 
 export interface UseCommentsResult {
   comments: readonly Comment[]
-  /** A display name for an author id -- see the note on `FORMER_MEMBER`. */
+  /** A display name for an author id -- see the note on `UNKNOWN_AUTHOR`. */
   authorName: (authorId: string) => string
   /**
    * Whether the reader may withdraw this comment.
@@ -151,10 +160,14 @@ export function useComments(workspaceSlug: string, issueId: string): UseComments
 
   const authorName = useCallback(
     (authorId: string): string => {
+      // Searched over the whole list, former members included, and that is
+      // the behaviour rather than an oversight: a comment is a thing that
+      // happened, and the person who wrote it does not stop having written it
+      // by leaving. Nothing here filters on `removedAt`.
       const member = members?.find((candidate) => candidate.userId === authorId)
 
       if (member === undefined) {
-        return FORMER_MEMBER
+        return UNKNOWN_AUTHOR
       }
 
       // `name` is nullable on `WorkspaceMember`; the email is always there and

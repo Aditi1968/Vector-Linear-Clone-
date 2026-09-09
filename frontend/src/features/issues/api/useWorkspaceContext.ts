@@ -18,8 +18,16 @@ const NO_PROJECTS: readonly WorkspaceProject[] = []
 export interface WorkspaceContext {
   /** Teams, in the order the server returned them. */
   teams: readonly WorkspaceTeam[]
-  /** Everyone in the workspace, for the assignee picker. */
+  /**
+   * Everyone the workspace has had, including people who have left.
+   *
+   * For resolving a name, never for offering a choice. An issue created or
+   * assigned by somebody who has since been removed still has to say who they
+   * were; `activeMembers` is what a picker reads.
+   */
   members: readonly WorkspaceMember[]
+  /** The people still here -- the only ones who can be given future work. */
+  activeMembers: readonly WorkspaceMember[]
   /** Every project an issue can be placed in. */
   projects: readonly WorkspaceProject[]
 
@@ -93,9 +101,18 @@ export function useWorkspaceContext(): WorkspaceContext {
 
     const memberById = new Map(members.map((member) => [member.userId, member]))
 
+    // Filtered here rather than on the server, and rather than at each picker.
+    // `workspaceMembers` deliberately returns both halves in one list -- see
+    // the note on `MembershipRepository.list_members` -- because a screen that
+    // fetched only the active ones would render a former member's work as
+    // authored by nobody, which looks exactly like a lookup that failed. So
+    // the split happens once, by field, where every consumer can see it.
+    const activeMembers = members.filter((member) => member.removedAt === null)
+
     return {
       teams,
       members,
+      activeMembers,
       projects,
       stateById,
       memberById,

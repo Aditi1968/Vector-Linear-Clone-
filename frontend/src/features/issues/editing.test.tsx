@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 import {
   CYCLE_ID,
   DONE_STATE_ID,
+  FORMER_MEMBER_ID,
   issueArchived,
   issueDetail,
   issueDetailData,
@@ -136,6 +137,59 @@ describe('editing an issue', () => {
       id: ALPHA_ID,
       input: { workspaceSlug: WORKSPACE_SLUG, assigneeId: null },
     })
+  })
+
+  it('offers nobody who has left as an assignee, and still names them as the creator', async () => {
+    const view = renderApp({ initialPath: detailPath })
+
+    await view.link.resolve('IssueWorkspaceContext', {
+      data: workspaceContextData({
+        workspaceMembers: [
+          {
+            __typename: 'WorkspaceMember',
+            userId: MEMBER_ID,
+            name: 'Ada Lovelace',
+            email: 'ada@example.com',
+            removedAt: null,
+          },
+          {
+            // `workspaceMembers` returns this row on purpose -- 026 stamps a
+            // removed membership rather than deleting it -- so the two halves
+            // of this test come from one response and one list.
+            __typename: 'WorkspaceMember',
+            userId: FORMER_MEMBER_ID,
+            name: 'Alonzo Church',
+            email: 'alonzo@example.com',
+            removedAt: '2026-06-01T00:00:00.000Z',
+          },
+        ],
+      }),
+    })
+    await view.link.resolve('IssueList', {
+      data: issueListData([issueRow(1, { title: 'Alpha' })]),
+    })
+    await view.link.resolve('IssueDetail', {
+      data: issueDetailData(
+        issueDetail(1, { title: 'Alpha', creatorId: FORMER_MEMBER_ID }),
+      ),
+    })
+
+    const assignee = picker('Assignee')
+
+    expect(
+      within(assignee).getByRole('option', { name: 'Ada Lovelace' }),
+    ).toBeInTheDocument()
+    // Assigning work to somebody who cannot open the issue is the bug this
+    // guards: `find_membership` filters `removed_at IS NULL`, so they would
+    // never see it.
+    expect(
+      within(assignee).queryByRole('option', { name: 'Alonzo Church' }),
+    ).toBeNull()
+
+    // ...and the same person still has a name in the log, which is why the
+    // list is not filtered on the server. Dropping them would make "created
+    // by somebody who left" render as "created by nobody".
+    expect(within(inspector()).getByText('Alonzo Church')).toBeInTheDocument()
   })
 
   it('clears a due date the same way', async () => {

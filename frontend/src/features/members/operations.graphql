@@ -19,6 +19,12 @@
 # and why the mutations in ./api.ts refetch it. Adding a `keyFields` policy
 # would fix the role case and not the removal case, so it is not worth the
 # entry in the shared cache configuration.
+#
+# `removedAt` is why this list is not only the current roster. Since 026 a
+# removal stamps the membership rather than deleting it, so somebody who left
+# is still a row here -- and without this field they render as a current
+# member, role menu and all. It is the field this screen marks them by and the
+# field that takes their controls away; see ./MembersPage.tsx.
 query WorkspaceMemberList($workspaceSlug: String!) {
   workspaceMembers(workspaceSlug: $workspaceSlug) {
     userId
@@ -26,6 +32,7 @@ query WorkspaceMemberList($workspaceSlug: String!) {
     name
     role
     createdAt
+    removedAt
   }
 }
 

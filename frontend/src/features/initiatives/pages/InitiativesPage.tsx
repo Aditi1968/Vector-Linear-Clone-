@@ -70,7 +70,11 @@ const NO_ERRORS: readonly InitiativeValidationError[] = []
  * is a different fact from "on track" and is shown as itself.
  */
 export function InitiativesPage() {
-  const { members, projects, isLoading: isLoadingContext } = useWorkspaceContext()
+  // Two lists for two jobs. The detail panel names an owner and the author of
+  // every update, both of whom may have left; the form chooses who owns the
+  // initiative next, and may only offer people still here.
+  const { members, activeMembers, projects, isLoading: isLoadingContext } =
+    useWorkspaceContext()
 
   const {
     initiatives,
@@ -464,7 +468,7 @@ export function InitiativesPage() {
           errorMessage={formMessage}
           errors={formErrors}
           isSaving={actions.isSaving}
-          members={members}
+          members={activeMembers}
           onCancel={closeForms}
           onSubmit={handleCreate}
           submitLabel="Create initiative"
@@ -487,7 +491,7 @@ export function InitiativesPage() {
             initialStatus={editing.status}
             initialTargetDate={editing.targetDate}
             isSaving={actions.isSaving}
-            members={members}
+            members={activeMembers}
             onCancel={closeForms}
             onSubmit={handleUpdate}
             submitLabel="Save changes"

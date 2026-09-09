@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 
 import { main, renderApp } from '../../test/render'
 import {
+  FORMER_MEMBER_ID,
   MEMBER_ID,
   OTHER_MEMBER_ID,
   WORKSPACE_SLUG,
@@ -10,6 +11,7 @@ import {
   workspaceShellData,
 } from '../../test/factories'
 import type {
+  MemberRemoveMutation,
   MemberRoleUpdateMutation,
   WorkspaceInvitationListQuery,
   WorkspaceMemberListQuery,
@@ -37,6 +39,7 @@ const membersData: WorkspaceMemberListQuery = {
       name: 'Ada Lovelace',
       role: 'OWNER',
       createdAt: '2026-01-01T00:00:00.000Z',
+      removedAt: null,
     },
     {
       __typename: 'WorkspaceMember',
@@ -45,6 +48,20 @@ const membersData: WorkspaceMemberListQuery = {
       name: null,
       role: 'MEMBER',
       createdAt: '2026-01-02T00:00:00.000Z',
+      removedAt: null,
+    },
+    {
+      // Somebody who has left. 026 stamps the membership rather than deleting
+      // it, so the server returns this row alongside the current ones -- and
+      // `role` is still ADMIN, which is exactly what makes an unmarked row
+      // dangerous: it reads as a serving administrator.
+      __typename: 'WorkspaceMember',
+      userId: FORMER_MEMBER_ID,
+      email: 'alonzo@example.com',
+      name: 'Alonzo Church',
+      role: 'ADMIN',
+      createdAt: '2026-01-03T00:00:00.000Z',
+      removedAt: '2026-06-01T00:00:00.000Z',
     },
   ],
 }
@@ -212,6 +229,30 @@ describe('what an admin is offered', () => {
     expect(within(main()).queryByText('No invitations are outstanding.')).toBeNull()
   })
 
+  it('marks someone who has left, and offers no way to act on them', async () => {
+    const view = open('ADMIN')
+
+    await view.link.resolve('WorkspaceMemberList', { data: membersData })
+    await view.link.resolve('WorkspaceInvitationList', { data: invitationsData })
+
+    // In words, not in colour: a dimmed row says this to some people only.
+    expect(within(main()).getByText('Former member')).toBeInTheDocument()
+    // The name survives, because the row exists so that what they wrote still
+    // has an author.
+    expect(within(main()).getByText('Alonzo Church')).toBeInTheDocument()
+
+    // No role menu and no remove: every item in that menu is a change to a
+    // membership that has already ended, and the server refuses all of them.
+    // `getByRole` throwing on two matches is what keeps these names apart.
+    expect(
+      within(main()).queryByRole('button', { name: 'Actions for Alonzo Church' }),
+    ).toBeNull()
+    // Not because the menu is gone for everybody.
+    expect(
+      within(main()).getByRole('button', { name: 'Actions for Ada Lovelace' }),
+    ).toBeInTheDocument()
+  })
+
   it('confirms before removing someone', async () => {
     const view = open('ADMIN')
 
@@ -234,5 +275,102 @@ describe('what an admin is offered', () => {
     await expect(view.link.waitForRequest('MemberRemove')).resolves.toMatchObject({
       input: { workspaceSlug: WORKSPACE_SLUG, userId: MEMBER_ID },
     })
+  })
+
+  /** Open the dialog on Ada and press Remove. Every removal test starts here. */
+  async function removeAda(view: ReturnType<typeof open>) {
+    await view.link.resolve('WorkspaceMemberList', { data: membersData })
+    await view.link.resolve('WorkspaceInvitationList', { data: invitationsData })
+
+    await view.user.click(
+      screen.getByRole('button', { name: 'Actions for Ada Lovelace' }),
+    )
+    await view.user.click(
+      screen.getByRole('menuitem', { name: 'Remove from workspace' }),
+    )
+    await view.user.click(screen.getByRole('button', { name: 'Remove' }))
+  }
+
+  it('says which person a blocked removal is about, and why', async () => {
+    const view = open('ADMIN')
+
+    await removeAda(view)
+
+    const refused: MemberRemoveMutation = {
+      memberRemove: {
+        __typename: 'MemberRemovePayload',
+        removedUserId: null,
+        errors: [
+          {
+            __typename: 'ValidationErrorType',
+            field: 'userId',
+            code: 'STILL_LEADS_PROJECT',
+            message: 'Member still leads a project; reassign the lead first',
+          },
+        ],
+      },
+    }
+
+    await view.link.resolve('MemberRemove', { data: refused })
+
+    // The reason, not "The change could not be saved" -- a removal refused
+    // because somebody still leads a project is a thing an admin can act on,
+    // and only if the screen says so.
+    expect(
+      screen.getByText(/Member still leads a project; reassign the lead first/),
+    ).toBeInTheDocument()
+    // And who it is about. The server answers about the id it was sent, so
+    // "Member" in its message names nobody a reader can see; the page is the
+    // only side that knows which row this was.
+    expect(screen.getByText(/Ada Lovelace was not removed/)).toBeInTheDocument()
+
+    // Refused means unchanged: the row is still an ordinary member with its
+    // menu, not one the screen has optimistically marked as gone.
+    expect(within(main()).getAllByText('Former member')).toHaveLength(1)
+    expect(
+      within(main()).getByRole('button', { name: 'Actions for Ada Lovelace' }),
+    ).toBeInTheDocument()
+  })
+
+  it('shows the removal in the list the server sends back afterwards', async () => {
+    const view = open('ADMIN')
+
+    await removeAda(view)
+
+    await view.link.resolve('MemberRemove', {
+      data: {
+        memberRemove: {
+          __typename: 'MemberRemovePayload',
+          removedUserId: MEMBER_ID,
+          errors: [],
+        },
+      } satisfies MemberRemoveMutation,
+    })
+
+    // The write refetches the list rather than patching the cache, so this is
+    // the same answer a reload would get -- the removal is a stamped row
+    // coming back from the server, not a state this screen is holding.
+    await view.link.resolve('WorkspaceMemberList', {
+      data: {
+        workspaceMembers: membersData.workspaceMembers.map((member) =>
+          member.userId === MEMBER_ID
+            ? { ...member, removedAt: '2026-06-02T00:00:00.000Z' }
+            : member,
+        ),
+      } satisfies WorkspaceMemberListQuery,
+    })
+
+    // Two people have now left, and both are marked. Ada keeps her name and
+    // loses her menu.
+    expect(within(main()).getAllByText('Former member')).toHaveLength(2)
+    expect(within(main()).getByText('Ada Lovelace')).toBeInTheDocument()
+    expect(
+      within(main()).queryByRole('button', { name: 'Actions for Ada Lovelace' }),
+    ).toBeNull()
+    // Grace is untouched, so the marker is about `removedAt` and not about
+    // the list having been refetched.
+    expect(
+      within(main()).getByRole('button', { name: 'Actions for grace@example.com' }),
+    ).toBeInTheDocument()
   })
 })

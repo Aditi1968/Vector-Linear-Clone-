@@ -56,7 +56,9 @@ import styles from '../triage.module.css'
  * into the sign-in redirect.
  */
 export function TriagePage() {
-  const { teams, members, isLoading: isLoadingContext } = useWorkspaceContext()
+  // `activeMembers`: every use of this list on this screen is the assign
+  // menu, and triage is where work gets handed to somebody to do next.
+  const { teams, activeMembers, isLoading: isLoadingContext } = useWorkspaceContext()
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
 
   // The first team until someone chooses otherwise. A default, not a
@@ -300,7 +302,7 @@ export function TriagePage() {
                     <TriageRow
                       isSaving={actions.isSaving}
                       key={row.issue.id}
-                      members={members}
+                      members={activeMembers}
                       now={now}
                       onAccept={handleAccept}
                       onAssign={handleAssign}

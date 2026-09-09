@@ -60,6 +60,18 @@ export const ISSUE_ID = uuid(1)
 export const VIEWER_ID = uuid(900)
 export const OTHER_USER_ID = uuid(901)
 
+/**
+ * Somebody who has left the workspace, and is still in `authorsData`.
+ *
+ * That is what the server sends, not a convenience: 026 stamps a removed
+ * membership instead of deleting it and `workspaceMembers` returns the ones
+ * who left, precisely so a comment they wrote still resolves to their name.
+ * `CommentAuthors` selects no `removedAt` because this panel has no use for
+ * it -- it names people, and a name does not expire -- so a former member is
+ * shaped exactly like a current one here, which is the point.
+ */
+export const FORMER_USER_ID = uuid(902)
+
 export function cursor(label: string): string {
   return `Y3Vyc29yOnsiY3JlYXRlZF9hdCI6${label}`
 }
@@ -154,6 +166,12 @@ export function authorsData(viewerId: string | null = VIEWER_ID): CommentAuthors
         userId: OTHER_USER_ID,
         name: 'Grace Hopper',
         email: 'grace@example.com',
+      },
+      {
+        __typename: 'WorkspaceMember',
+        userId: FORMER_USER_ID,
+        name: 'Alan Turing',
+        email: 'alan@example.com',
       },
     ],
   }

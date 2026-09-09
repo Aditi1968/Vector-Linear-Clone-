@@ -71,6 +71,17 @@ export const DONE_STATE_ID = '00000000-0000-4000-8000-00000000ff02'
 export const MEMBER_ID = '00000000-0000-4000-8000-00000000aa01'
 export const OTHER_MEMBER_ID = '00000000-0000-4000-8000-00000000aa02'
 
+/**
+ * Somebody who has left, and is deliberately NOT in the default fixtures.
+ *
+ * `workspaceMembers` returns former members alongside current ones -- 026
+ * stamps a membership rather than deleting it, so that anything they wrote
+ * still resolves to their name. A test that cares says so by overriding
+ * `workspaceMembers`; putting one in every fixture would silently change what
+ * every picker in the suite is expected to contain.
+ */
+export const FORMER_MEMBER_ID = '00000000-0000-4000-8000-00000000aa03'
+
 export const PROJECT_ID = '00000000-0000-4000-8000-00000000bb01'
 export const CYCLE_ID = '00000000-0000-4000-8000-00000000cc01'
 
@@ -301,6 +312,7 @@ export function workspaceContextData(
         userId: MEMBER_ID,
         name: 'Ada Lovelace',
         email: 'ada@example.com',
+        removedAt: null,
       },
       {
         // No name, which is a real state -- an invited account that has never
@@ -309,6 +321,7 @@ export function workspaceContextData(
         userId: OTHER_MEMBER_ID,
         name: null,
         email: 'grace@example.com',
+        removedAt: null,
       },
     ],
     projects: {

@@ -10,6 +10,7 @@ import {
   commentRejected,
   commentsData,
   cursor,
+  FORMER_USER_ID,
   ISSUE_ID,
   OTHER_USER_ID,
   renderPanel,
@@ -85,9 +86,24 @@ describe('the comment thread', () => {
     ])
 
     expect(threadTexts()[0]).toContain('Grace Hopper')
-    // Reachable, and not a bug: a comment outlives its author's membership.
-    expect(threadTexts()[1]).toContain('Former member')
+    // An id in no list at all. Not "Former member": people who left ARE in
+    // the list -- see the test below -- so this branch is a lookup that came
+    // back with nothing, and naming it after a specific fate would be a guess
+    // dressed as a fact.
+    expect(threadTexts()[1]).toContain('Unknown author')
     expect(view.link.countOf('CommentAuthors')).toBe(1)
+  })
+
+  it('still names the author of a comment by somebody who has left', async () => {
+    await mount(undefined, [comment(1, { authorId: FORMER_USER_ID })])
+
+    // The whole reason 026 keeps a removed member's row. A thread is a record
+    // of what was said, and "Alan Turing wrote this" does not stop being true
+    // when Alan leaves -- so the panel reads the member list unfiltered, and
+    // this row is the guard on anything that later decides to "clean up"
+    // former members out of an activity log.
+    expect(threadTexts()[0]).toContain('Alan Turing')
+    expect(threadTexts()[0]).not.toContain('Unknown author')
   })
 
   it('shows a posted comment without refetching the thread', async () => {

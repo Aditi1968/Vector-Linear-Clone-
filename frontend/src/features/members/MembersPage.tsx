@@ -127,6 +127,13 @@ export function MembersPage() {
    * `email` field. Only the invite has fields for a rejection to name; every
    * other write on this screen owns no control, so its refusal belongs at the
    * top of the page and nowhere else.
+   *
+   * `prefix` names who a refusal is about. A removal is refused by the server
+   * with a reason and no subject -- "Member still leads a project; reassign
+   * the lead first" -- because the server is answering about the id it was
+   * sent. Read at the top of a list of people, that sentence is about nobody
+   * in particular, and the person it refers to is the one thing the screen
+   * already knows.
    */
   const report = useCallback(
     (
@@ -136,6 +143,7 @@ export function MembersPage() {
         | { status: 'failed'; message: string },
       success: string,
       toForm = false,
+      prefix = '',
     ): boolean => {
       setFormErrors(NO_ERRORS)
 
@@ -152,13 +160,15 @@ export function MembersPage() {
           setFormErrors(outcome.errors)
           setActionError(null)
         } else {
-          setActionError(outcome.errors.map((entry) => entry.message).join(' '))
+          setActionError(
+            prefix + outcome.errors.map((entry) => entry.message).join(' '),
+          )
         }
 
         return false
       }
 
-      setActionError(outcome.message)
+      setActionError(prefix + outcome.message)
       return false
     },
     [],
@@ -262,6 +272,12 @@ export function MembersPage() {
                 <List label="Workspace members">
                   {members.map((member) => {
                     const isSelf = member.userId === viewer?.id
+                    // Since 026 a removal stamps the membership instead of
+                    // deleting it, so this list is the roster *and* the
+                    // record of who used to be on it. Without this the two
+                    // render identically -- role menu included -- and the
+                    // screen offers to promote somebody who left.
+                    const isFormer = member.removedAt !== null
 
                     const items: readonly MenuItem[] = [
                       ...ROLES.map((entry) => ({
@@ -310,23 +326,55 @@ export function MembersPage() {
                         </ListRowMain>
 
                         <ListRowMeta>
+                          {/* The word, not a colour and not a dimmed row.
+                              Read before the role, because "Owner" on its own
+                              is the thing this marker has to contradict. */}
+                          {isFormer && (
+                            <span className={styles.former}>Former member</span>
+                          )}
+
                           {/* Readouts, not pills. `roleLabel` still returns
                               "Admin" rather than "ADMIN" -- the capitals are
                               CSS, so what a screen reader receives is a word
-                              and not an acronym it may spell out. */}
+                              and not an acronym it may spell out.
+
+                              Still shown for someone who left: it is what they
+                              held, which is what a row about the past is for,
+                              and it grants nothing -- `find_membership`
+                              filters `removed_at IS NULL`, so their session
+                              carries no permission at all. */}
                           <span className={styles.role}>
                             {roleLabel(member.role)}
                           </span>
 
-                          <time
-                            className={styles.joined}
-                            dateTime={member.createdAt}
-                            title={member.createdAt}
-                          >
-                            Joined {formatAbsolute(member.createdAt)}
-                          </time>
+                          {member.removedAt === null ? (
+                            <time
+                              className={styles.joined}
+                              dateTime={member.createdAt}
+                              title={member.createdAt}
+                            >
+                              Joined {formatAbsolute(member.createdAt)}
+                            </time>
+                          ) : (
+                            /* When they left, in place of when they joined.
+                               One date per row: the joining date of somebody
+                               who is gone is the less useful of the two. */
+                            <time
+                              className={styles.joined}
+                              dateTime={member.removedAt}
+                              title={member.removedAt}
+                            >
+                              Removed {formatAbsolute(member.removedAt)}
+                            </time>
+                          )}
 
-                          {canManage && (
+                          {/* No menu for a former member: every item in it is
+                              a change to a membership that has already ended,
+                              and the server refuses all of them -- `update_role`
+                              and `mark_removed` both filter on
+                              `removed_at IS NULL`. Offering them would be a
+                              screen promising what the backend will not do. */}
+                          {canManage && !isFormer && (
                             <Menu
                               label={`Actions for ${memberName(member)}`}
                               items={items}
@@ -569,11 +617,21 @@ export function MembersPage() {
                 setPendingRemoval(null)
 
                 void removeMember(target.userId).then((outcome) => {
-                  // The server refuses to remove the last owner, and that
-                  // refusal arrives here as `rejected`. The rule is not
+                  // The server refuses to remove the last owner, and also
+                  // anyone still holding something shared -- a project lead,
+                  // an initiative owner, a shared view, a connected
+                  // integration. Each arrives as `rejected` carrying the
+                  // reason and what to do about it. None of those rules is
                   // reimplemented on this side: a rule enforced in two places
-                  // is a rule that will eventually disagree with itself.
-                  report(outcome, `${memberName(target)} was removed.`)
+                  // is a rule that will eventually disagree with itself. The
+                  // screen's whole job is to say which person the reason is
+                  // about, which the server has no way to know it should.
+                  report(
+                    outcome,
+                    `${memberName(target)} was removed.`,
+                    false,
+                    `${memberName(target)} was not removed. `,
+                  )
                 })
               }}
             >

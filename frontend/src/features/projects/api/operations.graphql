@@ -110,11 +110,17 @@ query ProjectTeams($workspaceSlug: String!) {
 #
 # A lead id this query does not return is a person the viewer cannot see (or
 # an account since removed); ../lib/people.ts says so rather than guessing.
+#
+# `removedAt` is what keeps those two jobs apart. A lead who has since left
+# still has to resolve to a name -- otherwise the project reads as led by
+# nobody -- but they cannot be an option in the picker, because a lead is
+# somebody who is going to run the project. See `useProjectMembers`.
 query ProjectMembers($workspaceSlug: String!) {
   workspaceMembers(workspaceSlug: $workspaceSlug) {
     userId
     name
     email
+    removedAt
   }
 }
 

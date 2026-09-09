@@ -68,7 +68,10 @@ export function ProjectDetailPage() {
 
   const { project, isLoading, isNotFound, errorMessage, retry } = useProjectDetail(projectId)
   const { teams } = useProjectTeams()
-  const { members } = useProjectMembers()
+  // Both halves, for the two different jobs: `members` names whoever
+  // `leadId` points at, `activeMembers` is what the editor may offer as the
+  // next lead.
+  const { members, activeMembers } = useProjectMembers()
   const issueQuery = useProjectIssues(projectId)
   const unfiledIssues = useUnfiledIssues()
 
@@ -425,7 +428,7 @@ export function ProjectDetailPage() {
             targetDate: project.targetDate,
             leadId: project.leadId,
           }}
-          members={members}
+          members={activeMembers}
           submitLabel="Save changes"
           isSubmitting={actions.isSaving}
           onCancel={closeEditor}

@@ -166,7 +166,9 @@ export function IssueInspector({ issueId }: IssueInspectorProps) {
   const workspaceSlug = useWorkspaceSlug()
 
   const { issue, isLoading, isNotFound, errorMessage, retry } = useIssueDetail(issueId)
-  const { teamById, memberById, members, projects, isLoading: isContextLoading } =
+  // `memberById` names the creator, who may well have left; `activeMembers`
+  // is the assignee picker, which may only offer people who are still here.
+  const { teamById, memberById, activeMembers, projects, isLoading: isContextLoading } =
     useWorkspaceContext()
   const cycles = useTeamCycles(issue?.teamId)
   const { updateIssue, setProject, setCycle, archiveIssue, isSaving } =
@@ -555,7 +557,7 @@ export function IssueInspector({ issueId }: IssueInspectorProps) {
                 value={issue.assigneeId ?? ''}
               >
                 <option value="">Unassigned</option>
-                {members.map((member) => (
+                {activeMembers.map((member) => (
                   <option key={member.userId} value={member.userId}>
                     {memberLabel(member)}
                   </option>
