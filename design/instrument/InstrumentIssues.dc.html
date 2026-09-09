@@ -1,0 +1,152 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; background: #050a14; -webkit-font-smoothing: antialiased; }
+    a { color: #5cc5db; text-decoration: none; }
+    a:hover { color: #9fdfec; }
+  </style>
+</helmet>
+
+<div style="display: flex; width: 1440px; height: 900px; background: #050a14; overflow: hidden;">
+
+  <div style="display: flex; flex-direction: column; gap: 18px; width: 224px; flex-shrink: 0; padding: 14px 8px; border-right: 1px solid #101a2e; background: #04080f;">
+    <div style="display: flex; align-items: center; gap: 9px; padding: 2px 8px;">
+      <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#5cc5db" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <circle cx="3.9" cy="12.1" r="1.15" fill="#5cc5db" stroke="none"></circle>
+        <path d="M5.1 10.9 11.9 4.1"></path>
+        <path d="M6.9 4.1h5v5"></path>
+      </svg>
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: #e4eaf5;">Northwind</span>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 1px;">
+      <sc-for list="{{nav}}" as="i" hint-placeholder-count="6">
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-left: 2px solid {{i.mark}}; border-radius: 0 4px 4px 0; background: {{i.bg}};">
+          <span style="font-size: 12.5px; font-weight: {{i.weight}}; color: {{i.fg}};">{{i.label}}</span>
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; color: {{i.countFg}};">{{i.count}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; flex-grow: 1; min-width: 0;">
+
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 52px; flex-shrink: 0; padding: 0 20px; border-bottom: 1px solid #101a2e;">
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <h1 style="margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.015em; color: #e9eef7;">Issues</h1>
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.1em; color: #626c7d;">24 OPEN &#183; 7 DONE</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="display: flex; align-items: center; height: 26px; padding: 0 10px; border: 1px solid #22314c; border-radius: 4px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.06em; color: #98a5bb;">FILTER</div>
+        <div style="display: flex; align-items: center; height: 26px; padding: 0 12px; border: 1px solid #24354f; border-top-color: #ffffff; border-radius: 4px; background-image: linear-gradient(180deg, #eef2f9 0%, #b6c3d8 100%); color: #08101d; font-size: 12px; font-weight: 600;">New issue</div>
+      </div>
+    </div>
+
+    <!-- Column header: mono, uppercase, measured. -->
+    <div style="display: grid; grid-template-columns: 18px 18px 62px minmax(0, 1fr) 96px 74px 30px; align-items: center; gap: 10px; height: 26px; padding: 0 20px; border-bottom: 1px solid #101a2e; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9.5px; letter-spacing: 0.16em; color: #626c7d;">
+      <span></span>
+      <span></span>
+      <span>ID</span>
+      <span>TITLE</span>
+      <span>LABEL</span>
+      <span>DUE</span>
+      <span></span>
+    </div>
+
+    <div style="display: flex; flex-direction: column;">
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="10">
+        <div style="display: grid; grid-template-columns: 18px 18px 62px minmax(0, 1fr) 96px 74px 30px; align-items: center; gap: 10px; height: 34px; padding: 0 20px; border-bottom: 1px solid #080e1b; background: {{r.bg}};">
+
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true" focusable="false">
+            <rect x="2" y="9.5" width="2.4" height="3.5" rx="0.6" fill="{{r.p1}}"></rect>
+            <rect x="6.3" y="6.5" width="2.4" height="6.5" rx="0.6" fill="{{r.p2}}"></rect>
+            <rect x="10.6" y="3.5" width="2.4" height="9.5" rx="0.6" fill="{{r.p3}}"></rect>
+          </svg>
+
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="{{r.sColor}}" stroke-width="1.5" aria-hidden="true" focusable="false">
+            <circle cx="8" cy="8" r="5.4" stroke-dasharray="{{r.sDash}}"></circle>
+            <path d="{{r.sMark}}" fill="{{r.sFill}}" stroke="{{r.sStroke}}" stroke-linecap="round" stroke-linejoin="round"></path>
+          </svg>
+
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #74809a;">{{r.key}}</span>
+          <span style="overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; color: #e4eaf5;">{{r.title}}</span>
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.06em; color: {{r.labelColor}};">{{r.label}}</span>
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: {{r.dueColor}};">{{r.due}}</span>
+          <div style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 3px; background: #16223a; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9.5px; font-weight: 600; color: #c9d4e6;">{{r.who}}</div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const CAT = {
+      backlog:   { color: '#626c7d', dash: '2.1 2.3', mark: '', fill: 'none', stroke: 'none' },
+      unstarted: { color: '#a6aeba', dash: 'none', mark: '', fill: 'none', stroke: 'none' },
+      started:   { color: '#efc768', dash: 'none', mark: 'M8 5.2 10.8 8 8 10.8 5.2 8Z', fill: '#efc768', stroke: 'none' },
+      completed: { color: '#7fd0a5', dash: 'none', mark: 'm5.3 8.1 1.95 1.95 3.5-3.95', fill: 'none', stroke: '#7fd0a5' },
+    };
+    const FILLED = { none: 0, low: 1, medium: 2, high: 3, urgent: 3 };
+    const PCOLOR = { none: '#626c7d', low: '#8d96a4', medium: '#a6aeba', high: '#efc768', urgent: '#e4645f' };
+    const DIM = '#16223a';
+
+    const data = [
+      { key: 'ENG-114', title: 'Repository leaks asyncpg.Record to the service layer', cat: 'started', prio: 'high', label: 'ARCHITECTURE', lc: '#9fdfec', due: 'SEP 18', over: false, who: 'PR', sel: true },
+      { key: 'ENG-108', title: 'Composite key missing on the releases join', cat: 'unstarted', prio: 'urgent', label: 'TENANCY', lc: '#e4645f', due: 'SEP 09', over: true, who: 'AV', sel: false },
+      { key: 'APP-91', title: 'Board card move loses focus after optimistic update', cat: 'started', prio: 'medium', label: 'A11Y', lc: '#efc768', due: 'SEP 10', over: false, who: 'DC', sel: false },
+      { key: 'ENG-96', title: 'Keyset pagination drops the last page on ties', cat: 'unstarted', prio: 'high', label: 'BACKEND', lc: '#98a5bb', due: '—', over: false, who: 'PR', sel: false },
+      { key: 'APP-88', title: 'Command palette steals focus from the composer', cat: 'unstarted', prio: 'medium', label: 'A11Y', lc: '#efc768', due: '—', over: false, who: 'DC', sel: false },
+      { key: 'APP-77', title: 'Rail collapse loses the focused nav item', cat: 'backlog', prio: 'low', label: 'A11Y', lc: '#efc768', due: '—', over: false, who: 'DC', sel: false },
+      { key: 'ENG-72', title: 'Slack delivery loop has no dead-letter path', cat: 'backlog', prio: 'medium', label: 'INTEGRATION', lc: '#98a5bb', due: '—', over: false, who: 'AV', sel: false },
+      { key: 'ENG-64', title: 'Sweep expired sessions on the lifespan loop', cat: 'completed', prio: 'medium', label: 'SECURITY', lc: '#7fd0a5', due: 'SEP 04', over: false, who: 'AV', sel: false },
+      { key: 'ENG-51', title: 'Rate limit the unauthenticated argon2 path', cat: 'completed', prio: 'urgent', label: 'SECURITY', lc: '#7fd0a5', due: 'SEP 02', over: false, who: 'AV', sel: false },
+      { key: 'APP-40', title: 'Analytics empty state reads as a chart of zeroes', cat: 'completed', prio: 'low', label: 'CLARITY', lc: '#7fd0a5', due: 'AUG 29', over: false, who: 'DC', sel: false },
+    ];
+
+    return {
+      nav: [
+        { label: 'Issues', count: '24', state: 'on' },
+        { label: 'My issues', count: '6', state: 'off' },
+        { label: 'Inbox', count: '3', state: 'off' },
+        { label: 'Triage', count: '2', state: 'off' },
+        { label: 'Projects', count: '5', state: 'off' },
+        { label: 'Roadmap', count: '', state: 'off' },
+      ].map((i) => ({
+        label: i.label,
+        count: i.count,
+        bg: i.state === 'on' ? '#101d33' : 'transparent',
+        mark: i.state === 'on' ? '#5cc5db' : 'transparent',
+        fg: i.state === 'on' ? '#e9eef7' : '#98a5bb',
+        countFg: i.state === 'on' ? '#5cc5db' : '#626c7d',
+        weight: i.state === 'on' ? 600 : 400,
+      })),
+      rows: data.map((r) => {
+        const c = CAT[r.cat];
+        const n = FILLED[r.prio];
+        const on = PCOLOR[r.prio];
+        return {
+          key: r.key, title: r.title, label: r.label, labelColor: r.lc, due: r.due, who: r.who,
+          dueColor: r.over ? '#e4645f' : '#626c7d',
+          bg: r.sel ? '#101d33' : 'transparent',
+          p1: n >= 1 ? on : DIM, p2: n >= 2 ? on : DIM, p3: n >= 3 ? on : DIM,
+          sColor: c.color, sDash: c.dash, sMark: c.mark, sFill: c.fill, sStroke: c.stroke,
+        };
+      }),
+    };
+  }
+}
+</script>
+</body>
+</html>

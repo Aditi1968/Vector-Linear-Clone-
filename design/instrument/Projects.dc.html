@@ -1,0 +1,149 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; background: #050a14; -webkit-font-smoothing: antialiased; }
+    a { color: #5cc5db; text-decoration: none; }
+    a:hover { color: #9fdfec; }
+  </style>
+</helmet>
+
+<div style="display: grid; grid-template-columns: 224px minmax(0, 1fr); width: 1440px; height: 900px; background: #050a14; overflow: hidden;">
+
+  <div style="display: flex; flex-direction: column; gap: 18px; padding: 14px 8px; border-right: 1px solid #101a2e; background: #04080f;">
+    <div style="display: flex; align-items: center; gap: 9px; padding: 2px 8px;">
+      <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#5cc5db" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <circle cx="3.9" cy="12.1" r="1.15" fill="#5cc5db" stroke="none"></circle>
+        <path d="M5.1 10.9 11.9 4.1"></path>
+        <path d="M6.9 4.1h5v5"></path>
+      </svg>
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: #e4eaf5;">Northwind</span>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 1px;">
+      <sc-for list="{{nav}}" as="i" hint-placeholder-count="6">
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-left: 2px solid {{i.mark}}; border-radius: 0 4px 4px 0; background: {{i.bg}};">
+          <span style="font-size: 12.5px; font-weight: {{i.weight}}; color: {{i.fg}};">{{i.label}}</span>
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; color: {{i.countFg}};">{{i.count}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="display: flex; flex-direction: column; min-width: 0;">
+
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 52px; flex-shrink: 0; padding: 0 24px; border-bottom: 1px solid #101a2e;">
+      <div style="display: flex; align-items: baseline; gap: 12px;">
+        <h1 style="margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.015em; color: #e9eef7;">Projects</h1>
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.1em; color: #626c7d;">5 ACTIVE</span>
+      </div>
+      <div style="display: flex; align-items: center; height: 26px; padding: 0 12px; border: 1px solid #24354f; border-top-color: #ffffff; border-radius: 4px; background-image: linear-gradient(180deg, #eef2f9 0%, #b6c3d8 100%); color: #08101d; font-size: 12px; font-weight: 600;">New project</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 22px minmax(0, 1fr) 132px 200px 90px 74px; align-items: center; gap: 16px; height: 26px; padding: 0 24px; border-bottom: 1px solid #101a2e; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9.5px; letter-spacing: 0.16em; color: #626c7d;">
+      <span></span>
+      <span>PROJECT</span>
+      <span>LEAD</span>
+      <span>PROGRESS</span>
+      <span>TARGET</span>
+      <span style="text-align: right;">ISSUES</span>
+    </div>
+
+    <div style="display: flex; flex-direction: column;">
+      <sc-for list="{{rows}}" as="p" hint-placeholder-count="5">
+        <div style="display: grid; grid-template-columns: 22px minmax(0, 1fr) 132px 200px 90px 74px; align-items: center; gap: 16px; height: 62px; padding: 0 24px; border-bottom: 1px solid #101a2e;">
+
+          <!-- Health as a filled ring: the one place a dial belongs. -->
+          <svg width="18" height="18" viewBox="0 0 36 36" aria-hidden="true" focusable="false">
+            <circle cx="18" cy="18" r="14" fill="none" stroke="#16223a" stroke-width="4"></circle>
+            <circle cx="18" cy="18" r="14" fill="none" stroke="{{p.ring}}" stroke-width="4" stroke-linecap="round" stroke-dasharray="{{p.dash}}" transform="rotate(-90 18 18)"></circle>
+          </svg>
+
+          <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+            <span style="overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 14px; font-weight: 500; color: #e4eaf5;">{{p.name}}</span>
+            <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: {{p.stateFg}};">{{p.state}}</span>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 3px; background: #16223a; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9px; font-weight: 600; color: #c9d4e6;">{{p.who}}</div>
+            <span style="font-size: 12.5px; color: #98a5bb;">{{p.lead}}</span>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div style="display: flex; flex-grow: 1; height: 6px; border-radius: 1px; background: #101a2e; overflow: hidden;">
+              <div style="width: {{p.donePct}}; background: #7fd0a5;"></div>
+              <div style="width: {{p.progPct}}; background: #efc768;"></div>
+            </div>
+            <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; color: #74809a;">{{p.pct}}</span>
+          </div>
+
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: {{p.targetFg}};">{{p.target}}</span>
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; text-align: right; color: #74809a;">{{p.issues}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const CIRC = 2 * Math.PI * 14;
+    const HEALTH = { 'on track': '#7fd0a5', 'at risk': '#efc768', 'off track': '#e4645f', 'planned': '#626c7d' };
+
+    const data = [
+      { name: 'Billing migration', state: 'on track', lead: 'Priya', who: 'PR', done: 62, prog: 18, target: 'Oct 04', late: false, issues: '28' },
+      { name: 'Mobile beta', state: 'at risk', lead: 'Dev', who: 'DC', done: 34, prog: 22, target: 'Sep 22', late: false, issues: '41' },
+      { name: 'Tenancy hardening', state: 'on track', lead: 'Aditi', who: 'AV', done: 78, prog: 12, target: 'Sep 30', late: false, issues: '19' },
+      { name: 'Search relevance', state: 'off track', lead: 'Priya', who: 'PR', done: 15, prog: 10, target: 'Sep 08', late: true, issues: '12' },
+      { name: 'Design system v2', state: 'planned', lead: 'Dev', who: 'DC', done: 0, prog: 0, target: 'Nov 15', late: false, issues: '7' },
+    ];
+
+    return {
+      nav: [
+        { label: 'Issues', count: '24', state: 'off' },
+        { label: 'My issues', count: '6', state: 'off' },
+        { label: 'Inbox', count: '3', state: 'off' },
+        { label: 'Triage', count: '2', state: 'off' },
+        { label: 'Projects', count: '5', state: 'on' },
+        { label: 'Roadmap', count: '', state: 'off' },
+      ].map((i) => ({
+        label: i.label, count: i.count,
+        bg: i.state === 'on' ? '#101d33' : 'transparent',
+        mark: i.state === 'on' ? '#5cc5db' : 'transparent',
+        fg: i.state === 'on' ? '#e9eef7' : '#98a5bb',
+        countFg: i.state === 'on' ? '#5cc5db' : '#626c7d',
+        weight: i.state === 'on' ? 600 : 400,
+      })),
+      rows: data.map((p) => {
+        const filled = (p.done / 100) * CIRC;
+        return {
+          name: p.name,
+          state: p.state,
+          stateFg: HEALTH[p.state],
+          ring: HEALTH[p.state],
+          dash: filled.toFixed(1) + ' ' + (CIRC - filled).toFixed(1),
+          lead: p.lead,
+          who: p.who,
+          donePct: p.done + '%',
+          progPct: p.prog + '%',
+          pct: p.done + '%',
+          target: p.target,
+          targetFg: p.late ? '#e4645f' : '#74809a',
+          issues: p.issues,
+        };
+      }),
+    };
+  }
+}
+</script>
+</body>
+</html>

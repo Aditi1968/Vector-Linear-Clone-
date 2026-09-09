@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; background: #050a14; -webkit-font-smoothing: antialiased; }
+    a { color: #5cc5db; text-decoration: none; }
+    a:hover { color: #9fdfec; }
+  </style>
+</helmet>
+
+<div style="position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; width: 1440px; height: 900px; background: #050a14; overflow: hidden;">
+
+  <!-- Measured field: a faint engineering grid, the direction's signature. -->
+  <div style="position: absolute; inset: 0; background-image: linear-gradient(#0b1322 1px, transparent 1px), linear-gradient(90deg, #0b1322 1px, transparent 1px); background-size: 48px 48px; opacity: 0.55; pointer-events: none;"></div>
+  <div style="position: absolute; inset: 0; background: radial-gradient(ellipse 60% 45% at 50% 34%, rgba(5, 10, 20, 0) 0%, #050a14 100%); pointer-events: none;"></div>
+
+  <!-- A ruler across the top: ticks, not decoration. -->
+  <div style="position: absolute; top: 0; left: 0; right: 0; height: 26px; border-bottom: 1px solid #101a2e; display: flex; align-items: flex-end; gap: 0;">
+    <sc-for list="{{ticks}}" as="t" hint-placeholder-count="24">
+      <div style="width: 60px; height: {{t.h}}; border-left: 1px solid {{t.c}};"></div>
+    </sc-for>
+  </div>
+
+  <div style="position: relative; display: flex; flex-direction: column; align-items: center; gap: 44px;">
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 18px;">
+      <div style="display: flex; align-items: center; gap: 14px;">
+        <div style="width: 54px; height: 1px; background: linear-gradient(90deg, rgba(34,49,76,0), #22314c);"></div>
+        <svg width="30" height="30" viewBox="0 0 16 16" fill="none" stroke="#5cc5db" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+          <circle cx="3.9" cy="12.1" r="1.15" fill="#5cc5db" stroke="none"></circle>
+          <path d="M5.1 10.9 11.9 4.1"></path>
+          <path d="M6.9 4.1h5v5"></path>
+        </svg>
+        <div style="width: 54px; height: 1px; background: linear-gradient(90deg, #22314c, rgba(34,49,76,0));"></div>
+      </div>
+
+      <h1 style="margin: 0; font-size: 96px; line-height: 1.0; font-weight: 700; letter-spacing: -0.055em; background-image: linear-gradient(168deg, #ffffff 0%, #e9eef7 24%, #c9d4e5 50%, #98a5bb 72%, #dfe6f2 100%); -webkit-background-clip: text; background-clip: text; color: transparent;">Vector</h1>
+
+      <p style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; font-weight: 500; letter-spacing: 0.26em; text-transform: uppercase; color: #74809a;">Issue tracking, precisely</p>
+    </div>
+
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 20px;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <a href="#" style="display: inline-flex; align-items: center; justify-content: center; height: 46px; padding: 0 32px; border-radius: 6px; border: 1px solid #24354f; border-top-color: #ffffff; background-image: linear-gradient(180deg, #eef2f9 0%, #b6c3d8 100%); color: #08101d; font-size: 14.5px; font-weight: 600; letter-spacing: -0.005em;">Sign in</a>
+        <a href="#" style="display: inline-flex; align-items: center; justify-content: center; height: 46px; padding: 0 32px; border-radius: 6px; border: 1px solid #22314c; background: #0a1120; color: #e4eaf5; font-size: 14.5px; font-weight: 500;">Create account</a>
+      </div>
+
+      <!-- A readout, not a tagline: the machine reporting its own state. -->
+      <div style="display: flex; align-items: center; gap: 10px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: #626c7d;">
+        <div style="width: 5px; height: 5px; border-radius: 999px; background: #7fd0a5;"></div>
+        <span>All systems operational</span>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      ticks: Array.from({ length: 24 }, (_, i) => ({
+        h: i % 4 === 0 ? '12px' : '6px',
+        c: i % 4 === 0 ? '#22314c' : '#101a2e',
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>

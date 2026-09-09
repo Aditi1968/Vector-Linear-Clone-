@@ -1,0 +1,127 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; background: #050a14; -webkit-font-smoothing: antialiased; }
+    a { color: #5cc5db; text-decoration: none; }
+    a:hover { color: #9fdfec; }
+  </style>
+</helmet>
+
+<div style="display: grid; grid-template-columns: 224px minmax(0, 1fr); width: 1440px; height: 900px; background: #050a14; overflow: hidden;">
+
+  <!-- Settings gets its own index rather than the product rail. -->
+  <div style="display: flex; flex-direction: column; gap: 22px; padding: 18px 12px; border-right: 1px solid #101a2e; background: #04080f;">
+    <span style="padding: 0 8px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: #626c7d;">Settings</span>
+
+    <sc-for list="{{groups}}" as="g" hint-placeholder-count="2">
+      <div style="display: flex; flex-direction: column; gap: 5px;">
+        <span style="padding: 0 8px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9.5px; letter-spacing: 0.18em; text-transform: uppercase; color: #37527a;">{{g.name}}</span>
+        <div style="display: flex; flex-direction: column; gap: 1px;">
+          <sc-for list="{{g.items}}" as="i" hint-placeholder-count="4">
+            <div style="display: flex; align-items: center; height: 26px; padding: 0 8px; border-left: 2px solid {{i.mark}}; border-radius: 0 4px 4px 0; background: {{i.bg}}; font-size: 12.5px; font-weight: {{i.weight}}; color: {{i.fg}};">{{i.label}}</div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div style="display: flex; flex-direction: column; min-width: 0;">
+
+    <div style="display: flex; align-items: center; height: 52px; flex-shrink: 0; padding: 0 32px; border-bottom: 1px solid #101a2e;">
+      <h1 style="margin: 0; font-size: 16px; font-weight: 600; letter-spacing: -0.015em; color: #e9eef7;">Integrations</h1>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 34px; padding: 32px; max-width: 760px;">
+
+      <sc-for list="{{integrations}}" as="x" hint-placeholder-count="2">
+        <div style="display: flex; flex-direction: column; gap: 0; border: 1px solid #16223a; border-radius: 6px; background: #080e1b;">
+
+          <div style="display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 18px 20px; border-bottom: 1px solid #101a2e;">
+            <div style="display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border: 1px solid #22314c; border-radius: 6px; background: #0a1120; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 13px; font-weight: 600; color: #c9d4e6;">{{x.glyph}}</div>
+            <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0;">
+              <span style="font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: #e9eef7;">{{x.name}}</span>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="width: 5px; height: 5px; border-radius: 999px; background: {{x.dot}};"></div>
+                <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: {{x.stateFg}};">{{x.state}}</span>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; height: 28px; padding: 0 14px; border: 1px solid {{x.btnBorder}}; border-radius: 4px; background: {{x.btnBg}}; color: {{x.btnFg}}; font-size: 12.5px; font-weight: 500;">{{x.action}}</div>
+          </div>
+
+          <div style="display: flex; flex-direction: column;">
+            <sc-for list="{{x.rows}}" as="r" hint-placeholder-count="3">
+              <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 13px 20px; border-bottom: 1px solid #101a2e;">
+                <div style="display: flex; flex-direction: column; gap: 3px; min-width: 0;">
+                  <span style="font-size: 13px; color: #c9d4e6;">{{r.label}}</span>
+                  <span style="font-size: 11.5px; color: #626c7d;">{{r.hint}}</span>
+                </div>
+                <div style="display: flex; align-items: center; width: 34px; height: 19px; padding: 2px; border-radius: 999px; background: {{r.trackBg}}; justify-content: {{r.justify}};">
+                  <div style="width: 15px; height: 15px; border-radius: 999px; background: {{r.knob}};"></div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const nav = (label, on) => ({
+      label,
+      bg: on ? '#101d33' : 'transparent',
+      mark: on ? '#5cc5db' : 'transparent',
+      fg: on ? '#e9eef7' : '#98a5bb',
+      weight: on ? 600 : 400,
+    });
+
+    const toggle = (label, hint, on) => ({
+      label, hint,
+      trackBg: on ? '#5cc5db' : '#16223a',
+      knob: on ? '#050a14' : '#626c7d',
+      justify: on ? 'flex-end' : 'flex-start',
+    });
+
+    return {
+      groups: [
+        { name: 'Workspace', items: [nav('General', false), nav('Members', false), nav('Teams', false), nav('Integrations', true)] },
+        { name: 'Account', items: [nav('Profile', false), nav('Notifications', false), nav('Security', false)] },
+      ],
+      integrations: [
+        {
+          glyph: 'GH', name: 'GitHub', state: 'Connected', dot: '#7fd0a5', stateFg: '#7fd0a5',
+          action: 'Disconnect', btnBorder: '#22314c', btnBg: 'transparent', btnFg: '#98a5bb',
+          rows: [
+            toggle('Move issues when a pull request opens', 'The team’s first started state', true),
+            toggle('Complete issues when a pull request merges', 'Never on a closed-without-merge', true),
+            toggle('Link commits by issue key', 'Reads the commit subject', false),
+          ],
+        },
+        {
+          glyph: 'SL', name: 'Slack', state: 'Not connected', dot: '#626c7d', stateFg: '#626c7d',
+          action: 'Connect', btnBorder: '#24354f', btnBg: 'linear-gradient(180deg, #eef2f9 0%, #b6c3d8 100%)', btnFg: '#08101d',
+          rows: [
+            toggle('Announce completed issues', 'To one channel per workspace', false),
+            toggle('Announce urgent priority', 'Only when priority moves to Urgent', false),
+          ],
+        },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,109 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; background: #050a14; -webkit-font-smoothing: antialiased; }
+    a { color: #5cc5db; text-decoration: none; }
+    a:hover { color: #9fdfec; }
+  </style>
+</helmet>
+
+<div style="position: relative; display: grid; grid-template-columns: 300px minmax(0, 1fr); width: 1440px; height: 900px; background: #050a14;">
+
+  <!-- Progress as a calibrated scale, read top to bottom. -->
+  <div style="display: flex; flex-direction: column; justify-content: space-between; padding: 40px 32px; border-right: 1px solid #101a2e; background: #04080f;">
+
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <svg width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="#5cc5db" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <circle cx="3.9" cy="12.1" r="1.15" fill="#5cc5db" stroke="none"></circle>
+        <path d="M5.1 10.9 11.9 4.1"></path>
+        <path d="M6.9 4.1h5v5"></path>
+      </svg>
+      <span style="font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: #e4eaf5;">Vector</span>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 0;">
+      <sc-for list="{{steps}}" as="s" hint-placeholder-count="4">
+        <div style="display: grid; grid-template-columns: 34px minmax(0, 1fr); align-items: center; gap: 14px; height: 58px; border-top: 1px solid {{s.rule}};">
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.08em; color: {{s.num}};">{{s.index}}</span>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+            <span style="font-size: 13.5px; font-weight: {{s.weight}}; color: {{s.fg}};">{{s.label}}</span>
+            <div style="width: 6px; height: 6px; border-radius: 999px; background: {{s.dot}};"></div>
+          </div>
+        </div>
+      </sc-for>
+      <div style="border-top: 1px solid #101a2e;"></div>
+    </div>
+
+    <p style="margin: 0; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #626c7d;">Step 01 / 04</p>
+  </div>
+
+  <div style="position: relative; display: flex; align-items: center; padding: 0 96px; overflow: hidden;">
+    <div style="position: absolute; inset: 0; background-image: linear-gradient(#0b1322 1px, transparent 1px), linear-gradient(90deg, #0b1322 1px, transparent 1px); background-size: 48px 48px; opacity: 0.4; pointer-events: none;"></div>
+    <div style="position: absolute; inset: 0; background: radial-gradient(ellipse 70% 55% at 40% 45%, rgba(5,10,20,0) 0%, #050a14 100%); pointer-events: none;"></div>
+
+    <div style="position: relative; display: flex; flex-direction: column; gap: 36px; width: 100%; max-width: 520px;">
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <h1 style="margin: 0; font-size: 44px; line-height: 1.08; font-weight: 600; letter-spacing: -0.035em; color: #e9eef7;">Create your workspace</h1>
+        <p style="margin: 0; font-size: 16px; line-height: 1.55; color: #98a5bb; max-width: 420px; text-wrap: pretty;">A workspace holds your teams, issues and projects. You will be its owner.</p>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 20px;">
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label for="wsname" style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #74809a;">Workspace name</label>
+          <input id="wsname" type="text" value="Northwind" style="height: 44px; padding: 0 14px; border: 1px solid #24354f; border-radius: 6px; background: #0a1120; color: #e4eaf5; font-family: inherit; font-size: 15.5px; outline: 2px solid #5cc5db; outline-offset: 1px;">
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <label for="wsurl" style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #74809a;">Workspace URL</label>
+          <div style="display: flex; align-items: center; height: 44px; border: 1px solid #22314c; border-radius: 6px; background: #0a1120; overflow: hidden;">
+            <span style="padding: 0 0 0 14px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 14px; color: #626c7d;">vector.app/</span>
+            <input id="wsurl" type="text" value="northwind" style="flex-grow: 1; min-width: 0; height: 100%; padding: 0 14px 0 2px; border: 0; background: transparent; color: #e4eaf5; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 14px;">
+          </div>
+          <p style="margin: 0; font-size: 12.5px; color: #626c7d;">Lowercase letters, numbers and hyphens.</p>
+        </div>
+      </div>
+
+      <div style="display: flex; align-items: center; gap: 14px;">
+        <a href="#" style="display: inline-flex; align-items: center; justify-content: center; height: 46px; padding: 0 30px; border-radius: 6px; border: 1px solid #24354f; border-top-color: #ffffff; background-image: linear-gradient(180deg, #eef2f9 0%, #b6c3d8 100%); color: #08101d; font-size: 14.5px; font-weight: 600;">Create workspace</a>
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: #626c7d;">Enter</span>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const raw = [
+      { index: '01', label: 'Workspace', state: 'now' },
+      { index: '02', label: 'Team', state: 'next' },
+      { index: '03', label: 'Invite', state: 'next' },
+      { index: '04', label: 'Integrations', state: 'next' },
+    ];
+    return {
+      steps: raw.map((s) => ({
+        index: s.index,
+        label: s.label,
+        rule: s.state === 'now' ? '#22314c' : '#101a2e',
+        num: s.state === 'now' ? '#5cc5db' : '#626c7d',
+        fg: s.state === 'now' ? '#e9eef7' : '#74809a',
+        weight: s.state === 'now' ? 600 : 400,
+        dot: s.state === 'now' ? '#5cc5db' : 'transparent',
+      })),
+    };
+  }
+}
+</script>
+</body>
+</html>

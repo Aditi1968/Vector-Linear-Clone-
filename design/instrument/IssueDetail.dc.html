@@ -1,0 +1,144 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; background: #050a14; -webkit-font-smoothing: antialiased; }
+    a { color: #5cc5db; text-decoration: none; }
+    a:hover { color: #9fdfec; }
+  </style>
+</helmet>
+
+<div style="display: grid; grid-template-columns: 224px minmax(0, 1fr) 300px; width: 1440px; height: 900px; background: #050a14; overflow: hidden;">
+
+  <div style="display: flex; flex-direction: column; gap: 18px; padding: 14px 8px; border-right: 1px solid #101a2e; background: #04080f;">
+    <div style="display: flex; align-items: center; gap: 9px; padding: 2px 8px;">
+      <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#5cc5db" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <circle cx="3.9" cy="12.1" r="1.15" fill="#5cc5db" stroke="none"></circle>
+        <path d="M5.1 10.9 11.9 4.1"></path>
+        <path d="M6.9 4.1h5v5"></path>
+      </svg>
+      <span style="font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: #e4eaf5;">Northwind</span>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 1px;">
+      <sc-for list="{{nav}}" as="i" hint-placeholder-count="6">
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; height: 26px; padding: 0 8px; border-left: 2px solid {{i.mark}}; border-radius: 0 4px 4px 0; background: {{i.bg}};">
+          <span style="font-size: 12.5px; font-weight: {{i.weight}}; color: {{i.fg}};">{{i.label}}</span>
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; color: {{i.countFg}};">{{i.count}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- The issue itself: one column, generous measure, nothing competing. -->
+  <div style="display: flex; flex-direction: column; min-width: 0; border-right: 1px solid #101a2e;">
+
+    <div style="display: flex; align-items: center; gap: 12px; height: 44px; flex-shrink: 0; padding: 0 26px; border-bottom: 1px solid #101a2e;">
+      <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.1em; color: #626c7d;">ENGINEERING</span>
+      <span style="color: #22314c;">/</span>
+      <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; letter-spacing: 0.1em; color: #98a5bb;">ENG-114</span>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 30px; padding: 34px 26px; overflow: hidden;">
+
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <h1 style="margin: 0; max-width: 680px; font-size: 32px; line-height: 1.22; font-weight: 600; letter-spacing: -0.025em; color: #e9eef7; text-wrap: pretty;">Repository leaks asyncpg.Record to the service layer</h1>
+
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 7px; height: 26px; padding: 0 10px; border: 1px solid #22314c; border-radius: 4px;">
+            <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="#efc768" stroke-width="1.5" aria-hidden="true" focusable="false">
+              <circle cx="8" cy="8" r="5.4"></circle>
+              <path d="M8 5.2 10.8 8 8 10.8 5.2 8Z" fill="#efc768" stroke="none"></path>
+            </svg>
+            <span style="font-size: 12px; color: #e4eaf5;">In Progress</span>
+          </div>
+          <div style="display: flex; align-items: center; height: 26px; padding: 0 10px; border: 1px solid #22314c; border-radius: 4px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; letter-spacing: 0.1em; color: #9fdfec;">ARCHITECTURE</div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 14px; max-width: 680px;">
+        <p style="margin: 0; font-size: 15px; line-height: 1.68; color: #c9d4e6; text-wrap: pretty;">Rows are returned raw from three methods, so a caller in the service layer ends up holding a driver object. The boundary is supposed to be the repository: map to domain entities there.</p>
+        <div style="display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; border-left: 2px solid #22314c; background: #080e1b;">
+          <sc-for list="{{sites}}" as="s" hint-placeholder-count="3">
+            <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 12px; color: #98a5bb;">{{s.path}}</span>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- Activity as a measured log, the direction's rhythm applied to time. -->
+      <div style="display: flex; flex-direction: column; gap: 0; max-width: 680px;">
+        <p style="margin: 0 0 10px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase; color: #626c7d;">Activity</p>
+        <sc-for list="{{log}}" as="e" hint-placeholder-count="4">
+          <div style="display: grid; grid-template-columns: 62px 18px minmax(0, 1fr); align-items: baseline; gap: 12px; padding: 11px 0; border-top: 1px solid #101a2e;">
+            <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10.5px; color: #37527a;">{{e.at}}</span>
+            <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; font-weight: 600; color: #74809a;">{{e.who}}</span>
+            <span style="font-size: 13px; color: {{e.fg}};">{{e.what}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </div>
+
+  <!-- Properties: label above value, mono labels, hairline separations. -->
+  <div style="display: flex; flex-direction: column; padding: 20px 20px; background: #04080f;">
+    <sc-for list="{{props}}" as="p" hint-placeholder-count="6">
+      <div style="display: flex; flex-direction: column; gap: 7px; padding: 14px 0; border-bottom: 1px solid #101a2e;">
+        <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: #626c7d;">{{p.label}}</span>
+        <span style="font-size: 13.5px; color: {{p.fg}};">{{p.value}}</span>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      nav: [
+        { label: 'Issues', count: '24', state: 'on' },
+        { label: 'My issues', count: '6', state: 'off' },
+        { label: 'Inbox', count: '3', state: 'off' },
+        { label: 'Triage', count: '2', state: 'off' },
+        { label: 'Projects', count: '5', state: 'off' },
+        { label: 'Roadmap', count: '', state: 'off' },
+      ].map((i) => ({
+        label: i.label, count: i.count,
+        bg: i.state === 'on' ? '#101d33' : 'transparent',
+        mark: i.state === 'on' ? '#5cc5db' : 'transparent',
+        fg: i.state === 'on' ? '#e9eef7' : '#98a5bb',
+        countFg: i.state === 'on' ? '#5cc5db' : '#626c7d',
+        weight: i.state === 'on' ? 600 : 400,
+      })),
+      sites: [
+        { path: 'app/repositories/issues.py:214' },
+        { path: 'app/repositories/issues.py:388' },
+        { path: 'app/repositories/releases.py:96' },
+      ],
+      log: [
+        { at: '14:02', who: 'PR', what: 'moved this to In Progress', fg: '#98a5bb' },
+        { at: '13:48', who: 'PR', what: 'linked pull request #84', fg: '#98a5bb' },
+        { at: '11:20', who: 'AV', what: 'set priority to High', fg: '#98a5bb' },
+        { at: 'Sep 02', who: 'AV', what: 'created the issue', fg: '#74809a' },
+      ],
+      props: [
+        { label: 'Assignee', value: 'Priya Raman', fg: '#e4eaf5' },
+        { label: 'Priority', value: 'High', fg: '#efc768' },
+        { label: 'Estimate', value: '5 points', fg: '#e4eaf5' },
+        { label: 'Due', value: '18 September', fg: '#e4eaf5' },
+        { label: 'Project', value: 'Billing migration', fg: '#e4eaf5' },
+        { label: 'Cycle', value: 'Cycle 24', fg: '#e4eaf5' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

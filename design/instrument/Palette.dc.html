@@ -1,0 +1,122 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=IBM+Plex+Mono:wght@400;500;600&amp;display=swap">
+  <style>
+    body { margin: 0; font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif; background: #050a14; -webkit-font-smoothing: antialiased; }
+    a { color: #5cc5db; text-decoration: none; }
+    a:hover { color: #9fdfec; }
+  </style>
+</helmet>
+
+<div style="position: relative; display: flex; flex-direction: column; align-items: center; width: 1440px; height: 900px; background: #050a14; overflow: hidden;">
+
+  <!-- The list, dimmed behind the palette. -->
+  <div style="position: absolute; inset: 0; opacity: 0.30;">
+    <div style="display: flex; flex-direction: column; padding-top: 52px;">
+      <sc-for list="{{ghost}}" as="g" hint-placeholder-count="12">
+        <div style="display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 14px; height: 34px; align-items: center; padding: 0 24px; border-bottom: 1px solid #080e1b;">
+          <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 11px; color: #37527a;">{{g.key}}</span>
+          <span style="overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; color: #37527a;">{{g.title}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  <div style="position: absolute; inset: 0; background: rgba(5, 10, 20, 0.72);"></div>
+
+  <!-- The palette: a machined slab, keyed like an instrument. -->
+  <div style="position: relative; display: flex; flex-direction: column; width: 660px; margin-top: 132px; border: 1px solid #24354f; border-top-color: #37527a; border-radius: 8px; background: #080e1b; box-shadow: 0 40px 110px rgba(0, 0, 0, 0.75);">
+
+    <div style="display: flex; align-items: center; gap: 12px; height: 54px; padding: 0 18px; border-bottom: 1px solid #16223a;">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="#5cc5db" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+        <circle cx="3.9" cy="12.1" r="1.15" fill="#5cc5db" stroke="none"></circle>
+        <path d="M5.1 10.9 11.9 4.1"></path>
+        <path d="M6.9 4.1h5v5"></path>
+      </svg>
+      <span style="flex-grow: 1; font-size: 16px; color: #e9eef7;">assign</span>
+      <span style="width: 1px; height: 16px; background: #5cc5db;"></span>
+      <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.14em; color: #626c7d;">ESC</span>
+    </div>
+
+    <div style="display: flex; flex-direction: column; padding: 8px 0;">
+      <sc-for list="{{groups}}" as="grp" hint-placeholder-count="2">
+        <div style="display: flex; flex-direction: column; gap: 2px; padding: 8px 0;">
+          <span style="padding: 0 18px 6px; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase; color: #626c7d;">{{grp.name}}</span>
+          <sc-for list="{{grp.items}}" as="it" hint-placeholder-count="3">
+            <div style="display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 12px; height: 38px; padding: 0 18px; border-left: 2px solid {{it.mark}}; background: {{it.bg}};">
+              <div style="width: 6px; height: 6px; border-radius: 1px; background: {{it.dot}};"></div>
+              <span style="font-size: 13.5px; color: {{it.fg}};">{{it.label}}</span>
+              <span style="font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 10px; letter-spacing: 0.1em; color: {{it.keyFg}};">{{it.hint}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 36px; padding: 0 18px; border-top: 1px solid #16223a; font-family: 'IBM Plex Mono', ui-monospace, monospace; font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: #626c7d;">
+      <span>&#8593;&#8595; to move &#183; &#8629; to run</span>
+      <span>12 results</span>
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const row = (label, hint, on) => ({
+      label, hint,
+      bg: on ? '#101d33' : 'transparent',
+      mark: on ? '#5cc5db' : 'transparent',
+      dot: on ? '#5cc5db' : '#37527a',
+      fg: on ? '#ffffff' : '#c9d4e6',
+      keyFg: on ? '#9fdfec' : '#626c7d',
+    });
+
+    return {
+      ghost: [
+        { key: 'ENG-114', title: 'Repository leaks asyncpg.Record to the service layer' },
+        { key: 'ENG-108', title: 'Composite key missing on the releases join' },
+        { key: 'APP-91', title: 'Board card move loses focus after optimistic update' },
+        { key: 'ENG-96', title: 'Keyset pagination drops the last page on ties' },
+        { key: 'APP-88', title: 'Command palette steals focus from the composer' },
+        { key: 'APP-77', title: 'Rail collapse loses the focused nav item' },
+        { key: 'ENG-72', title: 'Slack delivery loop has no dead-letter path' },
+        { key: 'ENG-64', title: 'Sweep expired sessions on the lifespan loop' },
+        { key: 'ENG-51', title: 'Rate limit the unauthenticated argon2 path' },
+        { key: 'APP-40', title: 'Analytics empty state reads as a chart of zeroes' },
+        { key: 'ENG-38', title: 'Tombstone a membership rather than deleting it' },
+        { key: 'APP-31', title: 'Grouped list re-splits when a state is unresolved' },
+      ],
+      groups: [
+        {
+          name: 'Assign to',
+          items: [
+            row('Priya Raman', 'PR', true),
+            row('Aditi Vadmal', 'AV', false),
+            row('Dev Chandra', 'DC', false),
+            row('Nobody — unassign', '', false),
+          ],
+        },
+        {
+          name: 'Actions',
+          items: [
+            row('Assign to me', 'I', false),
+            row('Change status', 'S', false),
+            row('Set priority', 'P', false),
+          ],
+        },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>
