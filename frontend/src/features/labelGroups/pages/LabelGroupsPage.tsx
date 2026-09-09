@@ -223,6 +223,14 @@ export function LabelGroupsPage() {
       <PageHeader
         title="Label groups"
         description="Labels that are mutually exclusive, administered together."
+        /* `labelGroups` is a plain list and not a connection, so this is every
+           group rather than the ones fetched so far -- which is why the header
+           can state it and why the *label* counts inside the panel still carry
+           their "one page of 50" caveat. Withheld while the query is in
+           flight: "0 GROUPS" is a wrong answer, not a loading state. */
+        readout={
+          isLoading || errorMessage !== null ? undefined : `${groups.length} groups`
+        }
         actions={
           <Button onClick={openComposer} variant="primary">
             New group
