@@ -66,8 +66,17 @@ export function MyIssuesPage() {
 
   return (
     <>
+      {/* The readout is the screen reporting its own state in numbers, which
+        * the shell paints as a mono legend beside the title. Withheld until
+        * the first page has landed: `totalCount` is 0 before the server has
+        * answered, and "0 ASSIGNED" is a claim rather than a placeholder. */}
       <PageHeader
         title="My Issues"
+        readout={
+          viewerId === null || isLoadingFirstPage || showError
+            ? undefined
+            : `${String(totalCount)} assigned`
+        }
         description="Issues assigned to you, across every team in this workspace."
       />
 
@@ -89,7 +98,11 @@ export function MyIssuesPage() {
                     one live region for the whole list, which is this element. */}
                 <VisuallyHidden as="div">Loading your issues</VisuallyHidden>
                 {Array.from({ length: SKELETON_ROWS }, (_unused, index) => (
-                  <Skeleton key={index} width="100%" height="2.25rem" />
+                  /* `--row-height` and not a literal: the bars are standing in
+                     for rows, and the shell re-points that token when the
+                     density changes -- a fixed height would make the list
+                     jump the moment the real rows arrived. */
+                  <Skeleton key={index} width="100%" height="var(--row-height)" />
                 ))}
               </div>
             )}
