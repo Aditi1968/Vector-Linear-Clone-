@@ -47,6 +47,7 @@ from app.repositories.sessions import SessionRepository
 from app.repositories.slack import SlackRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
+from app.rest.oauth_origin import redirect_to_callback_origin
 from app.services.auth import AuthService
 from app.services.memberships import MembershipService
 from app.services.passwords import Argon2PasswordHasher
@@ -597,9 +598,23 @@ async def slack_oauth_start(
     Authorization happens BEFORE a state is issued. A caller who may not
     administer this workspace gets no state, so there is nothing for them to
     carry through Slack's consent screen and back.
+
+    And the state is issued on the CALLBACK's origin. A cookie set on the
+    host the browser happens to be on is not sent to the host Slack redirects
+    to, so a flow started from the dev origin came back to a callback holding
+    no state and was refused -- correctly, and for a reason nothing in the
+    callback could fix. See app/rest/oauth_origin.py.
     """
     if services.client_id is None:
         raise _unconfigured()
+
+    # Before authorization, so the session checked is the one on the origin
+    # the flow will finish on. A no-op wherever the app is served from its
+    # own callback origin, which is every deployment that is not tunnelled.
+    elsewhere = redirect_to_callback_origin(request, services.oauth_callback_url)
+
+    if elsewhere is not None:
+        return elsewhere
 
     # Called for its refusal, not its value. The scope is not carried into the
     # cookie or the redirect: the callback re-authorizes from the session

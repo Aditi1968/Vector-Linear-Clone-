@@ -54,6 +54,7 @@ from app.repositories.rate_limits import RateLimitRepository
 from app.repositories.sessions import SessionRepository
 from app.repositories.users import UserRepository
 from app.repositories.workspaces import WorkspaceRepository
+from app.rest.oauth_origin import redirect_to_callback_origin
 from app.services.auth import AuthService
 from app.services.github import (
     SIGNATURE_HEADER,
@@ -422,6 +423,14 @@ async def install(
 ) -> RedirectResponse:
     """Start an install: mint a state, remember it, and hand off to GitHub.
 
+    On the callback's own origin, first. The state is a cookie, and a cookie
+    written on the host the browser happens to be on is not sent to the host
+    GitHub redirects to -- which is how an install started from the dev
+    origin came back to a callback that could see no state at all and refused
+    it, correctly. `redirect_to_callback_origin` is a no-op when the two
+    already agree, which is every deployment served from its own callback
+    origin.
+
     The state is generated here and nowhere else. It goes two places at once --
     into the URL GitHub will echo back, and into a cookie only this browser
     holds -- and the callback connects nothing unless the two agree. That is
@@ -440,6 +449,15 @@ async def install(
 
     if not config.configured:
         raise _not_found()
+
+    # Before authorization rather than after, so the session that is checked
+    # is the one on the origin the flow will actually finish on. A caller not
+    # signed in over there is told so now, by the second hop, instead of ten
+    # minutes later by a state refusal that names nothing.
+    elsewhere = redirect_to_callback_origin(request, services.oauth_callback_url)
+
+    if elsewhere is not None:
+        return elsewhere
 
     # Called for the refusal, not for the value. An ordinary member sent off
     # to GitHub would install an app whose callback then refuses to record it,
