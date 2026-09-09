@@ -61,18 +61,32 @@
   white-space: nowrap;
 }
 
+/*
+ * Row meta: where the document is attached, and when it was last touched.
+ *
+ * Mono, which is the voice this direction gives every date -- and which is
+ * what makes a column of them read as a column. Not uppercased: the other half
+ * of this span is the name of a project or an initiative.
+ */
 .rowMeta {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: var(--numeric-tabular);
 }
 
 /* A value that is genuinely absent, or one this screen holds and cannot
- * name. Muted and italic rather than hidden. */
+ * name. Muted and italic rather than hidden.
+ *
+ * The face is restated rather than inherited: these sit inside the mono meta
+ * spans, and every one of them is a sentence. Prose belongs in the body face
+ * whatever it is sitting in. */
 .unresolved {
   color: var(--color-text-muted);
+  font-family: var(--font-sans);
   font-style: italic;
 }
 
@@ -98,7 +112,9 @@
 .panelMeta {
   margin: 0;
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: var(--numeric-tabular);
 }
 
 .titleRow {
@@ -305,17 +321,52 @@
 .revisionMeta,
 .commentMeta {
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: var(--numeric-tabular);
 }
 
 .revisionPreview {
   width: 100%;
 }
 
+/*
+ * The disclosure that opens an earlier version.
+ *
+ * It was cyan text, which is the one thing cyan may not be in this direction:
+ * a control. Cyan marks where you are and what is live, and a word painted
+ * with it that also happens to be clickable spends the accent on an action.
+ *
+ * It reads as a control now the way the artboard's `FILTER` does -- a bordered
+ * chip in the mono legend voice, not a filled pill and not a coloured word.
+ * `list-style: none` plus the `::-webkit-details-marker` reset removes the
+ * native triangle, which would otherwise sit outside the border.
+ */
 .revisionPreview summary {
-  color: var(--color-text-accent);
-  font-size: var(--text-xs);
+  display: inline-flex;
+  align-items: center;
+  /* `min-height` and vertical padding, not a fixed height: this label carries
+   * a timestamp and is long enough to wrap in a narrow inspector. A chip that
+   * clips its own name is worse than a chip two lines tall. */
+  min-height: var(--control-height-xs);
+  padding: var(--space-2) var(--space-3-5);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
+  line-height: var(--leading-tight);
   cursor: pointer;
+  list-style: none;
+}
+
+.revisionPreview summary::-webkit-details-marker {
+  display: none;
+}
+
+.revisionPreview summary:hover {
+  border-color: var(--color-border-hover);
+  color: var(--color-text-secondary);
 }
 
 .revisionPreview > .prose {
@@ -378,7 +429,10 @@
   line-height: var(--leading-normal);
 }
 
+/* A figure inside a sentence. Mono carries every count in this direction, so
+ * the number keeps its shape whatever face surrounds it. */
 .count {
+  font-family: var(--font-mono);
   font-variant-numeric: var(--numeric-tabular);
 }
 

@@ -61,21 +61,38 @@
   letter-spacing: var(--tracking-tight);
 }
 
+/* How many markers this month holds, as a readout on the lane's own header --
+ * the same mono legend the shell puts beside a page title. */
 .laneCount {
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-lg);
   font-variant-numeric: var(--numeric-tabular);
   font-weight: var(--weight-regular);
+  letter-spacing: var(--label-mono-tracking-lg);
+  text-transform: uppercase;
 }
 
 /* ----------------------------------------------------------------- items */
 
+/*
+ * Markers, ruled rather than boxed.
+ *
+ * Each item was a rounded card on its own raised ground, inside a lane that is
+ * already a card -- cards inside a card, which is how a dense tool ends up
+ * looking like a pricing page. A hairline between rows is the separation, and
+ * it is what `components/List` uses for every other list in the product.
+ *
+ * This changes nothing about what the roadmap claims. An item is still a
+ * marker in the month it is due; a rule under it is a boundary between two
+ * items, not a span between two dates.
+ */
 .items {
   display: flex;
   flex-direction: column;
-  gap: var(--space-4);
   margin: 0;
   padding: 0;
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
   list-style: none;
 }
 
@@ -83,10 +100,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  padding: var(--space-4) var(--space-5);
-  border: var(--border-width) solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  background-color: var(--color-surface-raised);
+  padding-block: var(--space-4);
+  border-block-end: var(--border-width) solid var(--color-border-subtle);
 }
 
 .itemHead {
@@ -105,15 +120,18 @@
  */
 .itemKind {
   color: var(--color-text-faint);
-  font-size: var(--text-3xs);
-  font-weight: var(--weight-medium);
-  letter-spacing: var(--tracking-caps);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  letter-spacing: var(--label-mono-tracking-md);
   text-transform: uppercase;
 }
 
+/* The one date this screen has. Mono and tabular, so a column of them lines
+ * up -- which is the whole of what a roadmap of markers has to offer. */
 .itemDate {
   color: var(--color-text-muted);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
   font-variant-numeric: var(--numeric-tabular);
   white-space: nowrap;
 }
@@ -155,9 +173,14 @@
   border-block-start: var(--border-width) solid var(--color-border-subtle);
 }
 
+/* The unscheduled items spread across the full width rather than down one
+ * lane. `column-gap` only: the rows still rule against each other vertically,
+ * and a horizontal gap is what keeps two adjacent columns from reading as one
+ * run-on row. */
 .undated .items {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  column-gap: var(--space-7);
 }
 
 .undated .laneTitle {
@@ -199,6 +222,9 @@
   line-height: var(--leading-normal);
 }
 
+/* A figure inside a sentence. Mono carries every count in this direction, so
+ * the number keeps its shape whatever face surrounds it. */
 .count {
+  font-family: var(--font-mono);
   font-variant-numeric: var(--numeric-tabular);
 }

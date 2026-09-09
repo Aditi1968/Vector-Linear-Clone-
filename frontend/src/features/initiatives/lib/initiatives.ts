@@ -22,7 +22,13 @@ import type { Health, Initiative, InitiativeStatus } from '../api'
  */
 const STATUS_PRESENTATION: Record<InitiativeStatus, { label: string; tone: BadgeTone }> = {
   PLANNED: { label: 'Planned', tone: 'neutral' },
-  ACTIVE: { label: 'Active', tone: 'info' },
+  // `success` and not `info`, matching what a project's STARTED wears. `info`
+  // is the cyan tone, and cyan in this product marks where you are and what is
+  // live rather than being a material to paint a pill with. It matters
+  // doubly here: the roadmap draws initiative and project badges in one
+  // column, so an ACTIVE initiative in cyan beside an in-progress project in
+  // green would be two vocabularies for one idea on one screen.
+  ACTIVE: { label: 'Active', tone: 'success' },
   COMPLETED: { label: 'Completed', tone: 'success' },
   CANCELED: { label: 'Canceled', tone: 'neutral' },
 }

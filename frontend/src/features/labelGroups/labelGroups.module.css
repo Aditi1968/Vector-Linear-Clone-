@@ -63,12 +63,16 @@
   white-space: nowrap;
 }
 
+/* Row meta here is one figure -- how many labels are in the group -- so it
+ * takes the mono voice whole. */
 .rowMeta {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-variant-numeric: var(--numeric-tabular);
 }
 
 /* ----------------------------------------------------------------- panel */
@@ -108,26 +112,43 @@
   gap: var(--space-4);
 }
 
+/*
+ * A section head, in the direction's mono legend voice.
+ *
+ * Uppercase sans at semibold was the same words in the body face, which puts a
+ * heading and the prose under it in one register and leaves the reader
+ * separating them by weight alone. Mono and widely tracked reads as a legend
+ * stamped on the panel rather than as a louder sentence.
+ */
 .sectionTitle {
   display: flex;
   gap: var(--space-4);
   align-items: baseline;
   margin: var(--space-4) 0 0;
   color: var(--color-text-secondary);
-  font-size: var(--text-body-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--label-mono-tracking-md);
   text-transform: uppercase;
 }
 
 /* ---------------------------------------------------------------- labels */
 
+/*
+ * The group's members, as ruled rows rather than as a stack of filled tiles.
+ *
+ * The tiles were a rounded surface each, with a gap between them: eight boxes
+ * inside a box, which is how a dense tool ends up looking like a settings
+ * page. Hairlines separate these for the same reason `components/List` does
+ * -- the rule is the separation, and everything else is spent on the content.
+ */
 .labelList {
   display: flex;
   flex-direction: column;
-  gap: var(--space-2);
   margin: 0;
   padding: 0;
+  border-block-start: var(--border-width) solid var(--color-border-subtle);
   list-style: none;
 }
 
@@ -136,9 +157,8 @@
   gap: var(--space-4);
   align-items: center;
   min-width: 0;
-  padding: var(--space-2) var(--space-4);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
+  padding: var(--space-3) var(--space-2);
+  border-block-end: var(--border-width) solid var(--color-border-subtle);
 }
 
 /*
@@ -181,8 +201,11 @@
 
 /* ------------------------------------------------------------ small type */
 
+/* A figure beside a section head. Mono carries every count in this direction,
+ * so the number keeps its shape whatever face surrounds it. */
 .count {
   color: var(--color-text-body);
+  font-family: var(--font-mono);
   font-variant-numeric: var(--numeric-tabular);
 }
 

@@ -140,14 +140,14 @@ export function ReleaseDetailPanel({
 
         <div className={styles.fact}>
           <dt>Cut</dt>
-          <dd>
+          <dd className={styles.mono}>
             <time dateTime={summary.createdAt}>{formatInstant(summary.createdAt)}</time>
           </dd>
         </div>
 
         <div className={styles.fact}>
           <dt>Deployed</dt>
-          <dd>
+          <dd className={styles.mono}>
             {summary.deployedAt === null ? (
               /* Not a dash. `releases_deployed_at_matches_status` makes the
                  status and the instant one fact, so a null here is the
