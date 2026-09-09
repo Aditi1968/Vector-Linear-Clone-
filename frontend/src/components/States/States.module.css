@@ -65,6 +65,47 @@
 }
 
 /**
+ * A link in the actions slot is a CONTROL, and has to look like one.
+ *
+ * Callers pass recovery routes here as bare anchors -- "Back to projects",
+ * "Back to issues" -- and `base.css` paints every `<a>` in the accent. That is
+ * right for a link inside a sentence, where colour plus an underline is the
+ * ordinary affordance and the link is one word among many. It is wrong here:
+ * this element is the whole point of the state, it sits alone under a heading
+ * with nothing around it to be distinguished FROM, and in this design cyan
+ * means "you are here", not "press this".
+ *
+ * So the anchors in this one slot take the outlined secondary shape, matching
+ * the `Button` that is usually standing beside them. Scoped to `.actions a`
+ * rather than fixed in `base.css` deliberately: changing the global rule would
+ * repaint every prose link in the product to solve a problem that exists in
+ * exactly one place.
+ *
+ * Geometry is `Button`'s `md` restated rather than composed, because that
+ * component has no link form -- an anchor is not a `<button>` and giving it
+ * one would break middle-click, "open in new tab" and the status bar. If
+ * `Button` ever grows an `as="a"`, delete this block and use it.
+ */
+.actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-height-md);
+  padding-inline: var(--space-5);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-full);
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+
+.actions a:hover {
+  background-color: var(--color-surface-hover);
+  color: var(--color-text-primary);
+}
+
+/**
  * The technical detail behind an error.
  *
  * A `<details>` element, not a state toggle: the browser already has a
