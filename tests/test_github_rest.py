@@ -461,6 +461,68 @@ async def test_a_signed_out_caller_cannot_finish_somebody_elses_install():
 # --- where the browser is sent afterwards -----------------------------
 
 
+async def test_a_start_with_no_return_target_ends_on_the_bare_origin():
+    """The P0, from the server's side, and the server is behaving correctly.
+
+    A deployment configured GitHub for real and every successful connection
+    landed the user on the Vector home page. The flow was not broken: the
+    install started, the state matched, the installation was recorded. The
+    front end simply never sent a `return_to`, so `allowed_redirect` took the
+    only branch left to it and returned `allowlist[0]`.
+
+    That fallback is right -- it is the one target the deployment has stated --
+    but the allowlist holds ORIGINS, and an origin has no path. So "back where
+    the deployment says people belong" and "the home page" are the same URL,
+    and a user who pressed Connect in workspace settings could not tell a
+    completed connection from a silently discarded one.
+
+    Asserted here rather than left to the front end alone, because it is the
+    reason `integrationStartHref` exists and the thing that makes its absence
+    a defect rather than a preference. The frontend regression tests are in
+    `frontend/src/features/settings/settings.test.tsx` and
+    `frontend/src/features/onboarding/onboarding.test.tsx`.
+    """
+    async with build_client(build_services_for()) as client:
+        # No `return_to`, which is exactly what the Connect link used to send.
+        state = state_from(await start_install(client))
+
+        response = await client.get(
+            "/github/callback",
+            params={"state": state, "installation_id": INSTALLATION_ID},
+        )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == APP_ORIGIN
+
+    # The half that makes it a bug report rather than a restatement: the
+    # target the user is sent to has NO PATH, so the browser opens the app at
+    # its root no matter which screen the flow was started from.
+    assert urlsplit(response.headers["location"]).path == ""
+
+
+async def test_a_supplied_return_target_survives_to_the_final_redirect():
+    """And the fix, end to end: a path is kept, not flattened to the origin.
+
+    The mirror of the test above. `allowed_redirect` compares only the ORIGIN
+    against the allowlist, so a path on an allowed origin is returned intact --
+    which is what makes it enough for the front end to name where it wants to
+    come back to.
+    """
+    settings_page = f"{APP_ORIGIN}/acme/settings"
+
+    async with build_client(build_services_for()) as client:
+        state = state_from(await start_install(client, return_to=settings_page))
+
+        response = await client.get(
+            "/github/callback",
+            params={"state": state, "installation_id": INSTALLATION_ID},
+        )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == settings_page
+    assert urlsplit(response.headers["location"]).path == "/acme/settings"
+
+
 async def test_a_return_target_off_the_allowlist_is_not_followed():
     """The open redirect, refused. The user still lands back in the app."""
     async with build_client(build_services_for()) as client:

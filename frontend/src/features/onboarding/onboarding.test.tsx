@@ -285,15 +285,49 @@ describe('integrations the deployment cannot offer', () => {
   it('points a DISCONNECTED provider at the backend start route', async () => {
     await renderIntegrations({ github: 'DISCONNECTED', slack: 'DISCONNECTED' })
 
-    const github = await screen.findByRole('link', { name: 'Connect GitHub' })
+    // Awaited so the query below runs against a settled render.
+    await screen.findByRole('link', { name: 'Connect GitHub' })
 
     // The backend's own endpoint, which mints the CSRF state and redirects.
     // Never a github.com URL assembled here, and no client id anywhere.
-    expect(github).toHaveAttribute('href', '/github/install?workspace=acme')
-    expect(screen.getByRole('link', { name: 'Connect Slack' })).toHaveAttribute(
-      'href',
-      '/slack/oauth/start?workspace=acme',
-    )
+    for (const [name, startPath] of [
+      ['Connect GitHub', '/github/install'],
+      ['Connect Slack', '/slack/oauth/start'],
+    ]) {
+      const href = screen.getByRole('link', { name }).getAttribute('href')
+
+      expect(href).toMatch(new RegExp(`^${startPath}\?`))
+      expect(new URLSearchParams(href!.split('?')[1]).get('workspace')).toBe('acme')
+      expect(href).not.toMatch(/github\.com|slack\.com|client_id/)
+    }
+  })
+
+  it('sends the callback back to this step, not to the workspace home', async () => {
+    /*
+      The same defect the settings screen had, and this is the call site where
+      getting it wrong is worst: a person part-way through onboarding who
+      connects GitHub and is dropped on the home page has lost their place in
+      a flow they had not finished.
+
+      Each call site names its own return path -- settings returns to
+      settings, this returns here -- so neither infers the other's, and the
+      onboarding path cannot leak into the settings flow.
+    */
+    await renderIntegrations({ github: 'DISCONNECTED', slack: 'DISCONNECTED' })
+
+    const github = await screen.findByRole('link', { name: 'Connect GitHub' })
+    const href = github.getAttribute('href')
+    const returnTo = new URLSearchParams(href!.split('?')[1]).get('return_to')
+
+    expect(returnTo).not.toBeNull()
+
+    // Absolute, because the server matches the ORIGIN against its allowlist
+    // and a bare path parses to no origin at all.
+    const parsed = new URL(returnTo!)
+
+    expect(parsed.origin).toBe(window.location.origin)
+    expect(parsed.pathname).toBe('/onboarding/integrations')
+    expect(parsed.pathname).not.toBe('/')
   })
 
   it('does not read an unconfirmed GitHub claim as a connection', async () => {

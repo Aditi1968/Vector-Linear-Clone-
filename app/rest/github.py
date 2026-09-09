@@ -30,7 +30,7 @@ import json
 import secrets
 from dataclasses import dataclass
 from typing import Annotated, Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -295,6 +295,21 @@ def _encode_state(payload: dict[str, Any]) -> str:
     ).decode("ascii")
 
 
+def _path_of(url: str | None) -> str | None:
+    """The path of an absolute URL, for logging. Never the origin.
+
+    A redirect target is not a secret, but it names the deployment's own host
+    and there is nothing to learn from that in a log written BY that host. The
+    path is the part that answers the only question worth asking here -- where
+    does this flow end -- and an EMPTY path is the answer that matters: it
+    means the target is a bare origin, so the browser lands on the home page.
+    """
+    if url is None:
+        return None
+
+    return urlsplit(url).path or ""
+
+
 def _decode_state(raw: str | None) -> dict[str, Any] | None:
     """Read the state cookie back, or None if it is not one.
 
@@ -464,7 +479,21 @@ async def install(
     # which is a worse refusal than this one.
     await _authorized_scope(request, services, workspace)
 
+    # Names no secret: not the state, not the client id, not the workspace's
+    # contents. `workspace` is a slug the caller already sent and already
+    # passed authorization for, and it is the one field that makes two
+    # concurrent installs tellable apart in a log.
+    logger.info("github.install.start", workspace=workspace)
+
     state = secrets.token_urlsafe(STATE_ENTROPY_BYTES)
+
+    # The VALUE is never logged -- it is the CSRF secret, and a state in a log
+    # is a state an attacker who reads logs can replay. Only that one exists.
+    logger.info(
+        "github.install.state_created",
+        workspace=workspace,
+        return_to_supplied=return_to is not None,
+    )
 
     # Built from the configured client id and a freshly minted state. Nothing
     # the caller sent reaches this URL: `workspace` and `return_to` travel in
@@ -496,6 +525,29 @@ async def install(
         status_code=status.HTTP_302_FOUND,
     )
 
+    # Resolved once here and logged as a PATH, so a deployment can see where
+    # the flow intends to end without the log carrying an origin. This is the
+    # value the callback re-validates.
+    resolved_return_to = allowed_redirect(
+        return_to,
+        allowlist=config.redirect_allowlist,
+    )
+
+    logger.info(
+        "github.install.redirecting_to_github",
+        workspace=workspace,
+        # The authorize URL's host, which is a constant in this file and not
+        # anything a caller influenced. Logged so "did we actually hand off?"
+        # is answerable without the query string, which carries the state.
+        provider="github.com",
+        # PATH only. An empty path is the finding this line exists to surface:
+        # it means the flow will end on the deployment's bare origin -- the
+        # home page -- which is what `allowed_redirect` falls back to when no
+        # `return_to` was supplied.
+        return_to_path=_path_of(resolved_return_to),
+        allowlist_configured=bool(config.redirect_allowlist),
+    )
+
     _set_state_cookie(
         response,
         value=_encode_state(
@@ -503,10 +555,7 @@ async def install(
                 "state": state,
                 "session": _session_digest(request),
                 "workspace": workspace,
-                "return_to": allowed_redirect(
-                    return_to,
-                    allowlist=config.redirect_allowlist,
-                ),
+                "return_to": resolved_return_to,
             }
         ),
         environment=services.environment,
@@ -595,6 +644,17 @@ async def _complete_install(
 ) -> Response:
     """The callback's decisions, with the cookie handling left to its caller."""
     config = services.github.config
+
+    # Booleans and presence only. Not the state, not the code -- the code is a
+    # single-use credential this endpoint deliberately never exchanges, and
+    # logging one would be storing it.
+    logger.info(
+        "github.callback.reached",
+        configured=config.configured,
+        state_parameter_present=state is not None,
+        installation_id_present=installation_id is not None,
+        code_present=code is not None,
+    )
 
     if not config.configured:
         raise _not_found()
@@ -719,12 +779,32 @@ async def _complete_install(
     except WorkspaceAccessDeniedError:
         raise _not_found() from None
 
+    stored_return_to = _string_or_none(stored.get("return_to"))
+
     target = allowed_redirect(
         # Re-validated rather than trusted. The value was checked before it was
         # written, but it travelled through the client in between, and a cookie
         # is not a value this server chose.
-        _string_or_none(stored.get("return_to")),
+        stored_return_to,
         allowlist=config.redirect_allowlist,
+    )
+
+    # The line this whole investigation needed. `final_redirect_path` is the
+    # answer to "the flow worked, so why am I on the home page?" -- an empty
+    # string there means the target is a bare origin, which is what
+    # `allowed_redirect` returns when no `return_to` was ever supplied.
+    #
+    # `rewritten` says the stored value did not survive re-validation, so the
+    # allowlist fallback was taken. Getting here at all means the state was
+    # accepted, so that is stated rather than implied.
+    logger.info(
+        "github.callback.completed",
+        state_valid=True,
+        installation_resolved=installation_id is not None,
+        return_to_stored=stored_return_to is not None,
+        rewritten=stored_return_to is not None and stored_return_to != target,
+        final_redirect_path=_path_of(target),
+        redirecting=target is not None,
     )
 
     if target is None:

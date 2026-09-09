@@ -2,7 +2,18 @@ import { useQuery } from '@apollo/client/react'
 import { Link } from 'react-router-dom'
 import type { ReactNode } from 'react'
 
+import { ONBOARDING_PATH } from '../../../app/routes/paths'
 import { Badge, Spinner, VisuallyHidden } from '../../../components'
+import { integrationStartHref } from '../../../lib/integrations'
+
+/**
+ * This step's own URL, which is where a provider's callback should return to.
+ *
+ * Spelled from `ONBOARDING_PATH` and the step segment rather than written out,
+ * so it cannot drift from the route `features/onboarding/index.tsx` registers
+ * as `ONBOARDING_STEPS[3]`.
+ */
+const ONBOARDING_INTEGRATIONS_PATH = `${ONBOARDING_PATH}/integrations`
 import { OnboardingIntegrationsDocument } from '../api'
 import { workspaceHome } from '../lib/progress'
 import { useOnboardingContext } from './OnboardingLayout'
@@ -34,6 +45,15 @@ interface IntegrationCardProps {
   /** The backend's own start route. Never a provider URL. */
   startPath: string
   workspaceSlug: string
+  /**
+   * Where the callback should leave the browser, as a path on this origin.
+   *
+   * This step's own URL, so connecting a provider returns to the step the
+   * person was on rather than to whatever the deployment happens to have
+   * listed first in GITHUB_REDIRECT_ALLOWLIST -- which is an origin, so it
+   * has no path and lands on the home page. See lib/integrations.
+   */
+  returnToPath: string
 }
 
 /**
@@ -72,6 +92,7 @@ function IntegrationCard({
   connectedTo,
   startPath,
   workspaceSlug,
+  returnToPath,
 }: IntegrationCardProps) {
   let badge: ReactNode
   let detail: string
@@ -98,7 +119,8 @@ function IntegrationCard({
         // The workspace is named in the query string because the endpoint
         // authorizes against it before it issues a state -- an ordinary
         // member gets nothing to carry through the consent screen.
-        href={`${startPath}?workspace=${encodeURIComponent(workspaceSlug)}`}
+        // `return_to` brings the browser back to THIS step afterwards.
+        href={integrationStartHref(startPath, workspaceSlug, returnToPath)}
       >
         Connect {name}
       </a>
@@ -169,6 +191,7 @@ export function IntegrationsStep() {
             connectedTo={data.githubIntegration.accountLogin}
             name="GitHub"
             purpose="Link pull requests and commits to Vector issues."
+            returnToPath={ONBOARDING_INTEGRATIONS_PATH}
             startPath="/github/install"
             status={data.githubIntegration.status}
             workspaceSlug={workspaceSlug}
@@ -177,6 +200,7 @@ export function IntegrationsStep() {
             connectedTo={data.slackIntegration.teamName}
             name="Slack"
             purpose="Post issue updates into a Slack channel."
+            returnToPath={ONBOARDING_INTEGRATIONS_PATH}
             startPath="/slack/oauth/start"
             status={data.slackIntegration.status}
             workspaceSlug={workspaceSlug}

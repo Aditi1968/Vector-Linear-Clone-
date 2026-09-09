@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 
 import { PageContent, PageHeader } from '../../app/layout'
+import { paths } from '../../app/routes/paths'
 import { useWorkspace } from '../../app/workspace'
 import {
   Button,
@@ -14,6 +15,7 @@ import {
   VisuallyHidden,
   cx,
 } from '../../components'
+import { integrationStartHref } from '../../lib/integrations'
 import shared from '../screens.module.css'
 import styles from './Settings.module.css'
 import { useIntegrations } from './api'
@@ -61,6 +63,16 @@ interface IntegrationPanelProps {
   /** The backend's own start route. Never a provider URL. */
   startPath: string
   workspaceSlug: string
+  /**
+   * Where the provider's callback should leave the browser, as a path on this
+   * origin.
+   *
+   * Required rather than defaulted, because the default is what broke: with
+   * no `return_to` the backend falls back to the first allowed ORIGIN, which
+   * has no path, and a completed connection lands on the home page. See
+   * `lib/integrations`.
+   */
+  returnToPath: string
   /** Facts worth showing about a live connection: repositories, scopes. */
   details?: ReactNode
   isDisconnecting: boolean
@@ -125,6 +137,7 @@ function IntegrationPanel({
   connectedTo,
   startPath,
   workspaceSlug,
+  returnToPath,
   details,
   isDisconnecting,
   onDisconnect,
@@ -134,8 +147,10 @@ function IntegrationPanel({
 
   // The workspace is named in the query string because the endpoint
   // authorizes against it before it issues a state -- an ordinary member gets
-  // nothing to carry through the consent screen.
-  const startHref = `${startPath}?workspace=${encodeURIComponent(workspaceSlug)}`
+  // nothing to carry through the consent screen. `return_to` is named for a
+  // different reason: without it a completed connection ends on the home page
+  // rather than back here. See lib/integrations.
+  const startHref = integrationStartHref(startPath, workspaceSlug, returnToPath)
 
   const state =
     status === 'CONNECTED'
@@ -575,6 +590,7 @@ export function SettingsPage() {
               connectedTo={github.accountLogin}
               startPath={START_PATHS.github}
               workspaceSlug={slug}
+              returnToPath={paths.settings(slug)}
               isDisconnecting={isDisconnecting}
               onDisconnect={disconnectGithub}
               details={
@@ -598,6 +614,7 @@ export function SettingsPage() {
               connectedTo={slack.teamName}
               startPath={START_PATHS.slack}
               workspaceSlug={slug}
+              returnToPath={paths.settings(slug)}
               isDisconnecting={isDisconnecting}
               onDisconnect={disconnectSlack}
               details={

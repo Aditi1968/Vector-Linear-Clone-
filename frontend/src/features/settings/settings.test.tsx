@@ -19,6 +19,23 @@ import type { WorkspaceIntegrationsQuery } from '../../generated/operations'
 
 const PATH = `/${WORKSPACE_SLUG}/settings`
 
+/**
+ * What a Connect link should point at: the backend route, the workspace, and
+ * an absolute `return_to` naming this screen.
+ *
+ * Built the way the component builds it rather than written out, so these
+ * assertions stay about the CONTENTS of the URL and not about the order
+ * URLSearchParams happens to serialise two keys in.
+ */
+function expectedStartHref(startPath: string): string {
+  const parameters = new URLSearchParams({
+    workspace: WORKSPACE_SLUG,
+    return_to: new URL(PATH, window.location.origin).toString(),
+  })
+
+  return `${startPath}?${parameters.toString()}`
+}
+
 // A team and two of its states, for the pull-request automation controls.
 // Ids rather than names everywhere they are compared, because the automation
 // stores ids -- a team owns its state NAMES and may change them.
@@ -174,7 +191,7 @@ describe('an unconfirmed GitHub claim', () => {
     // and it goes to the backend's own route like every other start.
     expect(
       screen.getByRole('link', { name: 'Run the GitHub installation again' }),
-    ).toHaveAttribute('href', `/github/install?workspace=${WORKSPACE_SLUG}`)
+    ).toHaveAttribute('href', expectedStartHref('/github/install'))
 
     // Cancelling is the other way out: a claim nobody confirms should not have
     // to be waited out.
@@ -194,17 +211,47 @@ describe('a disconnected integration', () => {
     // The backend mints the CSRF `state` and redirects; a frontend-built
     // authorize URL would need a client id in this bundle and could not mint
     // a state the callback can check.
-    expect(github).toHaveAttribute(
-      'href',
-      `/github/install?workspace=${WORKSPACE_SLUG}`,
-    )
-    expect(slack).toHaveAttribute(
-      'href',
-      `/slack/oauth/start?workspace=${WORKSPACE_SLUG}`,
-    )
+    expect(github).toHaveAttribute('href', expectedStartHref('/github/install'))
+    expect(slack).toHaveAttribute('href', expectedStartHref('/slack/oauth/start'))
 
     for (const href of [github.getAttribute('href'), slack.getAttribute('href')]) {
       expect(href).not.toMatch(/github\.com|slack\.com|client_id/)
+    }
+  })
+
+  it('tells the callback to come back to settings, not to the home page', async () => {
+    /*
+      THE P0, as the user met it: press Connect GitHub, complete the whole
+      GitHub flow, and land on the Vector home page as though nothing had
+      happened. The installation WAS recorded -- the flow was never broken.
+
+      The link simply carried no `return_to`, so `allowed_redirect` on the
+      server took its last branch and returned `allowlist[0]`: the first
+      allowed ORIGIN. An origin has no path, so "where the deployment says
+      people belong" and "the home page" were the same URL.
+
+      So this asserts the parameter is present AND that it points at this
+      screen. Asserting only its presence would pass for a link that sent
+      everyone to the root explicitly.
+    */
+    await open('DISCONNECTED', 'DISCONNECTED')
+
+    for (const name of ['Connect GitHub', 'Connect Slack']) {
+      const href = screen.getByRole('link', { name }).getAttribute('href')
+      const returnTo = new URLSearchParams(href!.split('?')[1]).get('return_to')
+
+      expect(returnTo).not.toBeNull()
+
+      // Absolute, because the server compares the ORIGIN against its
+      // allowlist -- a bare path parses to no origin, is discarded as "not a
+      // URL", and falls back to exactly the bug above.
+      const parsed = new URL(returnTo!)
+
+      expect(parsed.origin).toBe(window.location.origin)
+      expect(parsed.pathname).toBe(`/${WORKSPACE_SLUG}/settings`)
+
+      // The failure that started this: an origin with no path.
+      expect(parsed.pathname).not.toBe('/')
     }
   })
 })
