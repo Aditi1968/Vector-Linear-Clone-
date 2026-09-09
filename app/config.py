@@ -94,6 +94,35 @@ class Settings(BaseSettings):
     # costs accuracy and no security -- which is the right way round.
     trusted_proxy_hops: int = 0
 
+    # uvicorn's `--forwarded-allow-ips`, read here as well as by uvicorn.
+    #
+    # Not to configure uvicorn -- it reads this variable itself -- but to know
+    # what uvicorn has DONE. When the peer is inside this list, uvicorn's
+    # ProxyHeadersMiddleware overwrites `scope["client"]` with an element of
+    # `X-Forwarded-For`, and under `*` it trusts every peer and takes the
+    # LEFTMOST element, which is the one the caller wrote.
+    #
+    # So on such a deployment `request.client` is not the TCP peer at all: it
+    # is a caller-supplied header value wearing the peer's clothes. Without
+    # this, `trusted_proxy_hops=0` would fall back to `request.client`
+    # believing it unforgeable, and be wrong in exactly the case that matters
+    # -- a deployment that set `*` for HSTS and never set the hop count.
+    #
+    # Default matches uvicorn's own, so a process nobody configured is
+    # described accurately.
+    forwarded_allow_ips: str = "127.0.0.1"
+
+    @property
+    def peer_address_is_trustworthy(self) -> bool:
+        """Whether `request.client` is the real peer rather than a header.
+
+        False as soon as a wildcard appears, because that is the setting under
+        which uvicorn rewrites the client for ANY peer. A specific list is
+        treated as trustworthy: the peers named in it are proxies an operator
+        chose, which is the same trust the hop count expresses.
+        """
+        return "*" not in self.forwarded_allow_ips
+
     # --- GitHub App -----------------------------------------------------
     #
     # Every field below is optional, and that is the whole design. Vector is

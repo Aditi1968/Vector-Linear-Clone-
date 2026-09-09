@@ -116,7 +116,12 @@ UNTRUSTED_REAL_IP_HEADER = "x-real-ip"
 MAX_ADDRESS_LENGTH = 45
 
 
-def read_client_ip(request: Request | None, *, trusted_hops: int) -> str | None:
+def read_client_ip(
+    request: Request | None,
+    *,
+    trusted_hops: int,
+    peer_is_trustworthy: bool = True,
+) -> str | None:
     """The caller's address, canonicalised; or None if there is not one.
 
     `trusted_hops` is how many proxies in front of this process are trusted to
@@ -125,6 +130,15 @@ def read_client_ip(request: Request | None, *, trusted_hops: int) -> str | None:
     and nothing else, which meant every caller got the DEPLOYMENT-SHAPED
     decision made for them by a default, and the default was wrong on the
     first deployment that had no nginx in front of it.
+
+    `peer_is_trustworthy` is `Settings.peer_address_is_trustworthy`, and it
+    exists because "fall back to the peer" is not automatically safe. Under
+    `--forwarded-allow-ips=*` uvicorn overwrites `scope["client"]` with the
+    LEFTMOST `X-Forwarded-For` element for any peer, so `request.client` is a
+    caller-supplied value there. This is the belt to the hop count's braces:
+    it keeps the fallback safe on a deployment that set `*` for HSTS and never
+    set a hop count, which is precisely the configuration this fix would
+    otherwise leave exposed.
 
     None is a real answer and not a failure. A context built by hand has no
     request, a deployment may be reached in a shape that sets no header, and a
@@ -147,17 +161,17 @@ def read_client_ip(request: Request | None, *, trusted_hops: int) -> str | None:
             request.headers.get(FORWARDED_FOR_HEADER), trusted_hops
         )
 
-    # No trusted proxy, so the only thing that cannot be typed by the caller
-    # is the address the socket was actually opened from.
+    # No trusted proxy. The fallback is the address the socket was opened
+    # from -- but only where that is still what `request.client` means.
     #
-    # `request.client` and not a header, and this is worth being exact about
-    # because it is not simply "the TCP peer": uvicorn's ProxyHeadersMiddleware
-    # REWRITES `scope["client"]` from `X-Forwarded-For` when the peer is inside
-    # `--forwarded-allow-ips`. With that set to `*` it trusts every peer and
-    # takes the LEFTMOST element, which is the one the client chose. So this
-    # branch is only as good as that setting, and a deployment that widens
-    # `forwarded_allow_ips` must set `trusted_proxy_hops` to match rather than
-    # leaving this branch to read a value uvicorn already replaced.
+    # Under `--forwarded-allow-ips=*` it is not: uvicorn has already replaced
+    # it with the leftmost `X-Forwarded-For` element, which the caller wrote.
+    # Refusing here gives up the IP bucket and keeps the per-address budget
+    # and the argon2 semaphore, which is strictly better than keying a limit
+    # on a value the person being limited chose.
+    if not peer_is_trustworthy:
+        return None
+
     if request.client is None:
         return None
 

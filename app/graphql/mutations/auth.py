@@ -146,10 +146,16 @@ def _client_ip(info: Info) -> str | None:
     # nothing at all -- the same reason `_response` below annotates.
     request: Request | None = info.context.request
 
-    # The hop count is a fact about the deployment, not about this request, so
-    # it comes from settings rather than from anything a caller can influence.
+    # Both facts are about the DEPLOYMENT, not about this request, so both come
+    # from settings rather than from anything a caller can influence.
     # `get_settings` is lru_cached, so this is a dictionary lookup.
-    return read_client_ip(request, trusted_hops=get_settings().trusted_proxy_hops)
+    settings = get_settings()
+
+    return read_client_ip(
+        request,
+        trusted_hops=settings.trusted_proxy_hops,
+        peer_is_trustworthy=settings.peer_address_is_trustworthy,
+    )
 
 
 def _response(info: Info) -> Response:

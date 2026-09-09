@@ -209,6 +209,39 @@ def test_the_peer_is_used_when_no_proxy_is_trusted():
     assert read_client_ip(FakeRequest(peer=CLIENT), trusted_hops=0) == CLIENT
 
 
+def test_the_peer_is_refused_when_uvicorn_may_have_rewritten_it():
+    """Belt to the hop count's braces, and the case that would have stayed open.
+
+    `TRUSTED_PROXY_HOPS` is set in render.yaml, but a blueprint env change does
+    not always reach a running service. If it did not, `trusted_hops` would be
+    0 here -- and on Render `request.client` is NOT the TCP peer, because
+    `FORWARDED_ALLOW_IPS: "*"` makes uvicorn overwrite it with the leftmost
+    `X-Forwarded-For` element, which the caller wrote. The fallback would have
+    handed back the forgery the hop count was added to prevent.
+
+    So when the peer cannot be believed the answer is None: no IP bucket at
+    all, with the per-address budget and the argon2 semaphore untouched. Giving
+    up a backstop beats keying it on a value the limited party chose.
+    """
+    request = FakeRequest(peer=ATTACKER_CLAIM)
+
+    assert read_client_ip(request, trusted_hops=0, peer_is_trustworthy=False) is None
+
+
+def test_a_trusted_hop_count_still_works_when_the_peer_is_untrustworthy():
+    """The two settings are independent, and the header path does not care.
+
+    Render is exactly this pair: `FORWARDED_ALLOW_IPS: "*"` (so the peer is
+    meaningless) and one appending proxy (so the last element is real).
+    """
+    request = FakeRequest(
+        headers={FORWARDED_FOR_HEADER: f"{ATTACKER_CLAIM}, {CLIENT}"},
+        peer=ATTACKER_CLAIM,
+    )
+
+    assert read_client_ip(request, trusted_hops=1, peer_is_trustworthy=False) == CLIENT
+
+
 def test_no_request_is_no_address():
     """A context built by hand has no request, which is not an error."""
     assert read_client_ip(None, trusted_hops=0) is None
