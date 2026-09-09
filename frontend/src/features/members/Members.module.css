@@ -51,6 +51,32 @@
 }
 
 /*
+ * Somebody who has left, marked in words.
+ *
+ * A hairline box and no fill: cyan means "you are here" and a filled badge is
+ * the thing this direction took out, so the outline is the whole decoration
+ * and "Former member" is the whole message. Dimming the row would say the same
+ * thing in colour alone, which is to say it would say it to some people.
+ *
+ * `--color-text-muted` is 7.0:1 and one step above the date beside it -- the
+ * marker is the more important of the two readouts and reads as such without
+ * competing with the name.
+ */
+.former {
+  flex: none;
+  padding: var(--space-2) var(--space-3);
+  border: var(--border-width) solid var(--color-border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  letter-spacing: var(--label-mono-tracking-sm);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/*
  * When they joined.
  *
  * `--color-text-faint` is 5.0:1 -- the artboard paints this row `#626c7d`

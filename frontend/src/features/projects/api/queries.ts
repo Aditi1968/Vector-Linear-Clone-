@@ -204,7 +204,16 @@ export function useProjectTeams(): UseProjectTeamsResult {
 }
 
 export interface UseProjectMembersResult {
+  /**
+   * Everyone the workspace has had, for turning a `leadId` into a name.
+   *
+   * Includes people who have left. A project whose lead was since removed
+   * still has a lead in the data, and dropping them here would render it as
+   * led by nobody rather than by somebody who is gone.
+   */
   members: readonly ProjectMember[]
+  /** The people still here -- the only ones the lead picker may offer. */
+  activeMembers: readonly ProjectMember[]
   isLoading: boolean
   /**
    * Deliberately not surfaced as a page-level error.
@@ -229,8 +238,11 @@ export function useProjectMembers(): UseProjectMembersResult {
     variables: { workspaceSlug },
   })
 
+  const members = data?.workspaceMembers ?? NO_MEMBERS
+
   return {
-    members: data?.workspaceMembers ?? NO_MEMBERS,
+    members,
+    activeMembers: members.filter((member) => member.removedAt === null),
     isLoading: loading,
     errorMessage: error === undefined ? null : describeError(error),
   }

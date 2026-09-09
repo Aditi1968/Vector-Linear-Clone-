@@ -23,7 +23,13 @@ function team(id: string, key: string): ProjectTeam {
 }
 
 function member(userId: string, name: string | null): ProjectMember {
-  return { __typename: 'WorkspaceMember', userId, name, email: `${userId}@example.test` }
+  return {
+    __typename: 'WorkspaceMember',
+    userId,
+    name,
+    email: `${userId}@example.test`,
+    removedAt: null,
+  }
 }
 
 function issue(overrides: Partial<ProjectIssue> = {}): ProjectIssue {

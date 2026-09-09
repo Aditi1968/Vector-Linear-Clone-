@@ -73,7 +73,9 @@ export function ProjectListPage() {
   // The teams are needed to name the ones a project is on. A failure here
   // costs team names and nothing else, so it is not raised to the page.
   const { teams } = useProjectTeams()
-  const { members } = useProjectMembers()
+  // Only the picker here, so only the people still in the workspace. This
+  // page never resolves a `leadId`; the list rows do not name a lead.
+  const { activeMembers } = useProjectMembers()
   const { createProject, isSubmitting } = useCreateProject()
 
   const [isComposerOpen, setIsComposerOpen] = useState(false)
@@ -264,7 +266,7 @@ export function ProjectListPage() {
         description="Projects are workspace-wide. Add the teams working on it from the project's own page."
       >
         <ProjectForm
-          members={members}
+          members={activeMembers}
           submitLabel="Create project"
           isSubmitting={isSubmitting}
           onCancel={closeComposer}

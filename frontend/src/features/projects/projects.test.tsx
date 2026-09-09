@@ -95,7 +95,24 @@ const teamsData: ProjectTeamsData = {
 
 const membersData: ProjectMembersQuery = {
   workspaceMembers: [
-    { __typename: 'WorkspaceMember', userId: 'u1', name: 'Ada', email: 'ada@example.test' },
+    {
+      __typename: 'WorkspaceMember',
+      userId: 'u1',
+      name: 'Ada',
+      email: 'ada@example.test',
+      removedAt: null,
+    },
+    {
+      // Somebody who has left, which `workspaceMembers` returns alongside the
+      // current members -- 026 stamps the membership rather than deleting it.
+      // A lead picker must not offer them; naming an existing `leadId` still
+      // must.
+      __typename: 'WorkspaceMember',
+      userId: 'u2',
+      name: 'Alonzo',
+      email: 'alonzo@example.test',
+      removedAt: '2026-06-01T00:00:00.000Z',
+    },
   ],
 }
 
@@ -220,6 +237,27 @@ describe('the project list', () => {
 })
 
 describe('the project detail', () => {
+  it('names a lead who has left, and does not offer them as the next one', async () => {
+    const view = await openDetail(project({ leadId: 'u2' }))
+
+    // Still named. `workspaceMembers` returns former members precisely so
+    // that a `leadId` pointing at one resolves to a person rather than to
+    // "someone you cannot see", which is what a missing row would say.
+    expect(within(main()).getByText('Alonzo')).toBeInTheDocument()
+
+    await view.user.click(
+      screen.getByRole('button', { name: 'Actions for Payments migration' }),
+    )
+    await view.user.click(screen.getByRole('menuitem', { name: 'Edit project' }))
+
+    // The picker is a choice about who runs this project next, so it offers
+    // only people who are still here.
+    const lead = screen.getByRole('combobox', { name: 'Lead' })
+
+    expect(within(lead).getByRole('option', { name: 'Ada' })).toBeInTheDocument()
+    expect(within(lead).queryByRole('option', { name: 'Alonzo' })).toBeNull()
+  })
+
   it('gives one answer to a project that does not exist and to one in another workspace', async () => {
     // `project(id:)` returns null for both, and so does this screen --
     // distinguishing them would leak whether an id exists to someone who

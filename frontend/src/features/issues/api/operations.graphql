@@ -191,10 +191,16 @@ query IssueWorkspaceContext($workspaceSlug: String!) {
       position
     }
   }
+  # `removedAt` splits this one list into the two it has always been. The
+  # server returns people who have left so that an issue created or assigned
+  # by one still resolves to a name; an assignee picker must not offer them.
+  # `useWorkspaceContext` keeps both -- `members` for the lookup,
+  # `activeMembers` for anything choosing who does future work.
   workspaceMembers(workspaceSlug: $workspaceSlug) {
     userId
     name
     email
+    removedAt
   }
   projects(workspaceSlug: $workspaceSlug, first: 50) {
     nodes {
