@@ -48,22 +48,38 @@ STATEMENT = re.compile(r"^(SELECT|INSERT|UPDATE|DELETE|WITH)\s", re.IGNORECASE)
 COMMAND_TAG = re.compile(r"^(SELECT|INSERT|UPDATE|DELETE)(\s+\d+)+$", re.IGNORECASE)
 
 # The relations a statement names. Deliberately only the four keywords that
-# introduce one, and the trailing lookahead excludes a set-returning FUNCTION
-# -- `FROM unnest($1::text[], $2::text[])` names no table, and reading it as
-# one would put "unnest" in the exemption list beside the real tables.
+# introduce one.
+#
+# There was a trailing `(?!\s*\()` here, to exclude a set-returning FUNCTION --
+# `FROM unnest($1::text[], $2::text[])` names no table. It did something else
+# as well, and silently: `INSERT INTO sessions ( user_id, ... )` also puts a
+# paren after the name, so the greedy group BACKTRACKED one character to
+# satisfy the lookahead and captured `session`. Every INSERT with a column
+# list had its table name truncated by one letter, which then matched nothing
+# in the exemption list below, so the gate reported four tenant-free tables as
+# unscoped and named them in a way no grep would find.
+#
+# A lookahead cannot tell `unnest(` from `sessions (` -- both are an
+# identifier followed by a paren -- so the distinction is not one this pattern
+# can draw at all. `unnest` goes in the exemption list instead, which the
+# original comment rejected on taste. Taste lost: a name in a list is legible
+# and a backtracking lookahead is not.
 RELATION = re.compile(
-    r"\b(?:FROM|INTO|JOIN|UPDATE)\s+(?:ONLY\s+|LATERAL\s+)?([a-z_][a-z0-9_]*)(?!\s*\()",
+    r"\b(?:FROM|INTO|JOIN|UPDATE)\s+(?:ONLY\s+|LATERAL\s+)?([a-z_][a-z0-9_]*)",
     re.IGNORECASE,
 )
 
 # Words the pattern above can capture that are not names of anything. `SET` is
 # the one that actually occurs: an upsert's `ON CONFLICT ... DO UPDATE SET`
-# puts it exactly where a table name would be.
-NOT_A_RELATION = frozenset({"set", "select", "values", "only", "lateral"})
+# puts it exactly where a table name would be. `unnest` is the set-returning
+# function described above -- it is a function, not a relation, and a
+# statement selecting from it is scoped by whatever it joins that output to.
+NOT_A_RELATION = frozenset({"set", "select", "values", "only", "lateral", "unnest"})
 
 
 def _relations(sql: str) -> set[str]:
     return {match.lower() for match in RELATION.findall(sql)} - NOT_A_RELATION
+
 
 # The predicate itself, in any spelling a statement may use for it --
 # `workspace_id = $1`, `issues.workspace_id = $1`, or the join that carries it
