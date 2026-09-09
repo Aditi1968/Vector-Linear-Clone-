@@ -125,8 +125,14 @@ describe('the triage queue', () => {
       `TriageIssueConnection` has no `totalCount` and this screen loads one
       page, so "1 loaded" and "41 waiting" are different facts. Stating only
       the first would make a page of 25 read as the whole queue.
+
+      Said in two places now, which is why this asserts them separately
+      rather than matching /41/ anywhere: the header's mono readout carries
+      the queue's whole length, and the line above the list says how much of
+      it is on screen. A bare /41/ would match both and throw.
     */
-    expect(within(main()).getByText(/41/)).toBeInTheDocument()
+    expect(within(main()).getByText('41 waiting')).toBeInTheDocument()
+    expect(within(main()).getByText(/oldest of/)).toHaveTextContent('41')
   })
 
   it('says a team has nothing waiting rather than showing an empty list', async () => {

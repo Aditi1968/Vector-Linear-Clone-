@@ -192,9 +192,17 @@ export function FavoritesPage() {
 
   return (
     <>
+      {/*
+        The header's mono readout, the way every artboard puts one beside a
+        screen title. `favorites` takes no page-size argument and returns the
+        whole list, so this length really is the total -- which is the only
+        reason it is stated as one. Withheld while loading rather than shown
+        as `0 starred`, which is a claim and not a placeholder.
+      */}
       <PageHeader
         title="Favorites"
         description="The teams, projects and views you starred."
+        readout={isBusy ? undefined : `${String(resolved.length)} starred`}
         actions={
           <Menu
             align="end"
@@ -217,8 +225,11 @@ export function FavoritesPage() {
         {isBusy && (
           <div className={styles.skeletonStack} role="status" aria-busy="true">
             <VisuallyHidden as="div">Loading favorites</VisuallyHidden>
+            {/* `--row-height` and not a literal: the placeholder is a picture
+                of the rows that replace it, and the shell re-points that
+                token when density changes. */}
             {Array.from({ length: 4 }, (_unused, index) => (
-              <Skeleton key={index} width="100%" height="2.25rem" />
+              <Skeleton key={index} width="100%" height="var(--row-height)" />
             ))}
           </div>
         )}

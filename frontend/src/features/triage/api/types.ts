@@ -18,11 +18,15 @@ export type TriageRow = TriageRowFieldsFragment
 /**
  * The issue on a row.
  *
- * An `IssueSummary`, and that is the single most important fact about this
- * screen. It has `id`, `identifier`, `title`, `description` and `priority`
- * and it does NOT have `assigneeId`, `workflowStateId`, `labels` or
- * `dueDate` -- see ./operations.graphql for why resolving those per row is
- * not on the table. A row draws what is here and nothing else.
+ * The fragment's five fields -- `id`, `identifier`, `title`, `description`,
+ * `priority` -- and that is the single most important fact about this screen.
+ *
+ * Note *the fragment's*, not the type's: `IssueSummary` has been widened and
+ * now carries `workflowStateId`, `assigneeId`, `dueDate` and more. This alias
+ * follows the selection set, so it still has none of them, and TypeScript is
+ * the guard -- reaching for `issue.assigneeId` here does not compile. A row
+ * draws what is here and nothing else, because a cell filled from a field the
+ * query never asked for is a lie the row cannot detect.
  */
 export type TriageIssue = TriageRow['issue']
 
