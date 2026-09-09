@@ -420,6 +420,14 @@ describe('searching the workspace from the palette', () => {
       'Searching',
     )
 
+    /*
+      Twice: once in the live region, once drawn in the footer. They are one
+      string computed in one place, and this is what says so -- a footer that
+      counted the results itself would read "0 results" here, which is the
+      same claim the list is refusing to make one line above.
+    */
+    expect(within(dialog as HTMLElement).getAllByText('Searching')).toHaveLength(2)
+
     await link.resolve('CommandSearch', { data: searchData() })
 
     expect(screen.getByText('No matches')).toBeInTheDocument()

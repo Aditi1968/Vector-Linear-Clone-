@@ -8,13 +8,32 @@
  */
 
 /**
- * Anchored near the top of the viewport rather than centred.
+ * A machined slab, anchored near the top of the viewport rather than centred.
  *
  * A palette grows downwards as results arrive. Centred, it would grow in both
  * directions and the input under the user's eyes would move while they type.
+ *
+ * `Dialog` draws a 12px card edged in `--color-border-strong`, which is the
+ * right shape for a form and the wrong one for this. The corners tighten to
+ * `--radius-md`, the four edges drop to a hairline, and the top edge alone
+ * comes up to `--color-border-raised` -- a milled face catches the light along
+ * one edge and nowhere else, which is the same hairline the primary button
+ * wears in silver. The heavy `--shadow-lg` is already `Dialog`'s.
+ *
+ * `dialog.dialog` -- element *and* class -- because both stylesheets name a
+ * class called `dialog` at the same specificity, and a tie would be settled by
+ * whichever import the bundler happened to see last. Element + class is 0,1,1
+ * and wins wherever it lands.
+ *
+ * The scrim stays `Dialog`'s `::backdrop`, and that is the point: it is
+ * translucent, so what sits behind the palette is the user's own dimmed list
+ * rather than a blank sheet, and they keep their place while they type.
  */
-.dialog {
+dialog.dialog {
   margin-block-start: 12vh;
+  border-color: var(--color-border);
+  border-top-color: var(--color-border-raised);
+  border-radius: var(--radius-md);
 }
 
 .palette {
@@ -61,22 +80,39 @@
   gap: var(--space-1);
 }
 
+/**
+ * "Issues", "Go to", "Actions" -- set as the mono micro-label the rest of the
+ * direction speaks in, and the same one the rail's section names wear.
+ *
+ * `--color-text-faint` where the artboard draws `#626c7d`. That value is 3.7:1
+ * and this is a word; the token file states no word in the product goes below
+ * 4.5:1, and one step brighter is cheaper than an exception to that rule.
+ */
 .groupLabel {
   padding: var(--space-2) var(--space-3);
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  letter-spacing: var(--label-mono-tracking-sm);
+  line-height: var(--leading-none);
   text-transform: uppercase;
 }
 
 /**
  * One result.
  *
- * The cursor is a background, not an outline. The focus ring belongs to the
- * query field, which is the element that actually has focus -- drawing a
+ * The cursor is a mark and a wash, not an outline. The focus ring belongs to
+ * the query field, which is the element that actually has focus -- drawing a
  * second ring down here would show two focus indicators at once and leave a
  * keyboard user guessing which one the next keystroke goes to.
+ *
+ * The left 2px is a reserved gutter, transparent on every row that is not the
+ * cursor's, so moving the cursor paints an edge instead of shifting the whole
+ * label two pixels sideways. Rounded on the trailing corners only: the mark is
+ * struck against the slab's edge, and a radius on the left would round it back
+ * into the pill this stopped being. Written `calc(var(--border-width) * 2)`
+ * because it is twice a hairline -- there is no 2px border token and this file
+ * does not get to invent one.
  */
 .option {
   display: flex;
@@ -85,18 +121,36 @@
 
   min-height: var(--row-height);
   padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-md);
+  border-left: calc(var(--border-width) * 2) solid transparent;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 
-  color: var(--color-text-primary);
+  color: var(--color-text-body);
   font-size: var(--text-sm);
   cursor: pointer;
 
   transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
+/**
+ * The cursor: a cyan mark, a wash, and a brighter label.
+ *
+ * Three signals and not one, so this does not rest on colour alone -- but the
+ * colour has come off the word. A cyan *label* spends the accent across a
+ * whole line of text, and in a surface where cyan means "here" a run of it on
+ * the words themselves competes with the one pixel column whose entire job is
+ * to say so. The mark is on the edge; the label just goes to the brightest
+ * value in the palette, which is the change a reader actually registers.
+ *
+ * `aria-selected` on the option and `aria-activedescendant` on the field carry
+ * the programmatic half. See ./CommandList.tsx.
+ *
+ * No transition on the mark. Held arrow keys move the cursor faster than
+ * 120ms, and a fading edge would smear into a second one.
+ */
 .optionActive {
+  border-left-color: var(--color-accent);
   background-color: var(--color-surface-selected);
-  color: var(--color-text-accent);
+  color: var(--color-text-bright);
 }
 
 .optionIcon {
@@ -119,13 +173,23 @@
   text-overflow: ellipsis;
 }
 
+/* `ENG-42`, or a group's kind. The mono micro-label again, tabular so the
+ * hyphen lines up down the column and the eye can use it as a ruler. */
 .optionHint {
   flex: none;
-  color: var(--color-text-muted);
+  color: var(--color-text-faint);
   font-family: var(--font-mono);
-  font-size: var(--text-2xs);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
 }
 
+/* The artboard brightens this to cyan on the cursor's row. It does not here:
+ * cyan is the mark, and a second cyan thing in the same 34px row is a second
+ * claim on a signal that only works while it makes one. `slate-500` on the
+ * selected wash is 4.3:1 -- below the floor -- so the hint climbs to secondary
+ * rather than staying put. */
 .optionActive .optionHint {
   color: var(--color-text-secondary);
 }
@@ -149,12 +213,16 @@
   overflow-y: auto;
 }
 
+/* "Anywhere", "In the command palette" -- the same mono legend as the result
+ * groups, because they are the same kind of thing: a name for the rows under
+ * it, not a heading somebody shrank. */
 .shortcutsHeading {
   margin-block-end: var(--space-3);
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  letter-spacing: var(--label-mono-tracking-sm);
+  line-height: var(--leading-none);
   text-transform: uppercase;
 }
 
@@ -198,20 +266,42 @@
 /* ------------------------------------------------------------------ */
 
 /**
- * `aria-hidden` in the markup, so this is decoration for the eye only.
+ * A rule, the key legend on the left, the count on the right.
  *
- * The same three keys reach a screen-reader user through the listbox's own
- * semantics, which announce a combobox and its options without being told
- * that arrows move between them.
+ * `aria-hidden` in the markup, so this is decoration for the eye only. The
+ * same three keys reach a screen-reader user through the listbox's own
+ * semantics, which announce a combobox and its options without being told that
+ * arrows move between them, and the count reaches them through the status
+ * region above -- which is where the words in `.footerCount` come from, so the
+ * two can never disagree.
+ *
+ * Keycaps came off. The legend is an instrument's, set in the same mono
+ * micro-label as every other legend on this surface; three bordered `<kbd>`
+ * boxes in a direction built on hairlines were three boxes, and the reference
+ * that does need real keycaps is one Enter away on "Keyboard shortcuts".
  */
 .footer {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-5);
+  align-items: baseline;
 
   padding-block-start: var(--space-4);
   border-block-start: var(--border-width) solid var(--color-border);
 
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  letter-spacing: var(--label-mono-tracking-sm);
+  line-height: var(--leading-none);
+  text-transform: uppercase;
+}
+
+/* Pushed to the trailing edge by an auto margin rather than by
+ * `space-between`, which would spread the three legend items across the row
+ * instead of keeping them together. Tabular, so the count does not shift the
+ * word beside it as the results change under the user's typing. */
+.footerCount {
+  margin-inline-start: auto;
+  font-variant-numeric: var(--numeric-tabular);
 }

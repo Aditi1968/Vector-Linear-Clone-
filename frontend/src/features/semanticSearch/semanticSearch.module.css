@@ -71,12 +71,23 @@
   gap: var(--space-5);
 }
 
+/**
+ * "Nearest in meaning" -- the mono micro-label the direction speaks in, and
+ * the same one the rail's section names and the palette's group headings wear.
+ *
+ * Still an `<h2>` and still the accessible name of the section it heads; only
+ * the face moved. `--color-text-faint` where the artboard draws `#626c7d`:
+ * that value is 3.7:1 and this is a word, and the token file states no word in
+ * the product goes below 4.5:1.
+ */
 .resultsTitle {
   margin: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--text-body-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
   text-transform: uppercase;
 }
 
@@ -100,28 +111,46 @@
 }
 
 /*
- * The similarity, in tabular figures so a column of them lines up.
+ * The similarity, as a readout: mono, uppercase, tabular so a column of them
+ * lines up.
  *
  * Not a badge and not toned. A coloured pill would rank the matches by hue,
  * and there is no threshold in this product that says 74% is warning and 75%
  * is success -- the number is a distance, and the ordering is the ranking.
+ * Mono is the same reasoning one step further: this is an instrument reporting
+ * a measurement, and it should read like the other measurements on the screen
+ * rather than like prose that happens to contain a number.
  */
 .similarity {
   color: var(--color-text-faint);
-  font-size: var(--text-meta);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
   font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
   white-space: nowrap;
 }
 
 /* ----------------------------------------------------------- index panel */
 
+/*
+ * A hairline and a lit top edge, not a card.
+ *
+ * The panel keeps its gradient face -- it is a plate on the wall of the screen
+ * and the gradient is what makes it read as one -- but the 12px radius and the
+ * heavy `--color-border-strong` outline were a box drawn around three more
+ * boxes. One hairline, tightened corners, and the top edge alone brought up to
+ * `--color-border-raised`: a milled face catches the light along one edge and
+ * nowhere else.
+ */
 .indexPanel {
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
   padding: var(--space-6);
-  border: var(--border-width) solid var(--color-border-strong);
-  border-radius: var(--radius-xl);
+  border: var(--border-width) solid var(--color-border);
+  border-top-color: var(--color-border-raised);
+  border-radius: var(--radius-md);
   background: var(--gradient-panel);
 }
 
@@ -133,35 +162,46 @@
 
 .indexTitle {
   margin: 0;
-  color: var(--color-text-heading);
-  font-size: var(--text-body-sm);
-  font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--label-mono-tracking-md);
+  line-height: var(--leading-none);
   text-transform: uppercase;
 }
 
+/*
+ * Three figures on a gauge, divided by rules rather than boxed.
+ *
+ * Each cell was a bordered, filled card inside a bordered, filled panel --
+ * boxes nested two deep for three numbers. A leading hairline per cell says
+ * exactly as much and leaves the figures themselves as the only thing with
+ * weight, which is what they are: how much of this workspace the search can
+ * currently see.
+ */
 .counts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-4);
+  gap: var(--space-5);
   margin: 0;
 }
 
 .countCell {
   display: flex;
   flex-direction: column;
-  gap: var(--space-1);
+  gap: var(--space-2);
   min-width: 0;
-  padding: var(--space-4);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-surface);
+  padding-inline-start: var(--space-4);
+  border-inline-start: var(--border-width) solid var(--color-border);
 }
 
 .countCell dt {
   color: var(--color-text-faint);
-  font-size: var(--text-3xs);
-  letter-spacing: var(--tracking-caps);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
+  letter-spacing: var(--label-mono-tracking-sm);
+  line-height: var(--leading-none);
   text-transform: uppercase;
 }
 
