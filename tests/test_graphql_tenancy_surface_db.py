@@ -41,7 +41,7 @@ Marked `db`: deselected by default, skipped when Docker is unreachable.
 Nothing here touches DATABASE_URL or Neon.
 """
 
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -143,6 +143,20 @@ VALUES ($1, $2, $3)
 INSERT_REPOSITORY = """
 INSERT INTO github_repositories (workspace_id, repository_id, full_name)
 VALUES ($1, $2, $3)
+"""
+# A release points AT a commit, so `ReleaseService.create` resolves the sha
+# against `github_commits` and refuses with a `commitSha` field error when
+# there is no such row -- and refuses again when the row it finds carries a
+# NULL `committed_at`, because every consumer downstream needs a real instant.
+#
+# So `committed_at` is supplied here rather than left to default. The column
+# is nullable (migrations/017_github_development.sql), which means omitting it
+# would seed a row that exists and still fails the second check -- the more
+# confusing of the two failures, since the commit is plainly there.
+INSERT_COMMIT = """
+INSERT INTO github_commits
+    (workspace_id, repository_id, sha, message, committed_at)
+VALUES ($1, $2, $3, $4, $5)
 """
 
 
@@ -306,9 +320,15 @@ async def world(postgres_dsn):
         await reset_schema(connection)
         await apply_all_migrations(connection)
 
-        for workspace_id, slug, name, team_id, key, user_id, repo in (
-            (WORKSPACE_A, SLUG_A, "Carbon", TEAM_A, "CAR", USER_A, REPOSITORY_A),
-            (WORKSPACE_B, SLUG_B, "Dalton", TEAM_B, "DAL", USER_B, REPOSITORY_B),
+        for workspace_id, slug, name, team_id, key, user_id, repo, commit in (
+            (
+                WORKSPACE_A, SLUG_A, "Carbon", TEAM_A, "CAR",
+                USER_A, REPOSITORY_A, COMMIT_A,
+            ),
+            (
+                WORKSPACE_B, SLUG_B, "Dalton", TEAM_B, "DAL",
+                USER_B, REPOSITORY_B, COMMIT_B,
+            ),
         ):
             await connection.execute(INSERT_WORKSPACE, workspace_id, slug, name)
             await connection.execute(INSERT_TEAM, team_id, workspace_id, name, key)
@@ -320,6 +340,14 @@ async def world(postgres_dsn):
             )
             await connection.execute(
                 INSERT_REPOSITORY, workspace_id, repo, f"acme/{slug}"
+            )
+            await connection.execute(
+                INSERT_COMMIT,
+                workspace_id,
+                repo,
+                commit,
+                f"{key} commit",
+                datetime(2026, 8, 1, 12, 0, tzinfo=timezone.utc),
             )
 
         # Two more accounts in A: one who will be removed, and one who never

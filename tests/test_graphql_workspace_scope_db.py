@@ -845,19 +845,47 @@ async def test_an_issue_cannot_be_filed_against_another_workspaces_team(world):
         "SELECT issue_counter FROM teams WHERE id = $1", TEAM_B
     )
 
-    result = await run(
-        context,
+    document = (
         "mutation M($slug: String!, $team: UUID!) "
         '{ issueCreate(input: {workspaceSlug: $slug, teamId: $team, title: "misfiled"}) '
-        "{ issue { id } errors { field code } } }",
-        slug=SLUG_A,
-        team=str(TEAM_B),
+        "{ issue { id } errors { field code message } } }"
     )
 
-    # A team that is not this workspace's is not a rule the client can fix by
-    # editing a field, so it is not translated into a payload error: it
-    # propagates and is masked.
-    assert result.data is None or result.data["issueCreate"] is None
+    result = await run(context, document, slug=SLUG_A, team=str(TEAM_B))
+
+    # This assertion used to be `result.data is None`, on the reasoning that a
+    # foreign team is not a rule the client can fix by editing a field, so the
+    # violation propagates and is masked. The application deliberately stopped
+    # doing that (see `_EXPECTED_FOREIGN_KEYS` in app/services/issues.py): the
+    # refusal arrived as "Internal server error", which is what any client with
+    # a stale team in a picker got, and it is now a field error.
+    #
+    # Nothing about the tenancy guarantee changed -- the two assertions below
+    # are the ones that carry it, and they are unchanged and still pass. What
+    # changed is the shape of a refusal that was already refusing.
+    payload = result.data["issueCreate"]
+
+    assert result.errors is None
+    assert payload["issue"] is None
+    assert payload["errors"] == [
+        {"field": "teamId", "code": "NOT_FOUND", "message": "Team not found"}
+    ]
+
+    # And the property that makes answering at all safe, which was previously
+    # asserted only by a comment claiming it had been verified.
+    #
+    # A team belonging to B and a team belonging to nobody must be the SAME
+    # answer, byte for byte. If they ever diverge, this mutation becomes an
+    # oracle for "does this team id exist", answerable by anyone with an
+    # account -- so it is the divergence that has to fail, not the wording.
+    nowhere = await run(
+        context,
+        document,
+        slug=SLUG_A,
+        team="00000000-0000-7000-8000-00000000dead",
+    )
+
+    assert nowhere.data["issueCreate"] == payload
 
     misfiled = await connection.fetchval(
         "SELECT count(*) FROM issues WHERE title = $1", "misfiled"
