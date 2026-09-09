@@ -10,8 +10,20 @@ __pycache__/
 # `app/`, which is why tests/test_phase1a2_gates.py skips this path too.
 .claude/
 
+# Every local environment file, not just the two that were thought of.
+#
+# This listed `.env` and `.env.local` by name, which meant a `.env.staging`,
+# `.env.production` or `.env.neon` -- the obvious names to reach for when a
+# second deployment appears -- was TRACKED, and the first `git add -A` would
+# have committed a live DSN. `.dockerignore` already excluded `.env.*` for
+# exactly this reason; the two files now agree.
+#
+# `.env.example` is negated back in: it holds placeholders, it is the file
+# developers copy from, and tests/test_phase1a2_gates.py asserts it assigns
+# no real secret.
 .env
-.env.local
+.env.*
+!.env.example
 CLAUDE.md
 
 # Frontend build artefacts (frontend/).
