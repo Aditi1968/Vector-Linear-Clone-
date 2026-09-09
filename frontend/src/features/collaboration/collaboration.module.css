@@ -46,11 +46,16 @@
   font-weight: var(--weight-semibold);
 }
 
+/* The panel's count, in the direction's voice: every count, timestamp and
+ * readout in this product is a mono micro-label. It is still inside the `<h2>`,
+ * so the section is still named "Comments 3". */
 .count {
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
   font-weight: var(--weight-regular);
+  letter-spacing: var(--label-mono-tracking-md);
 }
 
 /*
@@ -168,12 +173,16 @@
   margin-top: var(--space-5);
 }
 
+/* "Blocks", "Blocked by". A column header, which is the smallest of the three
+ * mono micro-labels -- the tracking is what keeps 9.5px capitals legible and
+ * what makes it read as an instrument legend rather than as shouting. */
 .groupTitle {
   margin: 0 0 var(--space-3);
-  color: var(--color-text-muted);
-  font-size: var(--text-2xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-sm);
   font-weight: var(--weight-semibold);
-  letter-spacing: var(--tracking-caps);
+  letter-spacing: var(--label-mono-tracking-sm);
   text-transform: uppercase;
 }
 
@@ -236,10 +245,21 @@
 
 /* ------------------------------------------------------------- comments */
 
+/*
+ * The thread as a measured log -- `design/instrument/IssueDetail.dc.html`
+ * applies the same rhythm to an issue's activity, and a comment thread is the
+ * same shape of thing: entries down a column, each stamped with a time.
+ *
+ * Hairlines rather than gaps. A 16px void between entries reads as a stack of
+ * separate cards; a rule reads as one log with entries in it, and the rule is
+ * also what keeps a two-line comment and a twenty-line one looking like the
+ * same kind of object. The border is on the entry rather than between them, so
+ * the first one is ruled off from the panel heading too.
+ */
 .thread {
   display: flex;
   flex-direction: column;
-  gap: var(--space-6);
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -249,6 +269,8 @@
   display: flex;
   gap: var(--space-5);
   align-items: flex-start;
+  padding-block: var(--space-5);
+  border-top: var(--border-width) solid var(--color-border-subtle);
 }
 
 .commentBody {
@@ -268,10 +290,26 @@
   font-weight: var(--weight-medium);
 }
 
+/*
+ * The stamp on the entry.
+ *
+ * A mono micro-label, tabular, so the times line up down the log rather than
+ * ragging against the author names beside them. `--color-text-faint` is 5.0:1;
+ * the artboard paints this `#626c7d`, which is 3.7:1 -- one step brighter here
+ * on purpose, because no word in this product is painted below 4.5:1 and a
+ * timestamp is a word.
+ *
+ * Still `flex: 1 1 auto`, which is what pushes the delete control to the far
+ * edge of the meta line.
+ */
 .commentTime {
   flex: 1 1 auto;
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
+  font-variant-numeric: var(--numeric-tabular);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
 }
 
 /*

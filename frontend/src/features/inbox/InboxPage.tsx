@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { PageContent, PageHeader } from '../../app/layout'
 import { useAppPaths } from '../../app/routes'
 import {
-  Badge,
+  Avatar,
   Button,
   EmptyState,
   ErrorState,
@@ -16,6 +16,7 @@ import {
   SegmentedControl,
   Skeleton,
   VisuallyHidden,
+  cx,
 } from '../../components'
 import { memberLabel, useWorkspaceContext } from '../issues/api'
 import type { WorkspaceMember } from '../issues/api'
@@ -23,6 +24,7 @@ import { formatRelative } from '../issues/lib/dates'
 import { ListFooter } from '../screens'
 import styles from '../screens.module.css'
 import { useInbox } from './api'
+import inbox from './inbox.module.css'
 import type { InboxNotification } from './api'
 
 /** Six bars: a hint about layout, not a promise about how many rows are coming. */
@@ -209,7 +211,10 @@ export function InboxPage() {
             <VisuallyHidden as="div">{actionStatus ?? ''}</VisuallyHidden>
           </div>
 
-          <p className={styles.footnote} role="status">
+          {/* The screen's readout. Same sentence, same live region -- only the
+              voice changed, from a sans footnote to the mono micro-label the
+              direction gives every count on every screen. */}
+          <p className={inbox.readout} role="status">
             {unreadCount === 0
               ? 'Nothing unread.'
               : `${unreadCount} unread ${unreadCount === 1 ? 'notification' : 'notifications'}.`}
@@ -260,7 +265,44 @@ export function InboxPage() {
                   const sentence = describeNotification(notification, actor)
 
                   return (
-                    <ListRow interactive key={notification.id}>
+                    <ListRow
+                      interactive
+                      key={notification.id}
+                      className={cx(inbox.row, unread ? inbox.unread : inbox.read)}
+                    >
+                      {/*
+                        The live mark. Cyan when the row is unread and
+                        transparent otherwise -- never absent, or the sentences
+                        on read rows would start six pixels left of the ones
+                        beside them.
+
+                        `aria-hidden` because the word "Unread" is still in the
+                        row's text below; this is a second rendering of a fact,
+                        not the only one.
+                      */}
+                      <span className={inbox.dot} aria-hidden="true" />
+
+                      {/*
+                        Who did it. `decorative`, because the name is already
+                        the first thing the sentence says and announcing the
+                        person twice per row is noise.
+
+                        DUE_SOON has no actor by construction -- a date
+                        arrived, nobody acted -- so it gets the dashed empty
+                        slot the token file already defines for an unfilled
+                        person, rather than a tile with a guessed letter in it.
+                      */}
+                      {actor === undefined ? (
+                        <span className={inbox.actorEmpty} aria-hidden="true" />
+                      ) : (
+                        <Avatar
+                          name={memberLabel(actor)}
+                          size="md"
+                          decorative
+                          className={inbox.actor}
+                        />
+                      )}
+
                       <ListRowMain>
                         {/*
                           A real `<a>` stretched over the row, not a
@@ -291,10 +333,23 @@ export function InboxPage() {
                       </ListRowMain>
 
                       <ListRowMeta>
-                        {unread && <Badge tone="info">Unread</Badge>}
+                        {/*
+                          This was a `Badge tone="info"` -- a cyan-tinted,
+                          cyan-bordered, cyan-texted capsule reading "Unread",
+                          repeated down every unread row. Cyan in this
+                          direction marks where you are and what is live and is
+                          never a badge, so the mark moved to the dot at the
+                          head of the row and the raised row ground behind it.
+
+                          The word stays. It is the only thing that told a
+                          screen-reader user this row was unread, and dropping
+                          it to win a visual argument is a regression that
+                          passes every test.
+                        */}
+                        {unread && <VisuallyHidden>Unread</VisuallyHidden>}
 
                         <time
-                          className={styles.rowSub}
+                          className={inbox.time}
                           dateTime={notification.createdAt}
                           title={notification.createdAt}
                         >
