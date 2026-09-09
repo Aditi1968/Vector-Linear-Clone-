@@ -647,9 +647,9 @@ async def test_filing_against_another_workspaces_team_is_refused(tenanted):
             priority=1,
         )
 
-    assert [
-        (i.field, i.code, i.message) for i in absent_team.value.issues
-    ] == [(i.field, i.code, i.message) for i in foreign_team.value.issues]
+    assert [(i.field, i.code, i.message) for i in absent_team.value.issues] == [
+        (i.field, i.code, i.message) for i in foreign_team.value.issues
+    ]
 
     assert await tenanted.connection.fetchval("SELECT count(*) FROM issues") == before
 

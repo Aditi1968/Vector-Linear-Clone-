@@ -8,6 +8,7 @@ from app.config import Settings, get_settings
 from app.db import connect, disconnect, get_pool
 from app.graphql.router import build_graphql_router
 from app.graphql.schema import build_schema
+from app.http_headers import add_security_headers
 from app.http_limits import add_request_body_limit
 from app.repositories.embedding_jobs import EmbeddingJobRepository
 from app.repositories.embeddings import EmbeddingRepository
@@ -316,6 +317,7 @@ def create_app() -> FastAPI:
     )
 
     add_request_body_limit(app)
+    add_security_headers(app)
 
     app.include_router(
         build_graphql_router(
