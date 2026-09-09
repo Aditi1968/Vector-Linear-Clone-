@@ -322,12 +322,24 @@ async def world(postgres_dsn):
 
         for workspace_id, slug, name, team_id, key, user_id, repo, commit in (
             (
-                WORKSPACE_A, SLUG_A, "Carbon", TEAM_A, "CAR",
-                USER_A, REPOSITORY_A, COMMIT_A,
+                WORKSPACE_A,
+                SLUG_A,
+                "Carbon",
+                TEAM_A,
+                "CAR",
+                USER_A,
+                REPOSITORY_A,
+                COMMIT_A,
             ),
             (
-                WORKSPACE_B, SLUG_B, "Dalton", TEAM_B, "DAL",
-                USER_B, REPOSITORY_B, COMMIT_B,
+                WORKSPACE_B,
+                SLUG_B,
+                "Dalton",
+                TEAM_B,
+                "DAL",
+                USER_B,
+                REPOSITORY_B,
+                COMMIT_B,
             ),
         ):
             await connection.execute(INSERT_WORKSPACE, workspace_id, slug, name)
