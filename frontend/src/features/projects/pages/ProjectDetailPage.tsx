@@ -8,9 +8,9 @@ import {
   Dialog,
   ErrorState,
   Menu,
-  ProgressIndicator,
   Skeleton,
   VisuallyHidden,
+  cx,
 } from '../../../components'
 import type { MenuItem } from '../../../components'
 import {
@@ -22,6 +22,7 @@ import {
   useUnfiledIssues,
 } from '../api'
 import type { MilestoneDraft, ProjectDraft, ProjectOutcome, ProjectValidationError } from '../api'
+import { HealthRing } from '../components/HealthRing'
 import { ProjectForm } from '../components/ProjectForm'
 import { ProjectIssues } from '../components/ProjectIssues'
 import { ProjectMilestones } from '../components/ProjectMilestones'
@@ -29,7 +30,9 @@ import { ProjectTeams } from '../components/ProjectTeams'
 import {
   closedCount,
   formatDay,
+  isTargetLate,
   leadLabel,
+  projectHealth,
   projectStateLabel,
   projectStateTone,
 } from '../lib/projects'
@@ -242,6 +245,10 @@ export function ProjectDetailPage() {
   const projectIssues = issueQuery.issues
   const closed = closedCount(projectIssues)
   const lead = leadLabel(project.leadId, members)
+  // One instant, so the ring's hue and the target date's cannot disagree
+  // about whether the date has gone by.
+  const now = Date.now()
+  const health = projectHealth(project, now)
 
   const menuItems: readonly MenuItem[] = [
     { id: 'edit', label: 'Edit project', disabled: actions.isSaving, onSelect: openEditor },
@@ -298,7 +305,19 @@ export function ProjectDetailPage() {
                     {project.targetDate === null ? (
                       <span className={styles.factEmpty}>Not set</span>
                     ) : (
-                      <time dateTime={project.targetDate}>{formatDay(project.targetDate)}</time>
+                      // A target that has gone by on a project still running
+                      // is painted danger. Never the only signal -- the state
+                      // is written out one row above, and the ring below is
+                      // the same reading in a second channel.
+                      <time
+                        className={cx(
+                          styles.factDate,
+                          isTargetLate(project, now) && styles.late,
+                        )}
+                        dateTime={project.targetDate}
+                      >
+                        {formatDay(project.targetDate)}
+                      </time>
                     )}
                   </dd>
 
@@ -313,18 +332,28 @@ export function ProjectDetailPage() {
                     )}
                   </dd>
 
+                  {/* Still "Progress" and not "Health": the number the ring
+                      draws is closed issues, and a term promising an
+                      assessment over a figure that counts tickets would be
+                      the label lying about the value. Health is the arc's
+                      *hue*, and the state that produced it is the row above. */}
                   <dt className={styles.factTerm}>Progress</dt>
                   <dd className={styles.factValue}>
                     <span className={styles.progressRow}>
-                      <ProgressIndicator
+                      {/* The product's one dial, and this is the reading it
+                          was drawn for: how far along the whole project is,
+                          in a hue that says whether that is where it should
+                          be. Every other progress reading in these screens is
+                          a flat bar. */}
+                      <HealthRing
                         value={closed}
                         total={projectIssues.length}
+                        health={health}
                         label={
                           issueQuery.hasNextPage
                             ? `${project.name}: closed issues among those loaded`
                             : `${project.name}: closed issues`
                         }
-                        showLabel
                       />
                       <span>
                         {issueQuery.hasNextPage ? 'closed, of the issues loaded' : 'closed'}

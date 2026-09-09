@@ -44,7 +44,11 @@ export function formatDay(value: string): string {
  */
 const STATE_PRESENTATION: Record<ProjectState, { label: string; tone: BadgeTone }> = {
   PLANNED: { label: 'Planned', tone: 'neutral' },
-  STARTED: { label: 'In progress', tone: 'info' },
+  // `success` and not `info`. `info` is the cyan tone, and cyan in this
+  // product marks where you are and what is live -- it is not a material to
+  // paint a pill with. A badge wearing the same colour as the rail's current
+  // mark is a second claim on the one signal that has to stay unambiguous.
+  STARTED: { label: 'In progress', tone: 'success' },
   PAUSED: { label: 'Paused', tone: 'warning' },
   COMPLETED: { label: 'Completed', tone: 'success' },
   CANCELED: { label: 'Canceled', tone: 'neutral' },
@@ -65,6 +69,72 @@ export function projectStateLabel(state: ProjectState): string {
 
 export function projectStateTone(state: ProjectState): BadgeTone {
   return STATE_PRESENTATION[state].tone
+}
+
+/**
+ * The two fields health is read off. Structural rather than one of the
+ * generated fragments, because both the row selection and the detail
+ * selection carry them and neither is the authority on the other.
+ */
+export interface ProjectSchedule {
+  state: ProjectState
+  targetDate: string | null
+}
+
+/**
+ * Whether a project's target date has gone by with the project still open.
+ *
+ * `targetDate` is the `Date` scalar -- a calendar day, `YYYY-MM-DD` -- so the
+ * comparison is against a calendar day too, and `Date.parse` reads both sides
+ * as UTC midnight. Comparing a day against `Date.now()` directly would call a
+ * project due *today* late from the first millisecond of the morning.
+ *
+ * A closed project is never late: a project that finished after its target is
+ * a fact about the past, and painting it red for the rest of its life is an
+ * alarm nobody can act on. Same for a canceled one.
+ */
+export function isTargetLate(project: ProjectSchedule, now: number): boolean {
+  if (project.targetDate === null || project.state === 'COMPLETED' || project.state === 'CANCELED') {
+    return false
+  }
+
+  const target = Date.parse(project.targetDate)
+
+  if (Number.isNaN(target)) {
+    return false
+  }
+
+  const today = new Date(now)
+  const startOfToday = Date.UTC(today.getFullYear(), today.getMonth(), today.getDate())
+
+  return target < startOfToday
+}
+
+/**
+ * The four health readings the Instrument direction paints.
+ *
+ * The schema has no health field -- `ProjectState` is a lifecycle, not an
+ * assessment -- so health is derived from the two facts the API does supply:
+ * where the project is in its life, and whether its target has passed. That
+ * keeps `off-track` meaning something (a live project past its date) rather
+ * than being a hue nothing ever reaches.
+ */
+export type ProjectHealth = 'on-track' | 'at-risk' | 'off-track' | 'planned'
+
+export function projectHealth(project: ProjectSchedule, now: number): ProjectHealth {
+  if (project.state === 'PLANNED' || project.state === 'CANCELED') {
+    return 'planned'
+  }
+
+  if (project.state === 'COMPLETED') {
+    return 'on-track'
+  }
+
+  if (isTargetLate(project, now)) {
+    return 'off-track'
+  }
+
+  return project.state === 'PAUSED' ? 'at-risk' : 'on-track'
 }
 
 /**

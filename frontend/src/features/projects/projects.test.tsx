@@ -188,6 +188,21 @@ describe('the project list', () => {
     expect(within(row).getByText('DES')).toBeInTheDocument()
   })
 
+  it('states a project’s state on the row in words', async () => {
+    const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/projects` })
+
+    await view.link.resolve('ProjectList', { data: listData([project()]) })
+    await view.link.resolve('ProjectTeams', { data: teamsData })
+    await view.link.resolve('ProjectMembers', { data: membersData })
+
+    // The state moved from a pill at the trailing edge to a mono label under
+    // the name, and the thing that must survive that is the *word*: the hue
+    // is a second channel and never the only one.
+    const row = within(main()).getByRole('listitem')
+
+    expect(within(row).getByText('In progress')).toBeInTheDocument()
+  })
+
   it('leads to the project it names', async () => {
     const view = renderApp({ initialPath: `/${WORKSPACE_SLUG}/projects` })
 
@@ -212,6 +227,34 @@ describe('the project detail', () => {
     await openDetail(null)
 
     expect(screen.getByText('No such project')).toBeInTheDocument()
+  })
+
+  it('draws the health dial with a reading rather than with raw path data', async () => {
+    await openDetail(
+      project(),
+      issuesData([
+        projectIssue('00000000-0000-4000-8000-0000000000e1', 'Alpha'),
+        {
+          ...projectIssue('00000000-0000-4000-8000-0000000000e2', 'Beta'),
+          completedAt: '2026-02-01T00:00:00.000Z',
+        },
+      ]),
+    )
+
+    // Found by name, which also proves there is exactly one control with it
+    // on the screen -- `getByRole` throws on two, and two progress readings
+    // sharing a name is the bug this assertion is here to catch.
+    const dial = within(main()).getByRole('progressbar', {
+      name: 'Payments migration: closed issues',
+    })
+
+    // The counts the user is tracking, not the percentage a reader would
+    // compute off `aria-valuenow`.
+    expect(dial).toHaveAttribute('aria-valuetext', '1 of 2')
+    // A ring is not accessible because it renders: the drawing is hidden and
+    // the percentage sits beside it as text.
+    expect(dial.querySelector('svg')).toHaveAttribute('aria-hidden', 'true')
+    expect(dial).toHaveTextContent('50%')
   })
 
   it('adds a team through the mutation the schema provides for it', async () => {

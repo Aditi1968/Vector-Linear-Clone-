@@ -9,12 +9,12 @@ import {
   ListRowMeta,
   Menu,
   PlusIcon,
-  ProgressIndicator,
   Spinner,
 } from '../../../components'
 import type { MenuItem } from '../../../components'
 import type { ProjectIssue, ProjectMilestone, ProjectUnfiledIssue } from '../api'
 import { closedCount } from '../lib/projects'
+import { ProgressBar } from './ProgressBar'
 import styles from '../projects.module.css'
 
 export interface ProjectIssuesProps {
@@ -111,7 +111,7 @@ export function ProjectIssues({
           <>
             {issues.length > 0 && (
               <p className={styles.progressRow}>
-                <ProgressIndicator
+                <ProgressBar
                   value={closed}
                   total={issues.length}
                   label={
@@ -119,7 +119,6 @@ export function ProjectIssues({
                       ? 'Closed issues in this project, among those loaded'
                       : 'Closed issues in this project'
                   }
-                  showLabel
                 />
                 <span>closed &middot; completed or canceled</span>
               </p>

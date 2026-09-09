@@ -273,7 +273,13 @@ describe('the cycle detail', () => {
   it('asks for the panel’s list again when an issue leaves the cycle', async () => {
     const view = await openDetail(cycle(), issuesData([cycleIssue('Alpha')]))
 
-    await view.user.click(screen.getByRole('button', { name: 'Remove' }))
+    // Named for the issue it drops, not "Remove". One row's button is
+    // indistinguishable from the next one's when the accessible name is the
+    // visible word, and a list of them is a screen nobody can operate by
+    // voice or by rotor.
+    await view.user.click(
+      screen.getByRole('button', { name: 'Remove ENG-1 from this cycle' }),
+    )
     await view.link.resolve('IssueSetCycle', {
       data: issueCycleSet(issueDetail(1, { cycle: null })),
     })
