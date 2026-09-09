@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 import { useAppPaths } from '../../../app/routes'
 import {
   Avatar,
-  CycleIcon,
   ListRow,
   PriorityIndicator,
   ProjectIcon,
@@ -15,7 +14,7 @@ import {
 import { memberLabel } from '../api'
 import type { IssueRowFields, WorkflowState, WorkspaceMember } from '../api'
 import styles from '../issues.module.css'
-import { formatDueDate, formatRelative } from '../lib/dates'
+import { formatDueDate } from '../lib/dates'
 import { describePriority, priorityLevel } from '../lib/priority'
 
 /** How many labels fit on a row before the rest become a count. */
@@ -55,10 +54,18 @@ export interface IssueRowProps {
  * would make "the number of links in the list" stop meaning "the number of
  * issues".
  *
- * The columns are a grid with fixed leading widths rather than a flex row, so
- * that every title down the list starts on the same x. That alignment is most
- * of what makes a dense list scannable, and it is the thing that quietly
- * breaks when one row has no status glyph.
+ * ## Seven columns, and every one of them fixed except the title
+ *
+ * Priority, status, key, title, labels, due, assignee -- the design's own
+ * seven. The grid lives in `issues.module.css` as `.rowGrid` and the column
+ * header composes the same declaration, which is what keeps DUE over the
+ * dates. See that file for why none of the trailing tracks may be `auto`.
+ *
+ * Cycle, estimate and `updatedAt` used to ride in a trailing flex cluster and
+ * no longer do. A cluster is as wide as its widest row, so nothing above it
+ * can be labelled; all three are on the detail panel, and
+ * `components/IssueRow` still offers a free-form meta slot for the screens
+ * that want them in a row.
  *
  * The destination comes from `useAppPaths()` and never from a template
  * literal, which is the rule `src/app/routes/paths.ts` exists to enforce.
@@ -137,15 +144,11 @@ export function IssueRow({
           )}
         </span>
 
-        <span className={styles.rowMeta}>
-          {issue.cycle !== null && (
-            <span className={styles.chip}>
-              <CycleIcon />
-              <VisuallyHidden>Cycle</VisuallyHidden>
-              {issue.cycle.name ?? `Cycle ${String(issue.cycle.number)}`}
-            </span>
-          )}
-
+        {/* The cell is here whether or not there is a date in it. A grid puts
+          * the next child in the next free track, so omitting it would slide
+          * the assignee into the due column and put every avatar down the
+          * list on two different x positions. */}
+        <span className={styles.rowDue}>
           {issue.dueDate !== null && (
             <time
               className={styles.due}
@@ -156,33 +159,19 @@ export function IssueRow({
               {formatDueDate(issue.dueDate)}
             </time>
           )}
-
-          {issue.estimate !== null && (
-            <span className={styles.estimate}>
-              <VisuallyHidden>Estimate</VisuallyHidden>
-              {issue.estimate}
-            </span>
-          )}
-
-          {/* Relative for scanning, exact on hover. `updatedAt` rather than
-            * `createdAt`: every mutation moves it, so it is the column that
-            * answers "what changed recently". */}
-          <time
-            className={styles.age}
-            dateTime={issue.updatedAt}
-            title={issue.updatedAt}
-          >
-            {formatRelative(issue.updatedAt)}
-          </time>
-
-          {assignee === undefined ? (
-            <span className={styles.unassigned}>
-              <VisuallyHidden>Unassigned</VisuallyHidden>
-            </span>
-          ) : (
-            <Avatar name={memberLabel(assignee)} size="sm" />
-          )}
         </span>
+
+        {assignee === undefined ? (
+          <span className={styles.unassigned}>
+            <VisuallyHidden>Unassigned</VisuallyHidden>
+          </span>
+        ) : (
+          <Avatar
+            className={styles.rowAssignee}
+            name={memberLabel(assignee)}
+            size="sm"
+          />
+        )}
       </Link>
     </ListRow>
   )

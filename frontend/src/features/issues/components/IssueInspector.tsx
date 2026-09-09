@@ -116,6 +116,16 @@ export interface IssueInspectorProps {
 /**
  * One issue, editable in place, beside the list it came from.
  *
+ * ## Two columns: the issue, and the readouts
+ *
+ * The issue column is a document -- breadcrumb, title, state, description,
+ * activity -- and the second column is a stack of properties on the rail's
+ * own sunken ground. They are grid tracks and not two components, so the
+ * panel is one element that reflows: stacked in the 24rem pane, side by side
+ * at 90rem where there is room for the design's third column. The list does
+ * not step aside to make room for it, because the split pane *is* this
+ * screen.
+ *
  * ## Route-backed, which is what makes a refresh work
  *
  * The id arrives as a prop read from the URL, and the query runs from it.
@@ -232,7 +242,7 @@ export function IssueInspector({ issueId }: IssueInspectorProps) {
   if (isNotFound || issue === null) {
     return (
       <div className={styles.inspectorMissing}>
-        <h2 className={styles.inspectorHeading}>Issue not found</h2>
+        <h2 className={styles.missingHeading}>Issue not found</h2>
         <p className={styles.emptyBody}>
           No issue exists for this id. The link may be wrong or incomplete.
         </p>
@@ -243,107 +253,223 @@ export function IssueInspector({ issueId }: IssueInspectorProps) {
     )
   }
 
-  const states = teamById.get(issue.teamId)?.workflowStates ?? []
+  const team = teamById.get(issue.teamId)
+  const states = team?.workflowStates ?? []
   const state = states.find((candidate) => candidate.id === issue.workflowStateId)
   const category = state === undefined ? null : statusCategoryFrom(state.category)
-  const assignee = issue.assigneeId === null ? undefined : memberById.get(issue.assigneeId)
   const creator = issue.creatorId === null ? undefined : memberById.get(issue.creatorId)
 
   const unplaced = [...fieldErrors]
     .filter(([field]) => !PLACED_FIELDS.has(field))
     .flatMap(([field, messages]) => messages.map((message) => `${field}: ${message}`))
 
+  /*
+   * The activity log, newest first.
+   *
+   * ponytail: three timestamps, not an event stream. `createdAt`, `updatedAt`
+   * and `completedAt` are all the schema has, and only the first of them names
+   * a person -- so the middle entry says what happened and not who did it,
+   * which is honest rather than a guess at an actor. An `IssueEvent`
+   * connection would fill the same grid without changing its shape or this
+   * component's markup.
+   */
+  const log = [
+    { at: issue.updatedAt, who: undefined, what: 'last updated' },
+    issue.completedAt === null
+      ? null
+      : { at: issue.completedAt, who: undefined, what: 'closed this issue' },
+    { at: issue.createdAt, who: creator, what: 'created this issue' },
+  ].filter((entry) => entry !== null)
+
   return (
     <article className={styles.inspector}>
-      <header className={styles.inspectorHeader}>
-        {category !== null && (
-          <StatusIndicator category={category} name={state?.name} />
-        )}
-
-        {/*
-          The identifier is the heading, not the title. A heading names a
-          section and must stay stable while the thing it names is being
-          edited -- and ENG-42 is the name this issue has outside the
-          product. The title is a labelled field two lines below.
-        */}
-        <h2 className={styles.inspectorHeading}>{issue.identifier}</h2>
-
-        {isSaving && <Spinner label="Saving" />}
-
-        <Menu
-          align="end"
-          items={[
-            {
-              id: 'archive',
-              label: 'Archive issue',
-              destructive: true,
-              onSelect: archive,
-            },
-          ]}
-          label={`More actions on ${issue.identifier}`}
-        />
-
-        <IconButton
-          aria-label="Close issue"
-          icon={<CloseIcon />}
-          onClick={close}
-          size="sm"
-          variant="ghost"
-        />
-      </header>
-
-      {panelError !== null && (
-        <p className={styles.formError} role="alert">
-          {panelError}
-        </p>
-      )}
-
-      {unplaced.length > 0 && (
-        <p className={styles.formError} role="alert">
-          {unplaced.join(' ')}
-        </p>
-      )}
-
-      <div className={styles.inspectorBody}>
-        <Property baseId={baseId} errors={fieldErrors} label="Title" name="title">
-          {(control) => (
-            <EditableText
-              {...control}
-              className={styles.titleField}
-              onCommit={(title) => {
-                void apply(() => updateIssue(issue, { title }))
-              }}
-              value={issue.title}
-            />
+      <div className={styles.issueColumn}>
+        <header className={styles.inspectorHeader}>
+          {/*
+            The breadcrumb: where this issue lives, then what it is called. The
+            team is a sibling of the heading rather than part of it, because
+            the heading's accessible name is the key and only the key -- that is
+            the name a person says out loud, and it is what the navigation test
+            looks the panel up by.
+          */}
+          {team !== undefined && (
+            <>
+              <span className={styles.breadcrumbTeam}>{team.name}</span>
+              <span aria-hidden="true" className={styles.breadcrumbSeparator}>
+                /
+              </span>
+            </>
           )}
-        </Property>
 
-        <Property
-          baseId={baseId}
-          errors={fieldErrors}
-          label="Description"
-          name="description"
-        >
-          {(control) => (
-            <EditableText
-              {...control}
-              multiline
-              onCommit={(description) => {
-                // Whitespace-only means "no description", which is a
-                // decision about an empty box rather than a rewrite of
-                // content: any real text is sent unchanged.
-                void apply(() =>
-                  updateIssue(issue, {
-                    description: description.trim().length === 0 ? null : description,
-                  }),
-                )
-              }}
-              placeholder="Add a description..."
-              value={issue.description ?? ''}
-            />
+          {/*
+            The identifier is the heading, not the title. A heading names a
+            section and must stay stable while the thing it names is being
+            edited -- and ENG-42 is the name this issue has outside the
+            product. The title is a labelled field two lines below.
+          */}
+          <h2 className={styles.inspectorHeading}>{issue.identifier}</h2>
+
+          {isSaving && <Spinner label="Saving" />}
+
+          <Menu
+            align="end"
+            items={[
+              {
+                id: 'archive',
+                label: 'Archive issue',
+                destructive: true,
+                onSelect: archive,
+              },
+            ]}
+            label={`More actions on ${issue.identifier}`}
+          />
+
+          <IconButton
+            aria-label="Close issue"
+            icon={<CloseIcon />}
+            onClick={close}
+            size="sm"
+            variant="ghost"
+          />
+        </header>
+
+        <div className={styles.inspectorBody}>
+          {panelError !== null && (
+            <p className={styles.formError} role="alert">
+              {panelError}
+            </p>
           )}
-        </Property>
 
+          {unplaced.length > 0 && (
+            <p className={styles.formError} role="alert">
+              {unplaced.join(' ')}
+            </p>
+          )}
+
+          <Property baseId={baseId} errors={fieldErrors} label="Title" name="title">
+            {(control) => (
+              <EditableText
+                {...control}
+                className={styles.titleField}
+                onCommit={(title) => {
+                  void apply(() => updateIssue(issue, { title }))
+                }}
+                value={issue.title}
+              />
+            )}
+          </Property>
+
+          {/*
+            The state as a readout, under the title where the design puts it.
+            The only status glyph in the panel -- it used to sit in the header
+            beside the key -- so nothing is announced twice, and the Status
+            select in the properties column is still the one control that
+            changes it.
+          */}
+          {category !== null && (
+            <div className={styles.chipRow}>
+              <span className={styles.statusChip}>
+                {/* `showLabel` and not the name written out beside it: the
+                  * indicator is `role="img"` with the name on the wrapper, so
+                  * its own visible text is inside that graphic and is
+                  * announced once. A sibling `{state.name}` would be read a
+                  * second time. */}
+                <StatusIndicator category={category} name={state?.name} showLabel />
+              </span>
+            </div>
+          )}
+
+          <Property
+            baseId={baseId}
+            errors={fieldErrors}
+            label="Description"
+            name="description"
+          >
+            {(control) => (
+              <EditableText
+                {...control}
+                multiline
+                onCommit={(description) => {
+                  // Whitespace-only means "no description", which is a
+                  // decision about an empty box rather than a rewrite of
+                  // content: any real text is sent unchanged.
+                  void apply(() =>
+                    updateIssue(issue, {
+                      description: description.trim().length === 0 ? null : description,
+                    }),
+                  )
+                }}
+                placeholder="Add a description..."
+                value={issue.description ?? ''}
+              />
+            )}
+          </Property>
+
+          {/*
+            Agent A7's territory. Four self-contained panels, each rendering
+            its own level-3 heading; this file supplies the slot and the two
+            identifiers, and knows nothing else about them. See
+            features/collaboration/index.ts for the contract.
+          */}
+          <LabelsPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
+          <SubIssuesPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
+          <RelationsPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
+          <CommentsPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
+
+          {/*
+            The three timestamps, read as a log rather than as a definition
+            list: when, who, what, one hairline per entry. `completedAt` only
+            when the server has one -- it is derived from the workflow state's
+            category, so an always-present "not completed" line would describe
+            nothing.
+
+            The person is announced but not drawn twice: the avatar is
+            decorative and the name is in the sentence, visually hidden, so a
+            screen reader hears "Ada Lovelace created this issue" while the
+            column shows initials.
+          */}
+          <div className={styles.activity}>
+            <h3 className={styles.activityHeading}>Activity</h3>
+
+            {log.map((entry) => (
+              <div className={styles.logEntry} key={entry.what}>
+                <time
+                  className={styles.logTime}
+                  dateTime={entry.at}
+                  title={formatAbsolute(entry.at)}
+                >
+                  {formatRelative(entry.at)}
+                </time>
+
+                {entry.who === undefined ? (
+                  <span aria-hidden="true" />
+                ) : (
+                  <Avatar
+                    className={styles.logWho}
+                    decorative
+                    name={memberLabel(entry.who)}
+                    size="sm"
+                  />
+                )}
+
+                <span className={styles.logWhat}>
+                  {entry.who !== undefined && (
+                    <VisuallyHidden>{memberLabel(entry.who)} </VisuallyHidden>
+                  )}
+                  {entry.what}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          <p className={styles.inspectorId}>
+            <VisuallyHidden>Issue id</VisuallyHidden>
+            {issue.id}
+          </p>
+        </div>
+      </div>
+
+      <div className={styles.propertiesColumn}>
         <div className={styles.properties}>
           <Property
             baseId={baseId}
@@ -526,74 +652,6 @@ export function IssueInspector({ issueId }: IssueInspectorProps) {
             )}
           </Property>
         </div>
-
-        {/*
-          Agent A7's territory. Four self-contained panels, each rendering
-          its own level-3 heading; this file supplies the slot and the two
-          identifiers, and knows nothing else about them. See
-          features/collaboration/index.ts for the contract.
-        */}
-        <LabelsPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
-        <SubIssuesPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
-        <RelationsPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
-        <CommentsPanel issueId={issue.id} workspaceSlug={workspaceSlug} />
-
-        <dl className={styles.inspectorMeta}>
-          <dt>Created</dt>
-          <dd>
-            <time dateTime={issue.createdAt} title={formatAbsolute(issue.createdAt)}>
-              {formatRelative(issue.createdAt)}
-            </time>
-            {creator !== undefined && (
-              <>
-                {' by '}
-                <Avatar decorative name={memberLabel(creator)} size="sm" />
-                {memberLabel(creator)}
-              </>
-            )}
-          </dd>
-
-          <dt>Updated</dt>
-          <dd>
-            <time dateTime={issue.updatedAt} title={formatAbsolute(issue.updatedAt)}>
-              {formatRelative(issue.updatedAt)}
-            </time>
-          </dd>
-
-          {/*
-            Only when the server has one. `completedAt` is derived from the
-            workflow state's category and is non-null exactly while the issue
-            sits in a completed or canceled state, so an always-present "not
-            completed" row would describe nothing.
-          */}
-          {issue.completedAt !== null && (
-            <>
-              <dt>Completed</dt>
-              <dd>
-                <time dateTime={issue.completedAt}>
-                  {formatAbsolute(issue.completedAt)}
-                </time>
-              </dd>
-            </>
-          )}
-
-          <dt>Assignee</dt>
-          <dd>
-            {assignee === undefined ? (
-              'Unassigned'
-            ) : (
-              <>
-                <Avatar decorative name={memberLabel(assignee)} size="sm" />
-                {memberLabel(assignee)}
-              </>
-            )}
-          </dd>
-        </dl>
-
-        <p className={styles.inspectorId}>
-          <VisuallyHidden>Issue id</VisuallyHidden>
-          {issue.id}
-        </p>
       </div>
     </article>
   )

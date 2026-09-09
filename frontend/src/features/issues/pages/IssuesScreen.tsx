@@ -306,7 +306,32 @@ export function IssuesScreen() {
           {hasIssues && (
             <div onKeyDown={handleListKeys}>
               {groups === null ? (
-                <List label="Issues">{issues.map(renderRow)}</List>
+                <>
+                  {/*
+                    The column legend, and `aria-hidden` is the whole of its
+                    accessibility story: a screen reader already hears every
+                    value in a row named -- the identifier, "Due", "Overdue",
+                    the assignee -- so four more words before the list is
+                    noise. It is deliberately not a `<th>` row either. The
+                    rows below are a list of links, and a header row that
+                    said "table" would promise cell navigation that does not
+                    exist.
+
+                    Flat mode only. In grouped mode each run already carries
+                    a GroupHeader, and a second header above the first of
+                    them heads nothing.
+                  */}
+                  <div aria-hidden="true" className={styles.columnHeader}>
+                    <span />
+                    <span />
+                    <span>ID</span>
+                    <span>Title</span>
+                    <span>Label</span>
+                    <span>Due</span>
+                    <span />
+                  </div>
+                  <List label="Issues">{issues.map(renderRow)}</List>
+                </>
               ) : (
                 /*
                   A header and then a `List` carrying the same name, which is
