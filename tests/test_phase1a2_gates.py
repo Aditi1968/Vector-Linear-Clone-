@@ -588,7 +588,34 @@ def test_the_lock_tool_itself_is_pinned():
 
 
 def test_the_build_context_excludes_the_local_environment_file():
-    """`.dockerignore` is an allowlist; `.env` must not be added back."""
+    """`.dockerignore` is an allowlist; `.env` must not be added back.
+
+    Five entries now, where there were two, and each of the three additions
+    is here because RENDER HAS NO BIND MOUNTS. docker-compose.yml supplied
+    `migrations/` and `scripts/` from the host precisely because they were
+    not in the image; a managed platform cannot, so the image has to carry:
+
+      * `migrations` -- the schema, applied at boot against an empty
+        database;
+      * `scripts` -- `scripts.apply_migration`, which owns the ledger, the
+        advisory lock and the per-file checksum, and is therefore the only
+        thing allowed to apply one;
+      * `frontend` -- the sources the Node stage builds the bundle from, so
+        the API and the SPA are served from ONE origin.
+
+    Exact equality, as before: a sixth entry is a decision, not a detail.
+
+    The second half is new and is the half that matters more now. Widening
+    an allowlist is exactly where a secret gets into an image by `COPY`
+    rather than by `ENV` -- `test_the_image_bakes_in_no_configuration`
+    guards the `ENV` hole and says nothing about this one. Three of the five
+    entries are whole directories, so the leading `*` no longer protects
+    anything inside them: a `.env` written next to `frontend/package.json`,
+    or the `.pem` GitHub hands over as a file download left in `scripts/`,
+    would be copied in by a line that looks entirely ordinary. So the
+    re-exclusions are asserted individually rather than inferred from the
+    allowlist being short.
+    """
     lines = [
         line.strip()
         for line in DOCKERIGNORE.read_text(encoding="utf-8").splitlines()
@@ -599,9 +626,23 @@ def test_the_build_context_excludes_the_local_environment_file():
 
     allowed = {line[1:] for line in lines if line.startswith("!")}
 
-    assert allowed == {"app", "requirements.txt"}, (
-        f"the build context gained paths: {sorted(allowed)}"
-    )
+    assert allowed == {
+        "app",
+        "requirements.txt",
+        "migrations",
+        "scripts",
+        "frontend",
+    }, f"the build context gained paths: {sorted(allowed)}"
+
+    # `.env` and `.env.*` cover the repository root, where the real one is.
+    # The `**/` spellings cover the allowed directories, which the root
+    # patterns do not reach and which `*` no longer excludes.
+    for excluded in (".env", ".env.*", "**/.env", "**/.env.*", "**/*.pem"):
+        assert excluded in lines, (
+            f"`{excluded}` is no longer excluded from the build context; the "
+            "allowlist admits whole directories, so nothing else keeps a "
+            "credential dropped inside one out of the image"
+        )
 
 
 def test_the_image_bakes_in_no_configuration():

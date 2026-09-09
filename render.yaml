@@ -1,0 +1,136 @@
+# Vector on Render: ONE free web service, and nothing else.
+#
+# THIS IS A STAGING / DEMO DEPLOYMENT. It exists so there is a real public URL
+# to click through, not so anyone can rely on it. No uptime is promised, the
+# free instance sleeps after fifteen minutes of no traffic and takes tens of
+# seconds to wake, the database is a free Neon project that suspends on its
+# own, and known defects are expected to be present. Nothing here should be
+# described as production to a user.
+#
+# ENVIRONMENT is nonetheless set to `production`, and the two words are about
+# different things. `production` is the RUNTIME MODE: it is the only value
+# under which app/graphql/router.py serves no GraphiQL and the schema answers
+# no introspection, and the only value under which app/http_cookies.py marks
+# the session and OAuth-state cookies Secure. "Staging" describes what the
+# deployment is FOR. Anyone who "corrects" ENVIRONMENT to `staging` gets a
+# pydantic validation error -- app/config.py permits only development, test
+# and production -- and anyone who sets `development` instead has quietly put
+# GraphiQL, introspection and non-Secure cookies on a public host. Leave it
+# alone. See DEPLOYMENT_ENV_VARS.md.
+#
+# ONE SERVICE, ON PURPOSE. FastAPI serves the built React bundle from the same
+# origin as /graphql and /integrations/**; there is no second static site and
+# no CDN. That is not thrift -- this application authenticates with a
+# database-backed session cookie and mints OAuth state cookies, and a cookie
+# is returned only to the host that set it. Splitting the page from the API is
+# exactly the topology that broke the OAuth state check once already; see
+# app/rest/oauth_origin.py and app/spa.py.
+#
+# NO DATABASE IS DECLARED HERE, and that is a requirement rather than a
+# preference. migrations/001_issues.sql defaults its primary keys to
+# `uuidv7()`, which is native to PostgreSQL 18 and does not exist in 17 --
+# so the schema simply will not apply to an older server. Neon has had 18
+# generally available since May 2026 and defaults new projects to it; Render's
+# own managed PostgreSQL does not offer 18, and its free instance is deleted
+# after 30 days regardless. So the database is a Neon project created by hand
+# and supplied as DATABASE_URL. See DEPLOYMENT_ENV_VARS.md for the steps and
+# for the three extensions the migrations create.
+
+services:
+  - type: web
+    name: vector-staging
+
+    # Docker, so the image Render runs is the one `docker build .` produces
+    # locally and the one CI builds. The alternative -- a native Python
+    # runtime with a build command -- would mean Render assembling the
+    # frontend and the backend in a way nothing else in this repository
+    # reproduces.
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+
+    # Free, and asserted here rather than left to the dashboard so that a
+    # blueprint apply cannot quietly provision a paid instance. 512 MB and
+    # 0.1 CPU; see DEPLOYMENT_ENV_VARS.md on what that rules out.
+    plan: free
+
+    region: oregon
+
+    # Auto-deploy from the branch: fix, test, commit, push, rebuild. Render
+    # watches `main` and rebuilds the image on every push to it, so there is
+    # no manual deploy step and no second place a version can come from.
+    #
+    # `docker build` runs `tsc -b && vite build`, so a type error fails the
+    # DEPLOY rather than shipping a broken bundle -- which is the property
+    # that makes auto-deploy from a branch safe enough to want.
+    branch: main
+    autoDeploy: true
+
+    # /healthz, NOT /readyz, and the distinction is the whole point of there
+    # being two.
+    #
+    # /healthz answers from the process alone and never opens a connection.
+    # /readyz runs `SELECT 1`. Render restarts a service that fails its health
+    # check, so pointing it at /readyz would turn a momentary Neon blip -- a
+    # free project resuming from autosuspend, say -- into a restart of an
+    # application that was working perfectly, and restarts do not fix
+    # databases. It would also poll the database forever, which on a free Neon
+    # project means the compute never suspends and the monthly allowance is
+    # spent on health checks.
+    #
+    # /readyz is still the right probe for a load balancer deciding where to
+    # send traffic, and is what docker-compose.yml and k8s/30-api.yaml use.
+    healthCheckPath: /healthz
+
+    envVars:
+      # Every value is entered in the Render dashboard at blueprint-apply
+      # time. `sync: false` is what declares the variable without committing
+      # what goes in it -- the DSN below carries a password, and this file is
+      # in git.
+      - key: DATABASE_URL
+        sync: false
+
+      # `production`. Read the header of this file before changing it.
+      - key: ENVIRONMENT
+        sync: false
+
+      # The origin this deployment is served on, as `https://<host>`, for the
+      # one link this application cannot infer from a request: the deep link
+      # in a Slack message, built by a background loop that is serving nobody.
+      # Unset means messages go out with no link rather than a guessed one.
+      #
+      # Not knowable until Render has assigned the host, so it is filled in
+      # after the first deploy, and it is the same host as the service itself
+      # because there is only one origin.
+      - key: PUBLIC_BASE_URL
+        sync: false
+
+      # A committed value, unlike the three above, and deliberately so: this
+      # is a deployment decision rather than a credential, and a `sync: false`
+      # boolean left blank in the dashboard is an empty string, which pydantic
+      # rejects -- the service would fail to boot on a variable nobody meant
+      # to set at all.
+      #
+      # `true` runs the embedding worker on this process. What it costs is
+      # near nothing, because what it runs is the in-tree hashing embedder:
+      # no neural model is installed, none fits in 512 MB, and pretending
+      # otherwise is what DEPLOYMENT_ENV_VARS.md refuses to do. What it buys
+      # is that `embeddingIndexingState` reports real counts rather than an
+      # empty index forever, so the semantic search screen describes itself
+      # honestly instead of saying nothing has been indexed on a deployment
+      # where nothing ever would be.
+      - key: EMBEDDING_WORKER_ENABLED
+        value: "true"
+
+      # GITHUB_* and SLACK_* are deliberately absent from this file, and their
+      # absence is load-bearing rather than an omission. Both integrations are
+      # optional and every one of their settings defaults to None, which is
+      # what makes the deployment report itself UNCONFIGURED. A `sync: false`
+      # entry left blank in the dashboard produces an EMPTY STRING instead,
+      # which is not None -- `GithubAppConfig.configured` would then call a
+      # credential-less deployment configured and offer a Connect button whose
+      # every click dead-ends.
+      #
+      # So: add them in the Render dashboard if and when a provider is
+      # actually connected, all of a set or none of it.
+      # DEPLOYMENT_ENV_VARS.md lists the names and the callback URLs.

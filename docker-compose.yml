@@ -72,15 +72,23 @@ services:
 
   migrate:
     # The API image, run with a different command, rather than an image of
-    # its own -- and the bind mounts below are the reason it can be.
+    # its own -- and it no longer needs a bind mount to be one.
     #
-    # The runtime image deliberately ships `app` and nothing else: the root
-    # .dockerignore is an allowlist of exactly `app` and `requirements.txt`,
-    # and tests/test_phase1a2_gates.py fails if anything is added to it. So
-    # `migrations/` and `scripts/` cannot be baked in, and they are mounted
-    # read-only instead. scripts/apply_migration.py resolves MIGRATIONS_DIR
-    # as `parents[1] / "migrations"`, which lands on /srv/vector/migrations
-    # given where scripts/ is mounted.
+    # `migrations/` and `scripts/` used to be mounted here read-only, because
+    # the root .dockerignore was an allowlist of exactly `app` and
+    # `requirements.txt` and neither could be baked in. Both are in the image
+    # now: Render has no bind mounts, so a deployed container has to carry the
+    # schema and the runner that applies it, and once the image carries them
+    # a mount that shadowed them with the host's copy would make this stack
+    # test something the deployed one does not run.
+    #
+    # This service is therefore no longer the only thing that migrates -- the
+    # image's own CMD applies the same files through the same runner before
+    # uvicorn binds. It is kept because the `--status` at the end is an
+    # assertion the API's boot does not make: it exits non-zero on a checksum
+    # mismatch, so a migration edited after it was applied stops the stack
+    # here with a report naming the version, rather than at the API's first
+    # apply with a raise.
     image: vector-api:local
     build:
       context: .
@@ -93,10 +101,6 @@ services:
     environment:
       DATABASE_URL: postgresql://vector:vector@db:5432/vector
       ENVIRONMENT: development
-
-    volumes:
-      - ./migrations:/srv/vector/migrations:ro
-      - ./scripts:/srv/vector/scripts:ro
 
     # Applied one file at a time through the repository's own runner, in
     # filename order, so the ledger, the advisory lock and the per-file
