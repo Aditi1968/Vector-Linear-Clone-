@@ -196,7 +196,15 @@ def measure_naively(selections, parent_type, schema, fragments, expanding):
             if node.alias is not None:
                 aliases += 1
 
-            if node.name.value.startswith("__"):
+            # Named exactly, mirroring the rule. `startswith("__")` is what
+            # the rule used to do and is the bug it was fixed for: it also
+            # matches `__typename`, which is an ordinary leaf on every object
+            # and whose zero cost propagated up through its parent's
+            # `page_size * inner_complexity` and zeroed a whole fan-out. An
+            # oracle that kept the old test would agree with a rule that
+            # regressed to it, so this walk has to name the two introspection
+            # roots the same way `_measure` does.
+            if node.name.value in ("__schema", "__type"):
                 continue
 
             if node.selection_set is None:
@@ -351,6 +359,13 @@ EQUIVALENT_DOCUMENTS = {
     "mutation": (
         'mutation M { issueCreate(input: {workspaceSlug: "acme", teamId: "00000000-0000-7000-8000-0000000000fb", title: "t"}) '
         "{ issue { id title } errors { field code message } } }"
+    ),
+    "typename under a page": (
+        'query Q { issues(workspaceSlug: "acme", first: 100) { nodes { __typename } } }'
+    ),
+    "typename beside real fields": (
+        'query Q { __typename issues(workspaceSlug: "acme") '
+        "{ __typename nodes { __typename id } } }"
     ),
     "introspection": get_introspection_query(),
     "unknown field": 'query Q { issues(workspaceSlug: "acme") { nodes { titel } } }',
@@ -664,6 +679,72 @@ async def test_omitting_the_page_size_is_not_a_bypass():
     assert rejected_for(result, f"the maximum is {COMPLEXITY_LIMIT}")
     assert result.data is None
     assert service.calls == 0
+
+
+TYPENAME_PAGE = 'issues(workspaceSlug: "acme", first: 100) {{ nodes {{ {leaf} }} }}'
+
+# Eleven pages of a hundred rows: 1100 against a budget of 1000, and eleven
+# aliases against a cap of fifteen, so complexity is the only budget that can
+# refuse it. Under the bug this document scored 0 and ran eleven statements.
+TYPENAME_FANOUT = 11
+
+
+def typename_fanout(leaf: str, pages: int) -> str:
+    return issues_query(
+        *(f"a{index}: " + TYPENAME_PAGE.format(leaf=leaf) for index in range(pages))
+    )
+
+
+@pytest.mark.parametrize("leaf", ["__typename", "id"])
+async def test_a_typename_fanout_is_priced_like_any_other_leaf(leaf: str):
+    """`__typename` is answered from the schema, and costs a row to reach.
+
+    THE REGRESSION THIS PINS. The rule used to skip every field whose name
+    began with `__`, which is graphql-core's `is_introspection_key` and which
+    also matches `__typename`. A composite field is charged
+    `page_size * inner_complexity`, so a leaf costing nothing zeroed its
+    parent, and the zero propagated all the way to the root: a document
+    selecting only `__typename` under several unbatched connections scored 0
+    and was executed. `__schema` and `__type` really are free -- their
+    subtrees are described by the schema and touch no database -- but
+    `__typename` is only ever reached by resolving the object it sits on.
+
+    Parametrised against `id` so the claim is an equality rather than a
+    threshold: the two leaves must be charged the same, or this test would
+    pass on a rule that merely made `__typename` expensive.
+    """
+    service = RecordingIssueService(
+        IssuePage(nodes=[make_entity(1)], has_next_page=False, end_cursor=None)
+    )
+
+    result = await build_schema("test").execute(
+        typename_fanout(leaf, TYPENAME_FANOUT),
+        context_value=Context(service),
+    )
+
+    assert rejected_for(result, f"the maximum is {COMPLEXITY_LIMIT}")
+    assert result.data is None
+    # The half a rejection cannot report on its own: no page was ever read.
+    assert service.calls == 0
+
+
+@pytest.mark.parametrize("leaf", ["__typename", "id"])
+async def test_a_typename_fanout_inside_the_budget_still_runs(leaf: str):
+    """The control. A rule that refused `__typename` outright would also
+    satisfy the test above, and would break every client that sends it --
+    Apollo and urql add `__typename` to every selection set by themselves.
+    """
+    service = RecordingIssueService(
+        IssuePage(nodes=[make_entity(1)], has_next_page=False, end_cursor=None)
+    )
+
+    result = await build_schema("test").execute(
+        typename_fanout(leaf, TYPENAME_FANOUT - 2),
+        context_value=Context(service),
+    )
+
+    assert result.errors is None
+    assert service.calls == TYPENAME_FANOUT - 2
 
 
 @pytest.mark.parametrize("environment", ALL_ENVIRONMENTS)
