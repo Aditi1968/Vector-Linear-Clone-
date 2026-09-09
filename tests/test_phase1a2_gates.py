@@ -902,34 +902,20 @@ def _notification_kind_values(relative_path: str) -> set[str]:
     return values
 
 
-def _skip_guard_source() -> str:
-    """The guard script as it is actually written in ci.yml.
-
-    Extracted from the workflow rather than copied into this file, so that
-    editing the workflow's copy cannot leave a stale duplicate passing here.
-    """
-    workflow = _workflow_text()
-    body = workflow.split("<<'PY'\n", 1)
-
-    assert len(body) == 2, "the skip guard heredoc is no longer in ci.yml"
-
-    lines = []
-
-    for line in body[1].splitlines():
-        if line.strip() == "PY":
-            break
-
-        lines.append(line[10:] if line.startswith(" " * 10) else line.lstrip())
-
-    return "\n".join(lines)
-
-
-def _junit_report(tmp_path: Path, *, tests: int, skipped: int) -> Path:
-    report = tmp_path / "report.xml"
+def _junit_report(
+    tmp_path: Path,
+    *,
+    tests: int,
+    skipped: int,
+    failures: int = 0,
+    errors: int = 0,
+    name: str = "report",
+) -> Path:
+    report = tmp_path / f"{name}.xml"
     report.write_text(
         '<?xml version="1.0" encoding="utf-8"?>'
         '<testsuites name="pytest tests">'
-        f'<testsuite name="pytest" errors="0" failures="0" '
+        f'<testsuite name="pytest" errors="{errors}" failures="{failures}" '
         f'skipped="{skipped}" tests="{tests}"/>'
         "</testsuites>",
         encoding="utf-8",
@@ -938,46 +924,99 @@ def _junit_report(tmp_path: Path, *, tests: int, skipped: int) -> Path:
     return report
 
 
-def _run_skip_guard(tmp_path: Path, report: Path) -> subprocess.CompletedProcess:
-    script = tmp_path / "guard.py"
-    script.write_text(_skip_guard_source(), encoding="utf-8")
+def _run_db_gate(*reports: Path) -> subprocess.CompletedProcess:
+    """The real gate, invoked exactly as CI invokes it.
 
+    The script itself rather than a copy extracted from the workflow. The
+    earlier version of these tests pulled a heredoc out of ci.yml and ran
+    that, which was the right shape while the guard lived only in the
+    workflow; now that CI and a developer's terminal run the same file,
+    testing anything but that file would be testing a duplicate.
+
+    `test_the_db_gate_is_what_ci_runs` below is what keeps the two joined.
+    """
     return subprocess.run(
-        [sys.executable, str(script), str(report)],
+        [sys.executable, "-m", "scripts.db_gate", *(str(r) for r in reports)],
         capture_output=True,
         text=True,
+        cwd=REPO_ROOT,
     )
 
 
-def test_the_skip_guard_accepts_a_run_in_which_the_tests_ran(tmp_path):
-    result = _run_skip_guard(tmp_path, _junit_report(tmp_path, tests=12, skipped=0))
+def test_the_db_gate_is_what_ci_runs():
+    """CI must invoke the script, not a re-implementation of it.
+
+    Without this, the workflow could drift back to an inline check that
+    tests less than the script does -- which is what it used to do: the
+    heredoc asserted `skipped` and `tests == 0` and left failures and errors
+    to an exit code that a pipe can swallow.
+    """
+    assert "python -m scripts.db_gate" in _workflow_text()
+    assert "<<'PY'" not in _workflow_text(), (
+        "an inline guard heredoc is back in ci.yml; the db gate is "
+        "scripts/db_gate.py and must not be duplicated there"
+    )
+
+
+def test_the_db_gate_accepts_a_run_in_which_the_tests_ran(tmp_path):
+    result = _run_db_gate(_junit_report(tmp_path, tests=12, skipped=0))
 
     assert result.returncode == 0, result.stderr
 
 
 @pytest.mark.parametrize(
-    ("tests", "skipped", "why"),
+    ("counts", "why"),
     [
-        (12, 12, "the fixture skipped every db test"),
-        (12, 1, "one db test skipped"),
-        (0, 0, "nothing was collected"),
+        ({"tests": 12, "skipped": 12}, "the fixture skipped every db test"),
+        ({"tests": 12, "skipped": 1}, "one db test skipped"),
+        ({"tests": 0, "skipped": 0}, "nothing was collected"),
+        ({"tests": 12, "skipped": 0, "failures": 1}, "a test failed"),
+        ({"tests": 12, "skipped": 0, "errors": 1}, "a fixture errored"),
     ],
 )
-def test_the_skip_guard_rejects_a_run_that_tested_nothing(
-    tmp_path, tests, skipped, why
+def test_the_db_gate_rejects_a_run_that_did_not_verify_the_database(
+    tmp_path, counts, why
 ):
-    """`pytest -m db` exits 0 when every test skips.
+    """Four ways `pytest -m db` exits 0 without having proven anything.
 
-    That is right on a laptop without Docker and wrong in CI, where a
-    skipped suite is a green job that verified nothing. The guard is the
-    only thing standing between those two readings.
+    Every one of them has been read as a pass in this repository. The
+    skipped cases are the fixture answering an unreachable Docker, which is
+    right on a laptop and wrong as evidence. The failure and error cases are
+    newer here and are the reason this gate stopped trusting exit codes at
+    all: `pytest ... | tail` reports the pipe's status, and a run with 16
+    failures and 998 errors printed a zero.
     """
-    result = _run_skip_guard(
-        tmp_path, _junit_report(tmp_path, tests=tests, skipped=skipped)
+    result = _run_db_gate(_junit_report(tmp_path, **counts))
+
+    assert result.returncode != 0, f"the gate passed a run where {why}"
+    assert "FAIL" in result.stderr
+
+
+def test_the_db_gate_rejects_a_missing_shard(tmp_path):
+    """A shard that never finished must not read as an empty pass.
+
+    The db suite is sharded on machines that cannot hold it in one process,
+    and the failure mode there is a shard killed by the OOM reaper rather
+    than a shard that failed. Its report simply does not exist, and treating
+    an absent file as zero failures would turn the exact collapse this gate
+    exists to catch into a green line.
+    """
+    result = _run_db_gate(
+        _junit_report(tmp_path, tests=12, skipped=0, name="present"),
+        tmp_path / "never_written.xml",
     )
 
-    assert result.returncode != 0, f"the guard passed a run where {why}"
-    assert "did not run" in result.stderr
+    assert result.returncode != 0
+    assert "MISSING" in result.stderr
+
+
+def test_the_db_gate_aggregates_shards_and_fails_on_any_one(tmp_path):
+    """One dirty shard fails the aggregate, however clean the others are."""
+    clean = _junit_report(tmp_path, tests=100, skipped=0, name="clean")
+    dirty = _junit_report(tmp_path, tests=100, skipped=3, name="dirty")
+
+    assert _run_db_gate(clean, clean).returncode == 0
+    assert _run_db_gate(clean, dirty).returncode != 0
 
 
 # --------------------------------------------------------------------------

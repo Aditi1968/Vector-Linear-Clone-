@@ -274,31 +274,16 @@ jobs:
         #
         # Asserted from the JUnit report rather than by matching counts in
         # the log, so adding a test does not need a change here.
-        run: |
-          python - "${RUNNER_TEMP}/db-tests.xml" <<'PY'
-          import sys
-          import xml.etree.ElementTree as ElementTree
-
-          report = ElementTree.parse(sys.argv[1]).getroot()
-          suite = report.find("testsuite") if report.tag == "testsuites" else report
-
-          if suite is None:
-              sys.exit(f"no testsuite element in {sys.argv[1]}")
-
-          total = int(suite.get("tests", "0"))
-          skipped = int(suite.get("skipped", "0"))
-
-          if skipped or total == 0:
-              sys.exit(
-                  f"db-marked tests did not run: tests={total}, skipped={skipped}. "
-                  "The fixture skips when the Docker daemon is unreachable or the "
-                  "pgvector/pgvector:pg18 container will not start. In CI that "
-                  "is a broken "
-                  "gate, not an environment fact."
-              )
-
-          print(f"{total} db-marked tests ran")
-          PY
+        #
+        # `scripts/db_gate.py` rather than a heredoc, and the reason is that
+        # the heredoc this replaces checked `skipped` and `tests == 0` while
+        # leaving `failures` and `errors` to pytest's exit code. That is a
+        # real hole: piping pytest through `tail` reports the pipe's status,
+        # and a run with 16 failures and 998 errors was read as green here
+        # for exactly that reason. The script asserts all four from the
+        # report, so no exit code has to be trusted -- and a developer runs
+        # the identical gate locally instead of an approximation of it.
+        run: python -m scripts.db_gate "${RUNNER_TEMP}/db-tests.xml"
 
   migrations:
     name: Migrations apply to an empty database
