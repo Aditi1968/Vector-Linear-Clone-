@@ -1,7 +1,8 @@
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useQuery } from '@apollo/client/react'
 
 import { useWorkspaceSlug } from '../../../app/routes'
+import { describeError } from '../lib/errors'
 import { IssueWorkspaceContextDocument } from './documents'
 import type {
   WorkflowState,
@@ -32,6 +33,17 @@ export interface WorkspaceContext {
 
   /** Whether the lookups are still empty because the answer has not arrived. */
   isLoading: boolean
+  /**
+   * Why the lookups are empty, when the reason is that the request failed.
+   *
+   * Read by the screens for which a team is a *precondition* rather than a
+   * lookup -- the board and the triage queue, neither of which can be drawn
+   * without one. Every other consumer ignores it deliberately; see the note
+   * on the hook.
+   */
+  errorMessage: string | null
+  /** Ask again. The recovery path out of `errorMessage`. */
+  retry: () => void
 }
 
 /**
@@ -57,20 +69,38 @@ export interface WorkspaceContext {
  * genuinely differs. Keying on `data?.teams` would be equivalent and would
  * need three dependencies to say the same thing.
  *
- * ## Empty is a state, not an error
+ * ## Empty is a state, not an error -- except where it is a claim
  *
- * A workspace with no teams, no projects or one member is ordinary. Nothing
- * here reports a failure: the pickers that read these render what there is,
- * and the composer refuses to submit when there is no team to file into.
- * A failed request leaves the maps empty, which degrades a row to its ids
- * rather than replacing the whole list with an error panel about a lookup.
+ * A workspace with no teams, no projects or one member is ordinary. Most
+ * consumers read these as *lookups*: the pickers render what there is, the
+ * composer refuses to submit when there is no team to file into, and a failed
+ * request degrades a row to its ids rather than replacing a whole list with an
+ * error panel about a name resolution. Those consumers still ignore the
+ * failure, and should.
+ *
+ * But two screens treat a team as a *precondition* and say so on screen. The
+ * board and the triage queue both render "No teams in this workspace" when
+ * this comes back with none -- and an empty array is what a failed request
+ * leaves behind too, so a dropped connection made both of them assert
+ * something about the workspace that nothing had measured. That is the one
+ * thing an empty state may never do.
+ *
+ * So the failure is reported rather than swallowed. Whether it matters is the
+ * caller's decision, which is the only place that knows whether it is about to
+ * draw a lookup or make a claim.
  */
 export function useWorkspaceContext(): WorkspaceContext {
   const workspaceSlug = useWorkspaceSlug()
 
-  const { data, loading } = useQuery(IssueWorkspaceContextDocument, {
+  const { data, error, loading, refetch } = useQuery(IssueWorkspaceContextDocument, {
     variables: { workspaceSlug },
   })
+
+  const retry = useCallback(() => {
+    // Swallowed: `refetch` rejects *and* sets `error` on the hook result, and
+    // `error` is what the screen renders.
+    void refetch().catch(() => undefined)
+  }, [refetch])
 
   return useMemo(() => {
     const teams = data?.teams ?? NO_TEAMS
@@ -101,8 +131,10 @@ export function useWorkspaceContext(): WorkspaceContext {
       memberById,
       teamById,
       isLoading: loading,
+      errorMessage: error === undefined ? null : describeError(error),
+      retry,
     }
-  }, [data, loading])
+  }, [data, error, loading, retry])
 }
 
 /**
