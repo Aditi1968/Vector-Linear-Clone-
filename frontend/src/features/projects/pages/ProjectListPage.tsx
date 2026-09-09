@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom'
 
 import { PageContent, PageHeader } from '../../../app/layout'
 import {
-  Badge,
   Button,
   Dialog,
   EmptyState,
@@ -16,6 +15,7 @@ import {
   Skeleton,
   Tag,
   VisuallyHidden,
+  cx,
 } from '../../../components'
 import { useAppPaths } from '../../../app/routes'
 import { useCreateProject, useProjectList, useProjectMembers, useProjectTeams } from '../api'
@@ -23,11 +23,20 @@ import type { ProjectDraft, ProjectValidationError } from '../api'
 import { ProjectForm } from '../components/ProjectForm'
 import {
   formatDay,
+  isTargetLate,
+  projectHealth,
   projectStateLabel,
-  projectStateTone,
   resolveTeams,
 } from '../lib/projects'
 import styles from '../projects.module.css'
+
+/** The four health readings, as the classes that paint them. */
+const HEALTH_CLASS = {
+  'on-track': styles.onTrack,
+  'at-risk': styles.atRisk,
+  'off-track': styles.offTrack,
+  planned: styles.planned,
+} as const
 
 const NO_ERRORS: readonly ProjectValidationError[] = []
 
@@ -110,10 +119,18 @@ export function ProjectListPage() {
   const hasProjects = projects.length > 0
   const isEmpty = !isLoadingFirstPage && errorMessage === null && !hasProjects
 
+  // One instant for the whole render, so two rows a tick apart cannot
+  // disagree about whether the same date has gone by.
+  const now = Date.now()
+
   return (
     <>
       <PageHeader
         title="Projects"
+        // "Loaded" and not "active": the connection exposes no total and this
+        // screen has no idea how many projects the workspace holds. A readout
+        // that said "5 ACTIVE" would be reading the page, not the workspace.
+        readout={hasProjects ? `${String(projects.length)} loaded` : undefined}
         actions={
           <Button variant="primary" onClick={openComposer}>
             New project
@@ -166,13 +183,23 @@ export function ProjectListPage() {
             <List label="Projects">
               {projects.map((project) => {
                 const memberships = resolveTeams(project.teamIds, teams)
+                const health = projectHealth(project, now)
 
                 return (
                   <ListRow interactive key={project.id}>
                     <ListRowMain>
-                      <Link className={styles.rowLink} to={paths.project(project.id)}>
-                        {project.name}
-                      </Link>
+                      {/* Name over state, which is the artboard's row: the
+                          state is a legend on the project rather than a pill
+                          floated to the far edge, where it had to compete
+                          with the teams and the date for the eye. */}
+                      <span className={styles.rowStack}>
+                        <Link className={styles.rowLink} to={paths.project(project.id)}>
+                          {project.name}
+                        </Link>
+                        <span className={cx(styles.rowState, HEALTH_CLASS[health])}>
+                          {projectStateLabel(project.state)}
+                        </span>
+                      </span>
                     </ListRowMain>
 
                     <ListRowMeta>
@@ -187,16 +214,17 @@ export function ProjectListPage() {
                       )}
 
                       {project.targetDate !== null && (
-                        <span>
+                        <span
+                          className={cx(
+                            styles.rowDate,
+                            isTargetLate(project, now) && styles.late,
+                          )}
+                        >
                           {/* The word matters: a bare date beside a project
                               could be a start, an end or a last edit. */}
                           Target <time dateTime={project.targetDate}>{formatDay(project.targetDate)}</time>
                         </span>
                       )}
-
-                      <Badge tone={projectStateTone(project.state)}>
-                        {projectStateLabel(project.state)}
-                      </Badge>
                     </ListRowMeta>
                   </ListRow>
                 )
@@ -219,7 +247,7 @@ export function ProjectListPage() {
                 // "Loaded" and not "total": the schema exposes no count, so
                 // this is a fact about this screen and does not pretend to be
                 // a fact about the database.
-                <span>
+                <span className={styles.endOfList}>
                   End of list &middot; {projects.length}{' '}
                   {projects.length === 1 ? 'project' : 'projects'} loaded
                 </span>

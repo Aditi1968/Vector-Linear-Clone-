@@ -4,7 +4,6 @@ import { Link } from 'react-router-dom'
 import { PageContent, PageHeader } from '../../../app/layout'
 import { useAppPaths } from '../../../app/routes'
 import {
-  Badge,
   Button,
   CycleIcon,
   Dialog,
@@ -152,7 +151,7 @@ export function CycleListPage() {
                   range reads as one fact and a screen reader announcing two
                   adjacent dates with no relation between them is worse. */}
               <span className={styles.dates}>{formatCycleRange(cycle)}</span>
-              <Badge tone="neutral">#{cycle.number}</Badge>
+              <span className={styles.rowNumber}>#{cycle.number}</span>
             </ListRowMeta>
           </ListRow>
         ))}
