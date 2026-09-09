@@ -26,9 +26,10 @@ import hashlib
 import re
 import sys
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import asyncpg
+import certifi
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -166,6 +167,38 @@ def _read_env_file(path: Path) -> str | None:
     return found.get("DATABASE_URL") or found.get("STAGING_DATABASE_URL")
 
 
+def _local_dsn(dsn: str) -> str:
+    """The same server, reachable from THIS machine.
+
+    A deployment DSN names the CA bundle by the container's path --
+    `/etc/ssl/certs/ca-certificates.crt`, which is where Debian keeps it and
+    which does not exist on a Windows development machine. asyncpg then fails
+    in `_parse_connect_dsn_and_args` with a bare `FileNotFoundError` before
+    opening a socket, which reads like a broken DSN rather than a missing
+    local file.
+
+    Substituting the local trust store keeps the verification identical --
+    same `verify-full`, same hostname check, same public CA chain -- while
+    changing only where this machine looks for the roots. Nothing about the
+    deployment's own DSN is altered; this value is used for this process's
+    connection and is never written anywhere.
+    """
+    parts = urlsplit(dsn)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+
+    cafile = query.get("sslrootcert")
+
+    if cafile and not Path(cafile).is_file():
+        query["sslrootcert"] = certifi.where()
+
+        print(f"  note: {cafile} is the container's CA path and is absent here;")
+        print("        verifying against this machine's trust store instead.")
+
+    return urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(query), parts.fragment)
+    )
+
+
 async def report(dsn: str) -> int:
     parts = urlsplit(dsn)
     host = parts.hostname or ""
@@ -188,7 +221,24 @@ async def report(dsn: str) -> int:
     print(f"host suffix:              ...{suffix}")
     print(f"host fingerprint:         {digest}")
 
-    conn = await asyncpg.connect(dsn, timeout=30)
+    # The ENDPOINT, separately from the host, because Neon gives one branch
+    # two hostnames: `ep-name-123.region.aws.neon.tech` speaks PostgreSQL
+    # directly and `ep-name-123-pooler.region...` goes through PgBouncer. They
+    # are the SAME database. Comparing full hostnames would call those two
+    # different databases and send somebody hunting for a branch mix-up that
+    # is not there, so the endpoint id is fingerprinted with `-pooler` removed
+    # and the pooling reported as its own fact.
+    label = host.split(".")[0]
+    pooled = label.endswith("-pooler")
+    endpoint = label[: -len("-pooler")] if pooled else label
+
+    print(
+        f"endpoint fingerprint:     "
+        f"{hashlib.sha256(endpoint.encode()).hexdigest()[:12]}"
+    )
+    print(f"pooled endpoint:          {'yes (PgBouncer)' if pooled else 'no (direct)'}")
+
+    conn = await asyncpg.connect(_local_dsn(dsn), timeout=30)
 
     try:
         version = await conn.fetchval("SELECT version()")
