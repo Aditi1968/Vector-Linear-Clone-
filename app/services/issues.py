@@ -6,7 +6,7 @@ from uuid import UUID
 import asyncpg
 
 from app.domain.activity import ActivityKind, IssueSnapshot
-from app.domain.errors import ValidationError, ValidationIssue
+from app.domain.errors import TeamNotFoundError, ValidationError, ValidationIssue
 from app.domain.estimates import (
     EstimateScale,
     estimate_error_message,
@@ -69,9 +69,26 @@ ISSUES_CYCLE_FK = "issues_cycle_fk"
 # validation errors. Each name here identifies exactly one rule, and each of
 # those rules is about a value the client supplied, so the translation says
 # only what the constraint already said. A foreign key not in this mapping --
-# `issues_team_fk`, `issues_creator_fk` -- is violated only by a value the
-# server chose, which makes it a defect here and not a correction for the
-# client to make; those propagate untouched.
+# `issues_creator_fk` -- is violated only by a value the server chose, which
+# makes it a defect here and not a correction for the client to make; those
+# propagate untouched.
+#
+# `issues_team_fk` used to be in that second group and is now in the first,
+# because `IssueCreateInput.teamId` became a REQUIRED client-supplied field
+# when tenancy landed. Before that the server chose the team, and a violation
+# really was a defect rather than a client mistake.
+#
+# It is NOT, however, what a bad `teamId` normally produces. `create`
+# resolves the team through `default_workflow_state_id` before the INSERT is
+# reached, so the ordinary path raises `TeamNotFoundError` and is handled
+# there; this entry is the narrower case where the team disappears between
+# that read and the insert. Both answer the same field error, which is what
+# makes the race invisible to a client rather than a second error to explain.
+#
+# Both were found the same way: sending a second workspace's team id with an
+# attacker's own workspace slug. Nothing crossed a tenant -- the write was
+# refused either way -- but the refusal arrived as "Internal server error",
+# which any client hits with a stale team in a picker.
 #
 # `issues_assignee_fk` is violated identically by a user who does not exist
 # and by one who exists in another workspace, and both arrive here as this
@@ -79,6 +96,17 @@ ISSUES_CYCLE_FK = "issues_cycle_fk"
 # them would answer "does this user id exist" for a caller who is only
 # entitled to know about their own workspace.
 _EXPECTED_FOREIGN_KEYS: dict[str, ValidationIssue] = {
+    "issues_team_fk": ValidationIssue(
+        field="teamId",
+        code="NOT_FOUND",
+        # Says nothing about which of the two happened, on the same argument
+        # `issues_assignee_fk` below makes: a team in another workspace and a
+        # team that exists nowhere both break this constraint, and answering
+        # them differently would confirm the existence of a team the caller
+        # is not entitled to know about. Verified: both cases return this
+        # identical error.
+        message="Team not found",
+    ),
     "issues_assignee_fk": ValidationIssue(
         field="assigneeId",
         code="NOT_A_MEMBER",
@@ -408,6 +436,25 @@ class IssueService:
                         )
 
                     return entity
+            except TeamNotFoundError:
+                # The team does not exist, or exists in another workspace.
+                # `default_workflow_state_id` resolves the team before the
+                # INSERT is reached, so this -- not `issues_team_fk` -- is
+                # what a bad `teamId` actually produces, and it used to
+                # escape unmapped as "Internal server error".
+                #
+                # `teamId` became a REQUIRED client-supplied field when
+                # tenancy landed; before that the server chose the team and
+                # this error genuinely was unreachable from client input.
+                # Nothing updated the error handling when the input changed.
+                #
+                # Answers the same thing for both cases, on the argument
+                # `_EXPECTED_FOREIGN_KEYS` makes about assignees: telling a
+                # foreign team apart from a nonexistent one would confirm
+                # the existence of a team the caller cannot see.
+                raise ValidationError(
+                    [_EXPECTED_FOREIGN_KEYS["issues_team_fk"]]
+                ) from None
             except asyncpg.ForeignKeyViolationError as exc:
                 # Caught outside the transaction block so the rollback has
                 # already happened by the time this runs. Catching inside it

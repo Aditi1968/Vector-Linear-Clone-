@@ -48,9 +48,29 @@ DEMO_EMAIL = "demo@vector.local"
 DEMO_PASSWORD = "vector-local-demo"
 DEMO_NAME = "Demo User"
 
-# The tenant `app/graphql/tenancy.py` binds every request to today, and the
-# one migration 002 creates.
-WORKSPACE_SLUG = "vector"
+# The workspace this seed files everything into, and NOT the one migration
+# 002 creates.
+#
+# 002 inserts a workspace with the slug `vector`, from the phase when every
+# resolver was bound to a single tenant. That row still exists and has **zero
+# members**, which makes it unreachable: membership is granted by accepting
+# an invitation, an invitation can only be sent by an admin of the workspace,
+# and a workspace with no members has no admin. There is no API path into it
+# from a fresh database, so a seed that targeted it could only get there by
+# writing a membership row behind the API's back -- which would make this
+# script the one caller that does not go through the product.
+#
+# So the demo account creates and owns its own workspace instead. The
+# consequence worth knowing: `vector` stays reserved by that orphan row, so
+# this cannot be called `vector` even though nothing is using it.
+WORKSPACE_SLUG = "demo"
+WORKSPACE_NAME = "Demo Workspace"
+
+# The team the demo issues are filed under. `key` is the ENG in ENG-42, and
+# 005 constrains it to 1-10 uppercase letters and digits starting with a
+# letter -- so it cannot simply be the workspace slug.
+TEAM_NAME = "Engineering"
+TEAM_KEY = "ENG"
 
 # The only addresses this script will talk to. `urlparse().hostname` lowercases
 # and strips the brackets from an IPv6 literal, so `[::1]` arrives as `::1`.
@@ -81,9 +101,33 @@ mutation SeedLogin($input: LoginInput!) {
 }
 """
 
+WORKSPACE_CREATE_MUTATION = """
+mutation SeedWorkspaceCreate($input: WorkspaceCreateInput!) {
+  workspaceCreate(input: $input) {
+    workspace { id slug }
+    errors { field code message }
+  }
+}
+"""
+
+TEAM_CREATE_MUTATION = """
+mutation SeedTeamCreate($input: TeamCreateInput!) {
+  teamCreate(input: $input) {
+    team { id key }
+    errors { field code message }
+  }
+}
+"""
+
+MY_WORKSPACES_QUERY = """
+query SeedMyWorkspaces {
+  myWorkspaces { workspace { id slug } }
+}
+"""
+
 EXISTING_ISSUES_QUERY = """
-query SeedExistingIssues {
-  issues(first: 1) { nodes { id identifier } }
+query SeedExistingIssues($slug: String!) {
+  issues(workspaceSlug: $slug, first: 1) { nodes { id identifier } }
 }
 """
 
@@ -352,8 +396,16 @@ def workflow_states_by_team(client: GraphqlClient) -> dict[str, dict[str, str]]:
     }
 
 
-def create_issue(client: GraphqlClient, spec: dict) -> dict:
-    """File one demo issue, and return the created issue."""
+def create_issue(client: GraphqlClient, spec: dict, team_id: str) -> dict:
+    """File one demo issue, and return the created issue.
+
+    `workspaceSlug` and `teamId` are both required by `IssueCreateInput` and
+    neither used to be passed here: this script predates tenancy, when the
+    server picked the one workspace and its default team by itself. The team
+    is threaded in from the caller rather than looked up again per issue, so
+    all nine land in the same team and the state lookup afterwards cannot be
+    reading a different team's board.
+    """
     due_date = None
 
     if spec["days"] is not None:
@@ -363,6 +415,8 @@ def create_issue(client: GraphqlClient, spec: dict) -> dict:
         ISSUE_CREATE_MUTATION,
         {
             "input": {
+                "workspaceSlug": WORKSPACE_SLUG,
+                "teamId": team_id,
                 "title": spec["title"],
                 "description": spec["description"],
                 "priority": spec["priority"],
@@ -390,7 +444,17 @@ def move_issue(client: GraphqlClient, issue_id: str, state_id: str) -> None:
     """
     data = client.execute(
         ISSUE_UPDATE_MUTATION,
-        {"id": issue_id, "input": {"workflowStateId": state_id}},
+        {
+            "id": issue_id,
+            "input": {
+                # Required since tenancy, and for the reason the input type
+                # states: the workspace is what the request is authorized
+                # against, never inferred from the issue id -- otherwise an
+                # id alone would be enough to reach across a tenant.
+                "workspaceSlug": WORKSPACE_SLUG,
+                "workflowStateId": state_id,
+            },
+        },
     )
     payload = data["issueUpdate"]
 
@@ -412,10 +476,24 @@ def seed_issues(client: GraphqlClient) -> int:
     would be rejected for.
     """
     states = workflow_states_by_team(client)
+
+    # The team every demo issue is filed into. `issueCreate` no longer picks
+    # one -- `teamId` is required -- so the choice is made here, once, and is
+    # the team `bootstrap_workspace` created. `next` rather than indexing,
+    # because a workspace with no team is a broken bootstrap and deserves the
+    # sentence below rather than an IndexError.
+    teams = client.execute(TEAMS_QUERY, {"slug": WORKSPACE_SLUG})["teams"]
+    team_id = next((team["id"] for team in teams if team["key"] == TEAM_KEY), None)
+
+    if team_id is None:
+        raise SeedError(
+            f"Workspace '{WORKSPACE_SLUG}' has no team '{TEAM_KEY}', so there "
+            "is nowhere to file the demo issues."
+        )
     created = 0
 
     for spec in DEMO_ISSUES:
-        issue = create_issue(client, spec)
+        issue = create_issue(client, spec, team_id)
         created += 1
 
         target = states.get(issue["teamId"], {}).get(spec["category"])
@@ -457,6 +535,73 @@ def assert_loopback(url: str) -> None:
         )
 
 
+def bootstrap_workspace(client: GraphqlClient) -> str:
+    """Make sure the demo workspace and its team exist, and say what happened.
+
+    This step did not use to exist, and its absence is what left a fresh
+    local stack showing an empty product. Migration 002 created one
+    workspace and every resolver was bound to it, so a seed could assume the
+    tenant was simply there. Since onboarding took that job, a newly
+    registered account is a member of nothing -- and `issues(workspaceSlug:
+    "vector")` answers "Workspace not found", which is the correct refusal
+    for a workspace that does not exist and reads like a broken API.
+
+    Both halves are create-if-absent rather than create-blindly, because
+    `sign_in` above logs into an existing demo account on every run after
+    the first, and that account already owns these. The workspace is checked
+    through `myWorkspaces` rather than by catching a duplicate-slug error:
+    the slug is unique across the whole installation, so a collision could
+    equally mean somebody else's workspace already holds it, and treating
+    that as "mine, carry on" would file demo issues into it. `myWorkspaces`
+    answers the question actually being asked -- is this account already in
+    a workspace called `vector`.
+    """
+    mine = client.execute(MY_WORKSPACES_QUERY, {})["myWorkspaces"]
+    slugs = {membership["workspace"]["slug"] for membership in mine}
+
+    if WORKSPACE_SLUG in slugs:
+        created = f"Workspace '{WORKSPACE_SLUG}' already exists."
+    else:
+        payload = client.execute(
+            WORKSPACE_CREATE_MUTATION,
+            {"input": {"name": WORKSPACE_NAME, "slug": WORKSPACE_SLUG}},
+        )["workspaceCreate"]
+
+        if payload["workspace"] is None:
+            raise SeedError(
+                "Could not create the demo workspace: "
+                + _issue_messages(payload["errors"])
+            )
+
+        created = f"Created workspace '{WORKSPACE_SLUG}'."
+
+    # The team is asked for through the same query the issue seeding uses, so
+    # there is one definition of "which teams are here" rather than two that
+    # can disagree.
+    teams = client.execute(TEAMS_QUERY, {"slug": WORKSPACE_SLUG})["teams"]
+
+    if any(team["key"] == TEAM_KEY for team in teams):
+        return f"{created} Team '{TEAM_KEY}' already exists."
+
+    payload = client.execute(
+        TEAM_CREATE_MUTATION,
+        {
+            "input": {
+                "workspaceSlug": WORKSPACE_SLUG,
+                "name": TEAM_NAME,
+                "key": TEAM_KEY,
+            }
+        },
+    )["teamCreate"]
+
+    if payload["team"] is None:
+        raise SeedError(
+            "Could not create the demo team: " + _issue_messages(payload["errors"])
+        )
+
+    return f"{created} Created team '{TEAM_KEY}'."
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Seed the local demo workspace through the GraphQL API.",
@@ -472,19 +617,33 @@ def main(argv: list[str]) -> int:
 
     client = GraphqlClient(arguments.api_url)
 
-    # Asked before anything is written, and the whole of this script's
-    # idempotency. An issue already present means a previous run seeded this
-    # database (or the owner has been using it), and either way filing nine
-    # more would be the wrong answer.
-    existing = client.execute(EXISTING_ISSUES_QUERY, {})["issues"]["nodes"]
+    # Signing in comes FIRST, and it did not use to. The idempotency check
+    # below asks `issues`, which every resolver now reaches through an
+    # AuthorizedWorkspaceScope -- so an unauthenticated caller is refused
+    # rather than answered, and this script aborted before it wrote anything
+    # with "Authentication required". A fresh local stack therefore came up
+    # with no demo data at all, which reads as an empty product rather than
+    # as a broken seed.
+    #
+    # Ordering them this way is safe because `sign_in` is register-or-login
+    # and writes nothing that a second run would duplicate: the account is
+    # the same account, and the check that guards the nine issues still runs
+    # before a single one of them is filed.
+    print(f"    {sign_in(client)}")
+    print(f"    {bootstrap_workspace(client)}")
+
+    # The whole of this script's idempotency. An issue already present means
+    # a previous run seeded this database (or the owner has been using it),
+    # and either way filing nine more would be the wrong answer.
+    existing = client.execute(EXISTING_ISSUES_QUERY, {"slug": WORKSPACE_SLUG})[
+        "issues"
+    ]["nodes"]
 
     if existing:
         print(f"    Workspace already has issues ({existing[0]['identifier']}).")
         print("    Nothing seeded.")
         _print_credentials()
         return 0
-
-    print(f"    {sign_in(client)}")
 
     created = seed_issues(client)
 

@@ -47,7 +47,7 @@ from uuid import UUID
 import asyncpg
 import pytest
 
-from app.domain.errors import TeamNotFoundError
+from app.domain.errors import ValidationError
 from app.domain.pagination import IssuePage
 from app.domain.tenancy import WorkspaceScope
 from app.repositories.issues import IssueRepository
@@ -605,15 +605,24 @@ async def test_filing_against_another_workspaces_team_is_refused(tenanted):
     The service now refuses this one statement earlier than the foreign key
     does, and that is worth being precise about. Creating an issue resolves
     the team's default workflow state first, and that lookup is scoped by
-    workspace, so a team from another tenant resolves to nothing and raises
-    TeamNotFoundError before any INSERT is attempted. That is not a
-    substitute for the constraint and must not become one: the lookup is
-    needed for its value, not as a check, and the second half of this test
-    asserts the server still refuses the pair on its own.
+    workspace, so a team from another tenant resolves to nothing before any
+    INSERT is attempted. That is not a substitute for the constraint and must
+    not become one: the lookup is needed for its value, not as a check, and
+    the second half of this test asserts the server still refuses the pair on
+    its own.
+
+    What that early refusal *is* changed here. It used to raise
+    `TeamNotFoundError`, which nothing above the service mapped, so a client
+    sending another workspace's team id got "Internal server error" -- found
+    by doing exactly that against a running stack. It is now a
+    `ValidationError` naming `teamId`, and this test asserts the field and
+    the code rather than just the type: the message must be identical to the
+    one a team that exists NOWHERE produces, or the error becomes a probe for
+    which team ids exist in other tenants.
     """
     before = await tenanted.connection.fetchval("SELECT count(*) FROM issues")
 
-    with pytest.raises(TeamNotFoundError):
+    with pytest.raises(ValidationError) as foreign_team:
         await tenanted.service.create(
             scope=SCOPE_A,
             team_id=TEAM_B,
@@ -621,6 +630,26 @@ async def test_filing_against_another_workspaces_team_is_refused(tenanted):
             description=None,
             priority=1,
         )
+
+    assert [(i.field, i.code) for i in foreign_team.value.issues] == [
+        ("teamId", "NOT_FOUND")
+    ]
+
+    # The same request with a team id belonging to nobody at all. The two
+    # answers must be indistinguishable; a client that can tell them apart
+    # can enumerate other workspaces' teams one guess at a time.
+    with pytest.raises(ValidationError) as absent_team:
+        await tenanted.service.create(
+            scope=SCOPE_A,
+            team_id=_issue_id(997),
+            title="Filed against nothing",
+            description=None,
+            priority=1,
+        )
+
+    assert [
+        (i.field, i.code, i.message) for i in absent_team.value.issues
+    ] == [(i.field, i.code, i.message) for i in foreign_team.value.issues]
 
     assert await tenanted.connection.fetchval("SELECT count(*) FROM issues") == before
 
