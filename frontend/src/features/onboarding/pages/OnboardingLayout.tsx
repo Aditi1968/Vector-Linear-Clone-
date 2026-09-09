@@ -1,6 +1,12 @@
 import { Navigate, Outlet, useLocation, useOutletContext } from 'react-router-dom'
 
-import { ErrorState, Spinner, VectorMark, VisuallyHidden } from '../../../components'
+import {
+  CheckIcon,
+  ErrorState,
+  Spinner,
+  VectorMark,
+  VisuallyHidden,
+} from '../../../components'
 import { useOnboardingProgress } from '../api'
 import type { OnboardingMembership, OnboardingStep } from '../lib/progress'
 import {
@@ -27,6 +33,19 @@ const STEP_LABELS: Record<OnboardingStep, string> = {
   team: 'Team',
   invite: 'Invite',
   integrations: 'Integrations',
+}
+
+/**
+ * `01`, not `1`.
+ *
+ * The scale down the rail is read as a column of numerals, and a column that
+ * alternates between one and two glyphs is not a scale, it is a list that
+ * happens to be numbered. Zero-padding is a drawing decision and never
+ * reaches a screen reader: every one of these is `aria-hidden`, and the
+ * position is announced by the `<ol>` and by the sentence below it.
+ */
+function pad(value: number): string {
+  return String(value).padStart(2, '0')
 }
 
 /**
@@ -126,54 +145,94 @@ export function OnboardingLayout() {
   const position = ONBOARDING_STEPS.indexOf(step) + 1
 
   return (
-    <main className={styles.page}>
-      <div className={styles.frame}>
+    <div className={styles.shell}>
+      {/*
+       * The rail: brand at the top, the scale in the middle, the counter at
+       * the foot. Not a `<nav>` and not an `<aside>` -- there is nothing to
+       * navigate to and nothing complementary about it. It is a progress
+       * readout, and the `<ol>` inside it is the part that carries meaning.
+       */}
+      <div className={styles.rail}>
         <p className={styles.brand}>
-          <VectorMark />
+          <VectorMark className={styles.brandMark} />
           <span>Vector</span>
         </p>
 
         {/*
-         * Step progress, conveyed rather than merely drawn.
+         * Progress as a calibrated scale, read top to bottom.
          *
          * An ordered list, so the count and each item's position are in the
          * accessibility tree for free; `aria-current="step"` on the one being
          * shown, which is the attribute value that exists for exactly this;
-         * and a visually-hidden "Step 2 of 4", because numbered dots do not
-         * say how far along this is to anyone who cannot see them.
+         * and a visually-hidden "Step 2 of 4" below, because a numeral and a
+         * dot do not say how far along this is to anyone who cannot see them.
          *
-         * Not a `<nav>` of links: the steps are not navigable -- the guard
+         * The tick on a finished step is decoration with a word behind it.
+         * Green and a check mark are two ways of saying the same thing and
+         * both are visual, so the state that a sighted reader gets from the
+         * glyph is spelled out for everyone else -- otherwise "done" is
+         * carried by colour alone, which is the failure this codebase draws
+         * different silhouettes per status category to avoid.
+         *
+         * Not a list of links: the steps are not navigable -- the guard above
          * decides which one is reachable -- and rendering them as links that
          * silently redirect would be lying about what they do.
          */}
         <ol aria-label="Setup steps" className={styles.steps}>
-          {ONBOARDING_STEPS.map((candidate, index) => (
-            <li
-              aria-current={candidate === step ? 'step' : undefined}
-              className={styles.stepItem}
-              data-state={
-                candidate === step
-                  ? 'current'
-                  : index < position - 1
-                    ? 'done'
-                    : 'upcoming'
-              }
-              key={candidate}
-            >
-              <span aria-hidden="true" className={styles.stepMarker}>
-                {index + 1}
-              </span>
-              {STEP_LABELS[candidate]}
-            </li>
-          ))}
+          {ONBOARDING_STEPS.map((candidate, index) => {
+            const state =
+              candidate === step
+                ? 'current'
+                : index < position - 1
+                  ? 'done'
+                  : 'upcoming'
+
+            return (
+              <li
+                aria-current={candidate === step ? 'step' : undefined}
+                className={styles.stepItem}
+                data-state={state}
+                key={candidate}
+              >
+                <span aria-hidden="true" className={styles.stepIndex}>
+                  {pad(index + 1)}
+                </span>
+                <span className={styles.stepLabel}>{STEP_LABELS[candidate]}</span>
+                <span className={styles.stepMark}>
+                  {state === 'done' && (
+                    <>
+                      <CheckIcon className={styles.stepTick} />
+                      <VisuallyHidden>Completed</VisuallyHidden>
+                    </>
+                  )}
+                  {state === 'current' && (
+                    <span aria-hidden="true" className={styles.stepDot} />
+                  )}
+                </span>
+              </li>
+            )
+          })}
         </ol>
 
         <VisuallyHidden>
           <p>{`Step ${position} of ${ONBOARDING_STEPS.length}: ${STEP_LABELS[step]}`}</p>
         </VisuallyHidden>
 
-        <Outlet context={{ membership } satisfies OnboardingContext} />
+        {/*
+         * The same fact as the sentence above it, drawn. `aria-hidden`, so it
+         * is not announced twice -- and because "Step 01 / 04" is a legend on
+         * an instrument, not a sentence anyone wants read aloud.
+         */}
+        <p aria-hidden="true" className={styles.counter}>
+          {`Step ${pad(position)} / ${pad(ONBOARDING_STEPS.length)}`}
+        </p>
       </div>
-    </main>
+
+      <main className={styles.content}>
+        <div className={styles.frame}>
+          <Outlet context={{ membership } satisfies OnboardingContext} />
+        </div>
+      </main>
+    </div>
   )
 }

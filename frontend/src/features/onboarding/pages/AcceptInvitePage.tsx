@@ -89,7 +89,7 @@ export function AcceptInvitePage() {
     <main className={styles.page}>
       <div className={styles.frame}>
         <p className={styles.brand}>
-          <VectorMark />
+          <VectorMark className={styles.brandMark} />
           <span>Vector</span>
         </p>
 

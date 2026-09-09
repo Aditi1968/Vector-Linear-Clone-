@@ -1,16 +1,22 @@
 /*
  * Styles for the auth feature.
  *
- * Every colour, space, radius and size is a token from
- * `src/styles/tokens.css` -- no literal hex, no magic pixel value -- which is
- * what makes a theme change a change to that file rather than a sweep. Dark
- * mode therefore needs nothing here.
+ * Signed-out ground, so it speaks the same language as the entry screen in
+ * `design/instrument/Main.dc.html`: the engineering grid with its fade, mono
+ * micro-labels over every field, 6px radii on the controls and the card's own
+ * 16px. What it keeps from before is the card itself -- a sign-in form is a
+ * short, bounded task and the box around it is what says so.
  *
- * Deliberately absent because `src/styles/base.css` owns them: the focus
- * ring, heading and form-control resets, and the reduced-motion override.
+ * Every colour, space, radius and size is a token from `src/styles/tokens.css`
+ * -- no literal hex, no magic pixel value -- which is what makes a theme
+ * change a change to that file rather than a sweep.
+ *
+ * Deliberately absent because `src/styles/base.css` owns them: the focus ring,
+ * heading and form-control resets, and the reduced-motion override.
  */
 
 .screen {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--space-6);
@@ -18,15 +24,47 @@
   justify-content: center;
   min-height: 100dvh;
   padding: var(--space-8) var(--space-6);
-  background-color: var(--color-bg-sunken);
+  overflow: hidden;
+  /* The page ground and not the rail's, because `--pattern-grid-fade`
+   * dissolves the grid into `--color-bg-app`. A fade that lands on a colour
+   * the page is not painted in leaves a visible ellipse. */
+  background-color: var(--color-bg-app);
+}
+
+/*
+ * The grid and the fade that dissolves it, as pseudo-elements: painted, never
+ * in the accessibility tree, no extra DOM. Used as a pair, always -- an
+ * unfaded grid running to the edges reads as a texture applied to the page
+ * rather than as a surface the card is sitting on.
+ */
+.screen::before,
+.screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.screen::before {
+  background-image: var(--pattern-grid);
+  background-size: var(--pattern-grid-size) var(--pattern-grid-size);
+}
+
+.screen::after {
+  background-image: var(--pattern-grid-fade);
 }
 
 .card {
+  position: relative;
+  z-index: var(--z-raised);
   width: 100%;
   max-width: 24rem;
   padding: var(--space-8);
-  border: var(--border-width) solid var(--color-border);
-  border-radius: var(--radius-xl);
+  border: var(--border-width) solid var(--color-border-strong);
+  /* `--radius-3xl` is named for exactly this: the signed-out card. It is the
+   * only 16px corner in the product, and it is bigger than the app's because
+   * it is the only card on its screen rather than one of forty. */
+  border-radius: var(--radius-3xl);
   background-color: var(--color-surface);
   box-shadow: var(--shadow-md);
 }
@@ -50,6 +88,8 @@
 
 .title {
   font-size: var(--text-xl);
+  letter-spacing: var(--tracking-tight);
+  line-height: var(--leading-tight);
 }
 
 .lead {
@@ -70,10 +110,25 @@
   gap: var(--space-3);
 }
 
+/*
+ * The mono micro-label: the direction's structural voice, and the thing that
+ * makes a form read as an instrument panel rather than as a web form. The
+ * tracking is what does the work -- unspaced capitals at 10.5px set solid and
+ * read as shouting.
+ *
+ * `text-transform` and not uppercase text in the markup, because the label's
+ * accessible name is computed from the DOM: "Email" is what a screen reader
+ * announces and what `getByLabel('Email')` finds, whatever the glyphs on
+ * screen are doing. Renaming these is a test failure in two suites; restyling
+ * them is this rule.
+ */
 .label {
-  font-size: var(--text-xs);
+  color: var(--color-text-faint);
+  font-family: var(--font-mono);
+  font-size: var(--label-mono-md);
   font-weight: var(--weight-medium);
-  color: var(--color-text-secondary);
+  letter-spacing: var(--label-mono-tracking-md);
+  text-transform: uppercase;
 }
 
 .hint {
@@ -101,6 +156,8 @@
 }
 
 .footer {
+  position: relative;
+  z-index: var(--z-raised);
   color: var(--color-text-muted);
 }
 
