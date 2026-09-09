@@ -31,6 +31,8 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import asyncpg
 import certifi
 
+from scripts.apply_migration import compute_checksum, read_migration
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 MIGRATIONS_DIR = REPO_ROOT / "migrations"
@@ -258,18 +260,49 @@ async def report(dsn: str) -> int:
         print(f"schema_migrations_exists: {str(exists).lower()}")
 
         recorded: list[str] = []
+        checksum_states: dict[str, str] = {}
 
         if exists:
             rows = await conn.fetch(
-                "SELECT version FROM schema_migrations ORDER BY version"
+                "SELECT version, checksum FROM schema_migrations ORDER BY version"
             )
             recorded = [r["version"] for r in rows]
+
+            # Checksums verified HERE rather than by shelling out to
+            # `apply_migration --status`. That command answers the same
+            # question, but its ledger prologue runs CREATE TABLE IF NOT
+            # EXISTS and may adopt 001 -- writes, on a database this tool
+            # exists to examine before anyone decides writing is safe.
+            #
+            # Same sha256 over the same normalised text `apply_migration`
+            # records, so a match here means exactly what a match there does:
+            # the file has not changed since it was applied.
+            by_version = {
+                VERSION_PATTERN.match(path.name).group(1): path
+                for path in MIGRATIONS_DIR.glob("*.sql")
+            }
+
+            for row in rows:
+                path = by_version.get(row["version"])
+
+                if path is None:
+                    checksum_states[row["version"]] = "no file"
+                elif compute_checksum(read_migration(path)) == row["checksum"]:
+                    checksum_states[row["version"]] = "ok"
+                else:
+                    checksum_states[row["version"]] = "MISMATCH"
+
+            bad = sorted(v for v, s in checksum_states.items() if s != "ok")
 
             print(f"schema_migrations_row_count: {len(recorded)}")
             print(
                 f"highest_recorded_migration:  {recorded[-1] if recorded else '(none)'}"
             )
             print(f"recorded migration numbers:  {', '.join(recorded) or '(none)'}")
+            print(
+                "checksums:                   "
+                + (f"all {len(recorded)} ok" if not bad else f"BAD: {', '.join(bad)}")
+            )
         else:
             print("schema_migrations_row_count: 0")
             print("highest_recorded_migration:  (no ledger table)")
@@ -379,6 +412,36 @@ async def report(dsn: str) -> int:
             print(f"    pending: {', '.join(pending)}")
         else:
             print("  Ledger and schema agree, and nothing is pending.")
+
+        # The three facts a redeploy actually turns on, stated separately from
+        # the ledger arithmetic above because each can be false on its own.
+        print()
+
+        bad_checksums = sorted(v for v, s in checksum_states.items() if s != "ok")
+        extensions = sorted(live["extension"])
+
+        print(f"  extensions present:       {', '.join(extensions) or '(none)'}")
+        print(
+            "  pgvector:                 "
+            + ("PRESENT" if "vector" in live["extension"] else "MISSING")
+        )
+
+        # What the image's CMD will do. It applies every migrations/*.sql in
+        # order through the runner, which skips any version already in the
+        # ledger -- so "no-op" is exactly the conjunction below, and any one
+        # of these being false means the container writes DDL on boot.
+        no_op = (
+            exists
+            and not pending
+            and not bad_checksums
+            and not partial
+            and not unrecorded_but_present
+        )
+
+        print(
+            "  startup migrations:       "
+            + ("NO-OP (all 32 skipped)" if no_op else "WOULD ATTEMPT WRITES")
+        )
 
         return 0
     finally:
