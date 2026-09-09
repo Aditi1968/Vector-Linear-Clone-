@@ -68,3 +68,42 @@ keywords = ["postgres"]
     # The literal word used in test fixtures to stand in for a DSN password.
     '''^PLACEHOLDER$''',
   ]
+
+
+# The same discipline, applied to a rule this repository does not own.
+#
+# gitleaks' default `generic-api-key` fires on three test fixtures, and it is
+# right to look at all three: each is an identifier whose name says "secret"
+# or "key" assigned a long opaque-looking literal, which is exactly the shape
+# of a credential someone pastes into a file by accident.
+#
+# `targetRules` is what keeps this from being the blind spot the `[allowlist]`
+# form would be. A bare top-level allowlist suppresses findings from EVERY
+# rule, including the vendor rules that recognise a real GitHub PAT or AWS
+# key; this one is inert for every rule except the single named one. Matched
+# against the captured secret rather than a path, for the reason spelled out
+# above the rule allowlist: a path entry would also hide a real credential
+# committed into one of these files by accident, and these are test files,
+# which is where a careless real value is most likely to land.
+#
+# Each value below was read before it was listed:
+[[allowlists]]
+description = "Synthetic fixture values that only look like credentials"
+targetRules = ["generic-api-key"]
+regexTarget = "secret"
+regexes = [
+  # tests/test_slack_signature.py and tests/test_slack_rest.py, the same
+  # literal in both. It is the example signing secret from Slack's own
+  # request-verification documentation, and it cannot be a real one: a Slack
+  # signing secret is 32 hex characters, and this contains `yyyzzz`. The
+  # signature tests need a fixed key on both sides of an HMAC; which key is
+  # arbitrary, so the published example is the honest choice.
+  '''^8f742231b10e8888abcd99yyyzzz85a5$''',
+
+  # tests/test_documents.py, in the test proving a refusal never quotes the
+  # document it refused. The string is a canary searched for in the error
+  # message -- if it appears, attacker-chosen text is being echoed back
+  # through the API. It is named `secret` because that is what it stands in
+  # for in the scenario, which is precisely why the scanner looked twice.
+  '''^totally-unique-marker-9f3a$''',
+]

@@ -1087,10 +1087,36 @@ def test_the_allowlist_is_scoped_to_one_rule_and_matched_against_the_secret():
     config = GITLEAKS_CONFIG.read_text(encoding="utf-8")
 
     assert "[[rules.allowlists]]" in config
-    assert not re.search(r"(?m)^\[allowlist\]", config), "top-level allowlist added"
-    assert not re.search(r"(?m)^\[\[allowlist", config), "top-level allowlist added"
     assert 'regexTarget = "secret"' in config
     assert "paths" not in config, "a path-scoped allowlist hides real credentials too"
+
+    # `[allowlist]` -- singular, a table -- is the unscoped form, and it is
+    # banned outright: it suppresses findings from every rule at once.
+    assert not re.search(r"(?m)^\[allowlist\]", config), "top-level allowlist added"
+
+    # `[[allowlists]]` -- plural, an array of tables -- can carry
+    # `targetRules`, which names the rules it applies to and leaves every
+    # other rule untouched. That is a narrow allowlist, not a blind spot, and
+    # it is the only way to exempt a value from a DEFAULT rule without
+    # redefining the rule and thereby narrowing its detection.
+    #
+    # This test previously banned the whole spelling by pattern. That was a
+    # proxy for the property, and it was wrong in the direction that matters:
+    # it forbade the correctly-scoped form as well as the dangerous one. So
+    # the assertion is now the property itself -- every top-level allowlist
+    # block, if any exist, names the rules it is scoped to.
+    blocks = re.split(r"(?m)^\[\[allowlists\]\]", config)[1:]
+
+    for block in blocks:
+        # Up to the next top-level table, so one block's keys are not read
+        # off the next one.
+        body = re.split(r"(?m)^\[", block)[0]
+
+        assert "targetRules" in body, (
+            "a top-level [[allowlists]] block without targetRules applies to "
+            "every rule, including the vendor rules that recognise a real "
+            "GitHub or AWS credential"
+        )
 
 
 def test_the_allowlist_holds_only_anchored_placeholder_values():
@@ -1100,8 +1126,23 @@ def test_the_allowlist_holds_only_anchored_placeholder_values():
     would skip every DSN password containing the project's own name.
     """
     config = GITLEAKS_CONFIG.read_text(encoding="utf-8")
-    block = config.split("regexes = [", 1)[1].split("]", 1)[0]
-    values = re.findall(r"'''(.*?)'''", block, re.DOTALL)
+
+    # EVERY regexes block, not just the first. This used to read only the
+    # first one, which was fine while there was only one -- and would have
+    # waved through an unanchored entry in any allowlist added after it,
+    # silently, since a passing test says nothing about what it skipped.
+    blocks = [chunk.split("]", 1)[0] for chunk in config.split("regexes = [")[1:]]
+
+    assert len(blocks) >= 2, (
+        "fewer allowlist blocks than expected; if one was removed, this "
+        "count comes down deliberately rather than by the test finding less"
+    )
+
+    values = [
+        value
+        for block in blocks
+        for value in re.findall(r"'''(.*?)'''", block, re.DOTALL)
+    ]
 
     assert values, "the allowlist regexes could not be read"
 
