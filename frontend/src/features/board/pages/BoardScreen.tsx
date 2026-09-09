@@ -85,6 +85,8 @@ export function BoardScreen() {
     projects,
     memberById,
     isLoading: isLoadingContext,
+    errorMessage: contextError,
+    retry: retryContext,
   } = useWorkspaceContext()
 
   /**
@@ -100,7 +102,19 @@ export function BoardScreen() {
       ? teams[0]
       : teams.find((candidate) => candidate.key === view.team)
 
-  const isUnknownTeam = view.team !== null && team === undefined
+  /*
+    `teams.length > 0` is load-bearing, not a tidiness check.
+
+    Without it this is true from the first frame: `teams` is empty while the
+    lookup is in flight, so `team` is undefined, so the screen announces "No
+    team with the key ENG" *underneath its own loading spinner* -- and goes on
+    announcing it forever if the request fails. Both are claims about which
+    teams the workspace has, made by a screen that has not been told.
+
+    Once the list has actually arrived and is empty, "no teams at all" is the
+    truer statement and the empty state below says it instead.
+  */
+  const isUnknownTeam = view.team !== null && teams.length > 0 && team === undefined
   const states = team?.workflowStates ?? NO_STATES
 
   /**
@@ -265,10 +279,22 @@ export function BoardScreen() {
           </p>
         )}
 
+        {/* The team lookup failed. How many teams this workspace has is
+          * therefore not something this screen knows, and the empty state
+          * below would assert it. */}
+        {!isLoadingContext && contextError !== null && teams.length === 0 && (
+          <ErrorState
+            description={contextError}
+            onRetry={retryContext}
+            title="Could not load teams"
+          />
+        )}
+
         {/* A board is a team's workflow states. Without a team there is
           * nothing to draw columns from, and this says that rather than
-          * rendering an empty frame. */}
-        {!isLoadingContext && teams.length === 0 && (
+          * rendering an empty frame. Only once the request answered with
+          * none -- an empty array from a failed request is not an answer. */}
+        {!isLoadingContext && contextError === null && teams.length === 0 && (
           <EmptyState
             description="A board is one team's workflow states, so there is nothing to show until a team exists."
             icon={<TeamIcon />}

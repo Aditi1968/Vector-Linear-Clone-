@@ -2,11 +2,21 @@ import { useId, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { Button, Input, Select, Textarea } from '../../../components'
+import { partitionFieldErrors } from '../../../lib/graphql'
 import { memberLabel } from '../../issues/api'
 import type { WorkspaceMember } from '../../issues/api'
 import type { InitiativeDraft, InitiativeStatus, InitiativeValidationError } from '../api'
 import { INITIATIVE_STATUSES, initiativeStatusLabel } from '../lib/initiatives'
 import styles from '../initiatives.module.css'
+
+/**
+ * The fields this form draws a control for.
+ *
+ * Module scope so the memo below keys on a stable array. Anything the server
+ * names that is not in here has nowhere to sit, and goes to the form-level
+ * alert rather than being dropped -- see `partitionFieldErrors`.
+ */
+const FIELDS = ['name', 'targetDate', 'ownerId'] as const
 
 export interface InitiativeFormProps {
   initialName?: string
@@ -68,17 +78,10 @@ export function InitiativeForm({
   const [ownerId, setOwnerId] = useState(initialOwnerId ?? '')
 
   /** Errors the server named, by the field it named them on. */
-  const errorByField = useMemo(() => {
-    const map = new Map<string, string>()
-
-    for (const entry of errors) {
-      if (!map.has(entry.field)) {
-        map.set(entry.field, entry.message)
-      }
-    }
-
-    return map
-  }, [errors])
+  const { byField: errorByField, unattached } = useMemo(
+    () => partitionFieldErrors(errors, FIELDS),
+    [errors],
+  )
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -101,11 +104,15 @@ export function InitiativeForm({
   const targetDateError = errorByField.get('targetDate')
   const ownerError = errorByField.get('ownerId')
 
+  // A transport failure and a refusal no control on this form owns are the
+  // same thing to the reader: the server said no, and no input is at fault.
+  const formMessages = errorMessage === null ? unattached : [errorMessage, ...unattached]
+
   return (
     <form className={styles.form} noValidate onSubmit={handleSubmit}>
-      {errorMessage !== null && (
+      {formMessages.length > 0 && (
         <p className={styles.formError} role="alert">
-          {errorMessage}
+          {formMessages.join(' ')}
         </p>
       )}
 

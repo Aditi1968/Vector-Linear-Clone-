@@ -57,8 +57,19 @@ import styles from '../triage.module.css'
  */
 export function TriagePage() {
   // `activeMembers`: every use of this list on this screen is the assign
-  // menu, and triage is where work gets handed to somebody to do next.
-  const { teams, activeMembers, isLoading: isLoadingContext } = useWorkspaceContext()
+  // menu, and triage is where work gets handed to somebody to do next. A
+  // member who has left must not be offered.
+  //
+  // `errorMessage`/`retry` are taken too, because this screen used to read a
+  // failed context lookup as an empty one and tell the user their workspace
+  // had no teams.
+  const {
+    teams,
+    activeMembers,
+    isLoading: isLoadingContext,
+    errorMessage: contextError,
+    retry: retryContext,
+  } = useWorkspaceContext()
   const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null)
 
   // The first team until someone chooses otherwise. A default, not a
@@ -203,10 +214,20 @@ export function TriagePage() {
           </div>
         )}
 
+        {/* The team lookup failed, so how many teams this workspace has is not
+            something this screen knows. An empty state here would assert it. */}
+        {!isLoadingContext && contextError !== null && teams.length === 0 && (
+          <ErrorState
+            title="Could not load teams"
+            description={contextError}
+            onRetry={retryContext}
+          />
+        )}
+
         {/* A workspace with no teams has no queue to show, and says so rather
             than spinning: `triageIssues(teamId:)` cannot be asked without
-            one. */}
-        {!isLoadingContext && teams.length === 0 && (
+            one. Only once the request actually answered with none. */}
+        {!isLoadingContext && contextError === null && teams.length === 0 && (
           <EmptyState
             icon={<InboxIcon />}
             title="No teams in this workspace"

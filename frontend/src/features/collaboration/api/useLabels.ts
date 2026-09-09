@@ -11,7 +11,7 @@ import {
   LabelCreateDocument,
   WorkspaceLabelsDocument,
 } from './documents'
-import { settle } from './outcome'
+import { describeOutcome, settle } from './outcome'
 import type { MutationOutcome } from './outcome'
 import { useLoadMore } from './paging'
 import type { Label } from './types'
@@ -138,7 +138,29 @@ export function useLabels(workspaceSlug: string, issueId: string): UseLabelsResu
         return { status: 'failed', message: 'The label was not created.' }
       }
 
-      return attach(label.id)
+      const attached = await attach(label.id)
+
+      if (attached.status === 'ok') {
+        return attached
+      }
+
+      /*
+        The half-failure, said out loud.
+
+        There is no create-and-attach operation in the schema, so these are two
+        writes and the first one has already landed. Returning the attach
+        failure unchanged reads as "nothing happened" -- and the obvious next
+        move, typing the same name again, then meets `labels_workspace_name_key`
+        refusing a duplicate of a label the person was never told existed.
+
+        Flattened to `failed` rather than kept as `rejected`: the field the
+        attach named is `labelId`, which is not something this form asked
+        anybody for, and the panel renders either case as one sentence anyway.
+      */
+      return {
+        status: 'failed',
+        message: `“${name}” was created in the workspace but could not be added to this issue. ${describeOutcome(attached) ?? ''}`.trim(),
+      }
     },
     [attach, createMutation, workspaceSlug],
   )

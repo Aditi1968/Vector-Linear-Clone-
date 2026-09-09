@@ -2,6 +2,7 @@ import { useId, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 
 import { Button, Input, Select } from '../../../components'
+import { partitionFieldErrors } from '../../../lib/graphql'
 import type { WorkspaceTeam } from '../../issues/api'
 import { PRIORITY_VALUES, describePriority } from '../../issues/lib/priority'
 import type {
@@ -18,6 +19,18 @@ import type {
 } from '../api'
 import { GROUPING_VALUES, groupingLabel, toFilterInput } from '../lib/savedViews'
 import styles from '../savedViews.module.css'
+
+/**
+ * The one field this form draws an error slot for.
+ *
+ * Module scope so the memo below keys on a stable array. The other refusals
+ * `savedViewCreate`/`savedViewUpdate` can return -- `teamId` ("Team not
+ * found"), and `workspaceSlug` ("You are no longer a member of this
+ * workspace") from `app/services/saved_views.py` -- name no control here, so
+ * they go to the form-level alert rather than being dropped. Before that they
+ * were dropped, and the form sat open having silently failed to save.
+ */
+const FIELDS = ['name'] as const
 
 /** The five categories a workflow state can belong to, as the schema names them. */
 const STATE_CATEGORIES: readonly WorkflowStateCategory[] = [
@@ -154,17 +167,10 @@ export function SavedViewForm({
   const isFilterLocked = initialFilter !== null && preserved === null
 
   /** Errors the server named, by the field it named them on. */
-  const errorByField = useMemo(() => {
-    const map = new Map<string, string>()
-
-    for (const entry of errors) {
-      if (!map.has(entry.field)) {
-        map.set(entry.field, entry.message)
-      }
-    }
-
-    return map
-  }, [errors])
+  const { byField: errorByField, unattached } = useMemo(
+    () => partitionFieldErrors(errors, FIELDS),
+    [errors],
+  )
 
   function buildFilter(): IssueFilterInput | undefined {
     // Omitted from the patch entirely, so `SavedViewUpdateInput` leaves the
@@ -210,11 +216,15 @@ export function SavedViewForm({
 
   const nameError = errorByField.get('name')
 
+  // A transport failure and a refusal no control on this form owns are the
+  // same thing to the reader: the server said no, and no input is at fault.
+  const formMessages = errorMessage === null ? unattached : [errorMessage, ...unattached]
+
   return (
     <form className={styles.form} noValidate onSubmit={handleSubmit}>
-      {errorMessage !== null && (
+      {formMessages.length > 0 && (
         <p className={styles.formError} role="alert">
-          {errorMessage}
+          {formMessages.join(' ')}
         </p>
       )}
 
