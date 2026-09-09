@@ -122,6 +122,28 @@ services:
       - key: EMBEDDING_WORKER_ENABLED
         value: "true"
 
+      # Read by UVICORN, not by app/config.py, and committed for the same
+      # reason as the line above: it is a fact about this platform's topology
+      # rather than a credential.
+      #
+      # Render terminates TLS at its edge and forwards over plain HTTP with
+      # `X-Forwarded-Proto: https`. uvicorn only believes that header from a
+      # peer in `forwarded_allow_ips`, which defaults to 127.0.0.1 -- and
+      # Render's proxy is not 127.0.0.1. So without this, `request.url.scheme`
+      # stays `http` and `app/http_headers.py` sends NO
+      # Strict-Transport-Security on a deployment that is HTTPS-only.
+      # Measured, not assumed: with the default the header is absent and with
+      # this it is present, and it is still correctly absent on a request
+      # that did not arrive over TLS.
+      #
+      # `*` is safe HERE and would not be everywhere: the container publishes
+      # no port of its own and is reachable only through Render's proxy, so
+      # there is no peer that could forge these headers. It is deliberately
+      # not put in the Dockerfile, where it would also apply to the compose
+      # and Kubernetes stacks, whose trust boundaries are their own.
+      - key: FORWARDED_ALLOW_IPS
+        value: "*"
+
       # GITHUB_* and SLACK_* are deliberately absent from this file, and their
       # absence is load-bearing rather than an omission. Both integrations are
       # optional and every one of their settings defaults to None, which is

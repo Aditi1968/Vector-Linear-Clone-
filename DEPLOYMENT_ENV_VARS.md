@@ -50,6 +50,7 @@ instead of running with a protection silently off.
 |---|---|
 | `PUBLIC_BASE_URL` | This deployment's origin, `https://<render-host>`, with no trailing path. Used for exactly one thing: the deep link in a Slack message, which is built by a background loop that is serving no request and so has no `Host` header to infer an origin from. Unset means messages go out **without** a link rather than with a guessed one. Not knowable until Render has assigned the host, so it is filled in after the first deploy. |
 | `EMBEDDING_WORKER_ENABLED` | `true` on this deployment, and already committed in `render.yaml` because it is a decision rather than a credential. Read **The 512 MB verdict** before changing it. Must be `true` or `false` — never blank, which pydantic rejects and which would stop the boot. |
+| `FORWARDED_ALLOW_IPS` | `*`, committed in `render.yaml`. Read by **uvicorn**, not by `app/config.py`. Render terminates TLS at its edge and forwards plain HTTP with `X-Forwarded-Proto: https`; uvicorn believes that header only from a peer in this list, which defaults to `127.0.0.1`. Without it `request.url.scheme` stays `http` and **no `Strict-Transport-Security` header is sent at all**. `*` is safe only because the container publishes no port and is reachable solely through Render's proxy. |
 
 ## OPTIONAL — GitHub App
 
@@ -284,6 +285,32 @@ Confirmed against the code rather than assumed:
 * **The image**: no `ENV` carries configuration, and the build context is an
   allowlist that re-excludes `.env`, `.env.*` and `*.pem` inside every
   directory it admits.
+* **HSTS**: sent, because `FORWARDED_ALLOW_IPS` is set. See above — without
+  it the header is silently absent.
+
+### One property that does NOT carry over — known, and accepted for staging
+
+`app/http_client_ip.py` reads `X-Real-IP` and trusts it, and its own docstring
+says exactly why that is safe in the deployments this repository ships:
+`frontend/nginx.conf` **overwrites** that header with `$remote_addr`, and the
+API is reachable only through nginx, so an outside caller cannot choose the
+value.
+
+**There is no nginx here.** Render's proxy adds `X-Forwarded-For` and does not
+scrub a client-supplied `X-Real-IP`, so on this deployment a caller can pick
+their own IP rate-limit bucket.
+
+What that does and does not cost, from `app/services/auth.py`: the IP budget
+is the *loose backstop*, not the primary control. The per-email-address budget
+and the argon2 semaphore in `app/services/passwords.py` are unaffected and are
+what actually bound a credential-stuffing attempt. So this is a weakened
+backstop on a staging deployment, not an open login endpoint.
+
+The fix is the one already recorded as a `ponytail:` note in that module — a
+trusted-proxy setting, so `X-Real-IP` is read only when a proxy is known to
+set it — and it is deliberately not made here, because that function is shared
+with the compose and Kubernetes stacks where the header *is* trustworthy and
+changing it blind would degrade them.
 
 ---
 
