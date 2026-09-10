@@ -1,7 +1,9 @@
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
+import structlog
 from fastapi import FastAPI
 
 from app.config import Settings, get_settings
@@ -147,9 +149,21 @@ def _build_schedule_worker() -> ScheduleWorker:
     )
 
 
+logger = structlog.get_logger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Start-up is timed and reported because it is the one thing about this
+    # process nobody can measure from outside. A deployment that takes minutes
+    # to answer /healthz looks identical, from a browser, to one that is down,
+    # to one whose platform is slow to route -- and the fix for each is
+    # different. Durations only: no configuration, no DSN, no secret.
+    started = time.monotonic()
+
     await connect()
+
+    connected_at = time.monotonic()
 
     # Builds the decoy hash the log-in path verifies against when no account
     # matches the submitted address. It costs one argon2 hash, and paying for
@@ -157,6 +171,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # process pays for two hashes where a wrong-password log-in pays for one,
     # which is exactly the timing difference the decoy exists to erase.
     await warm_password_hashing()
+
+    warmed_at = time.monotonic()
 
     # Both after `connect()`, because both take the pool; the embedding flag
     # is read from the same cached settings `connect()` resolved.
@@ -179,6 +195,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # two replicas racing leave the table in the one state either intended,
     # and there is nothing here worth a lease.
     sweep = asyncio.create_task(run_sweep_loop(_build_sweeper()))
+
+    # Emitted BEFORE the yield, which is the moment uvicorn considers startup
+    # complete and begins accepting requests -- so these numbers are exactly
+    # what stands between the process starting and /healthz answering.
+    #
+    # `pool_connect` covers the first real round trip to PostgreSQL, so on a
+    # serverless database it includes any resume from autosuspend. `argon2_warm`
+    # is one hash, deliberately paid here rather than by the first unknown
+    # -address login (see `warm_password_hashing`); it is small but it IS on the
+    # critical path, so it is measured rather than assumed.
+    logger.info(
+        "startup.ready",
+        pool_connect_seconds=round(connected_at - started, 3),
+        argon2_warm_seconds=round(warmed_at - connected_at, 3),
+        total_seconds=round(time.monotonic() - started, 3),
+        embedding_worker=worker is not None,
+    )
 
     try:
         yield

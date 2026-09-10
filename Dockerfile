@@ -133,12 +133,28 @@ EXPOSE 8000
 # nobody can describe, which is the one outcome worth crashing to avoid.
 #
 # No version is named: the set is whatever is in migrations/, in filename
-# order, applied one file at a time through the repository's own runner so
-# the ledger, the advisory lock and the per-file checksum all apply exactly
-# as they do anywhere else. Re-running is the normal case and is a no-op --
-# every restart and every redeploy runs this again, and an already-applied
-# version returns "nothing to do" rather than re-executing. Two replicas
-# racing are serialised by the runner's advisory lock.
+# order, through the repository's own runner so the ledger, the advisory lock
+# and the per-file checksum all apply exactly as they do anywhere else.
+# Re-running is the normal case and is a no-op -- every restart and every
+# redeploy runs this again, and an already-applied version returns "nothing to
+# do" rather than re-executing. Two replicas racing are serialised by the
+# runner's advisory lock.
+#
+# ONE PROCESS, not one per file, and that is a start-up fix rather than
+# tidying. This was a shell loop invoking the runner once per migration: 32
+# interpreter starts. Measured against the real database from a fast machine,
+# that loop cost 14.6s, of which 13.8s (432ms x 32) was interpreter start and
+# imports and under a second was database work -- nearly all of it "already
+# applied, do nothing". The overhead is CPU-bound and a Render free instance
+# has 0.1 CPU, so the same work runs into MINUTES there, and uvicorn is not
+# started until it finishes: /healthz answers nothing for the whole of it, on
+# every boot and every wake from sleep, even when the schema is current.
+#
+# `--all` is one process, one connection, and the ledger read and checksum
+# pass hoisted out of the per-file path (which was quadratic: 32 files x 32
+# checksums). Same measurement, same machine: 1.3s. The per-migration
+# TRANSACTION is unchanged -- a failure part-way leaves the migrations before
+# it committed and the failing one rolled back whole.
 #
 # `exec` so uvicorn REPLACES the shell rather than being its child: the
 # platform's SIGTERM has to reach the server, or every deploy ends in a
@@ -148,8 +164,6 @@ EXPOSE 8000
 # so that importing the composition root does not resolve settings as a
 # side effect -- so the factory form is required, not stylistic.
 CMD set -eu; \
-    for file in migrations/*.sql; do \
-        python -m scripts.apply_migration "$file"; \
-    done; \
+    python -m scripts.apply_migration --all; \
     exec uvicorn "app.main:create_app" "--factory" \
         --host 0.0.0.0 --port "${PORT:-8000}"
