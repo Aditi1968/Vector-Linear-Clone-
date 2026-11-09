@@ -17,6 +17,7 @@
     "graphql:check": "node scripts/graphql-codegen.mjs check",
     "test": "vitest run",
     "test:watch": "vitest --passWithNoTests",
+    "test:e2e:staging": "playwright test --project=staging --workers=2",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -41,8 +41,30 @@ import { defineConfig, devices } from '@playwright/test'
  */
 const baseURL = process.env.VECTOR_E2E_BASE_URL ?? 'http://127.0.0.1:5173'
 
+/*
+  Staging is a separate deployment, driven by a separate pair of projects
+  (`staging-setup` + `staging`) that live beside the local `chromium` project
+  below without touching it. Credentials and base URL come from e2e/.env,
+  loaded here so both this config and the sign-in setup see them. The file is
+  gitignored and absent in CI's local-stack run, so a missing file is not an
+  error -- only the staging projects need it, and they fail loudly if asked to
+  run without it.
+*/
+try {
+  process.loadEnvFile('./e2e/.env')
+} catch {
+  // No e2e/.env: local runs do not need one.
+}
+const stagingBaseURL = process.env.E2E_BASE_URL
+
 export default defineConfig({
   testDir: './e2e',
+
+  // The staging projects keep their specs in ./e2e/staging; everything else
+  // (the local `chromium` project) ignores that folder, so the two suites
+  // never pick up each other's files. The staging projects clear this with
+  // `testIgnore: []` so they can see their own.
+  testIgnore: '**/staging/**',
 
   /*
     One worker, and it is not a performance compromise.
@@ -121,6 +143,38 @@ export default defineConfig({
       // make when there is a rendering bug to catch with it.
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+    },
+
+    /*
+      Staging. Two projects in the standard setup-dependency shape: `staging`
+      depends on `staging-setup`, which signs in once and saves the session to
+      e2e/.auth/user.json, so every staging spec starts already authenticated
+      against the shared e2e-playground workspace.
+
+      These run only when selected (`--project=staging`); a bare
+      `playwright test` still runs the local `chromium` project unchanged.
+      Worker count is set on the `test:e2e:staging` npm script (Playwright has
+      no per-project `workers`), so the local project keeps `workers: 1` above.
+    */
+    {
+      name: 'staging-setup',
+      testDir: './e2e/staging',
+      testIgnore: [],
+      testMatch: /.*\.setup\.ts/,
+      use: { ...devices['Desktop Chrome'], baseURL: stagingBaseURL },
+    },
+    {
+      name: 'staging',
+      testDir: './e2e/staging',
+      testIgnore: [],
+      testMatch: /.*\.spec\.ts/,
+      dependencies: ['staging-setup'],
+      timeout: 60_000,
+      use: {
+        ...devices['Desktop Chrome'],
+        baseURL: stagingBaseURL,
+        storageState: 'e2e/.auth/user.json',
+      },
     },
   ],
 })
