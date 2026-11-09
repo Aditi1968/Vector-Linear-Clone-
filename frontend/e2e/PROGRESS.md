@@ -8,8 +8,8 @@ Branch: `e2e/full-button-coverage`. Live status; newest state wins.
 - [x] 3. Add `e2e/helpers.ts` (`expectMutation`)
 - [x] 4. GitHub issue #1 (re-login skips required team creation)
 
-## Phase 2 — Inventory
-- [ ] 5. `e2e/INVENTORY.md`: route → component → button → GraphQL op → result
+## Phase 2 — Inventory ✅
+- [x] 5. `e2e/INVENTORY.md` built (6 clusters inventoried). Static pass: NO broken controls — every control named + wired; one intentional native `<details>` (NO-HANDLER by design). Safety rules recorded (unique data, isolated logout, GitHub-skip, members).
 
 ## Phase 3 — Tests
 - [ ] 6. Per-route subagents (≤2 concurrent, own worktrees) write `e2e/<group>.spec.ts`
