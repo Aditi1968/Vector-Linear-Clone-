@@ -2,7 +2,7 @@ import { screen, within } from '@testing-library/react'
 import type { UserEvent } from '@testing-library/user-event'
 import { describe, expect, it } from 'vitest'
 
-import { issueListData, issueRow } from '../../test/factories'
+import { issueListData, issueRow, workspaceContextData } from '../../test/factories'
 import { main, renderApp } from '../../test/render'
 
 /**
@@ -123,7 +123,13 @@ describe('accessibility', () => {
   })
 
   it('moves focus through the composer in the order it is read', async () => {
-    const { user } = await renderPopulatedList()
+    const view = await renderPopulatedList()
+    const { user } = view
+
+    // The submit button is disabled until the team lookup answers -- it needs a
+    // teamId to file against -- so resolve the context: the composer's tab
+    // order is being tested in its ready state, where the submit is reachable.
+    await view.link.resolve('IssueWorkspaceContext', { data: workspaceContextData() })
 
     await user.keyboard('c')
 

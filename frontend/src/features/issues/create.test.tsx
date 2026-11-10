@@ -76,6 +76,32 @@ async function openComposer(view: ReturnType<typeof renderApp>): Promise<void> {
 const SCOPE_FIELDS = { workspaceSlug: WORKSPACE_SLUG, teamId: TEAM_ID }
 
 describe('creating an issue', () => {
+  it('keeps Create disabled until the team lookup answers, so a premature submit cannot fail with "no team"', async () => {
+    // The composer files into the first team from `IssueWorkspaceContext`. If
+    // the button is armed before that query answers, a fast submit fires with
+    // an undefined team and the server-less `createIssue` short-circuits to
+    // "This workspace has no team to file issues in." -- a false claim about a
+    // workspace that has one. The fix gates the button on the real loading
+    // state, so it stays disabled until the lookup answers.
+    const view = renderApp()
+
+    await view.link.resolve('IssueList', {
+      data: issueListData([issueRow(1, { title: 'Alpha' })]),
+    })
+
+    await view.user.click(screen.getByRole('button', { name: 'New issue' }))
+
+    // IssueWorkspaceContext is deliberately left unanswered: the team is
+    // unknown, so the button must be disabled rather than armed.
+    await view.link.idle()
+    expect(screen.getByRole('button', { name: 'Create issue' })).toBeDisabled()
+
+    // Once the team lookup answers, the button arms -- it is not permanently
+    // disabled, only gated on the lookup.
+    await view.link.resolve('IssueWorkspaceContext', { data: workspaceContextData() })
+    expect(screen.getByRole('button', { name: 'Create issue' })).toBeEnabled()
+  })
+
   it('opens the composer from the shell button', async () => {
     const view = renderApp()
 

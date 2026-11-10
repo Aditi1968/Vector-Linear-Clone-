@@ -69,7 +69,7 @@ export interface IssueComposerProps {
  * and a single banner for a transport or server failure that no field owns.
  */
 export function IssueComposer({ onCancel, onCreated }: IssueComposerProps) {
-  const { createIssue, isSubmitting } = useCreateIssue()
+  const { createIssue, isSubmitting, isPreparing } = useCreateIssue()
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
@@ -241,7 +241,14 @@ export function IssueComposer({ onCancel, onCreated }: IssueComposerProps) {
       </div>
 
       <div className={styles.composerActions}>
-        <Button variant="primary" type="submit" disabled={isSubmitting}>
+        {/*
+          Disabled while the team lookup is still loading as well as while
+          submitting: the create needs a teamId that only `IssueWorkspaceContext`
+          supplies, so arming the button before it answers lets a fast submit
+          fail with "no team to file issues in" for a workspace that has one.
+          See `useCreateIssue`.
+        */}
+        <Button variant="primary" type="submit" disabled={isSubmitting || isPreparing}>
           {isSubmitting ? 'Creating...' : 'Create issue'}
         </Button>
         <Button onClick={onCancel} disabled={isSubmitting}>
