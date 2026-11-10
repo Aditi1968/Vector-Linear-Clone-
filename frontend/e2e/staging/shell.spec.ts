@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 import { expectMutation } from '../helpers'
+import { workspaceSlug } from '../workspace'
 
 /**
  * Shell chrome against live staging (the shared `e2e-playground` workspace,
@@ -19,7 +20,7 @@ import { expectMutation } from '../helpers'
  * logs in as a second session before logging out.
  */
 
-const WS = '/e2e-playground'
+const WS = `/${workspaceSlug()}`
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

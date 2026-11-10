@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import type { Locator, Page } from '@playwright/test'
 
 import { expectMutation } from '../helpers'
+import { workspaceSlug } from '../workspace'
 
 /**
  * Collaboration panels on the issue detail view against live staging (the
@@ -16,7 +17,7 @@ import { expectMutation } from '../helpers'
  * before the click. This is a test-timing fix, not a product bug.
  */
 
-const WS = '/e2e-playground'
+const WS = `/${workspaceSlug()}`
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

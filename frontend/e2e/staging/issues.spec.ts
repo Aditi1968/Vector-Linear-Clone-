@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
 import { expectMutation } from '../helpers'
+import { workspaceSlug } from '../workspace'
 
 /**
  * Issues cluster against live staging (the shared `e2e-playground` workspace,
@@ -16,7 +17,7 @@ import { expectMutation } from '../helpers'
  * not a product bug: once the page has settled, IssueCreate fires every time.
  */
 
-const WS = '/e2e-playground'
+const WS = `/${workspaceSlug()}`
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -135,11 +136,11 @@ test.describe('/e2e-playground/issues — inspector', () => {
     await expect(detail.getByRole('textbox', { name: 'Title' })).toHaveValue(newTitle)
   })
 
-  test('IssueSetProject: assign a project to an issue', async ({ page }) => {
+  test('IssueSetProject: assign a freshly created project', async ({ page }) => {
     const stamp = new Date().toISOString()
     const projectName = `e2e project ${stamp}`
 
-    // Ensure at least one project exists to assign.
+    // The run's workspace is empty, so this is the only project.
     await page.goto(`${WS}/projects`)
     await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible()
     await settle(page)
@@ -152,25 +153,18 @@ test.describe('/e2e-playground/issues — inspector', () => {
     await projectCreated
 
     const detail = await createAndOpenIssue(page, `e2e ${stamp}`)
-    // The shared workspace accumulates projects and the dropdown shows a
-    // bounded set, so select whatever real project it offers rather than hunt
-    // for this run's specific one. Index 0 is the "No project" placeholder.
     const project = detail.getByRole('combobox', { name: 'Project' })
-    await expect(project.getByRole('option').nth(1)).toBeAttached()
+    await expect(project.getByRole('option', { name: projectName })).toBeAttached()
     const set = expectMutation(page, 'IssueSetProject')
-    await project.selectOption({ index: 1 })
+    await project.selectOption({ label: projectName })
     await set
-    await expect(project).not.toHaveValue('')
   })
 
   test('IssueSetCycle: assign a freshly created cycle', async ({ page }) => {
-    // Creates a cycle + an issue, then waits (with reloads) for the cycle to
-    // reach the inspector's cached list — generous for a cold instance.
-    test.setTimeout(120_000)
     const stamp = new Date().toISOString()
     const cycleName = `e2e cycle ${stamp}`
 
-    // Create a QA-team cycle to assign (none exist in the shared workspace).
+    // The run's workspace is empty, so this is the only QA cycle.
     await page.goto(`${WS}/cycles`)
     await expect(page.getByRole('heading', { name: 'Cycles' })).toBeVisible()
     await settle(page)
@@ -194,18 +188,11 @@ test.describe('/e2e-playground/issues — inspector', () => {
     await expect(detail).toBeVisible()
     await settle(page)
 
-    // The shared workspace accumulates cycles across runs and the dropdown
-    // shows a bounded, ordered set, so rather than hunt for this run's specific
-    // cycle in a crowded list (which raced the refetch under load), select
-    // whatever real cycle the dropdown offers. Index 0 is the "No cycle"
-    // placeholder; index 1 is the first real cycle. This still drives
-    // IssueSetCycle and asserts the issue ends up on a cycle.
     const cycle = detail.getByRole('combobox', { name: 'Cycle' })
-    await expect(cycle.getByRole('option').nth(1)).toBeAttached()
+    await expect(cycle.getByRole('option', { name: cycleName })).toBeAttached()
     const set = expectMutation(page, 'IssueSetCycle')
-    await cycle.selectOption({ index: 1 })
+    await cycle.selectOption({ label: cycleName })
     await set
-    await expect(cycle).not.toHaveValue('')
   })
 
   test('IssueArchive: More actions → Archive removes the row', async ({ page }) => {

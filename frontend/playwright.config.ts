@@ -161,6 +161,16 @@ export default defineConfig({
       testDir: './e2e/staging',
       testIgnore: [],
       testMatch: /.*\.setup\.ts/,
+      // Provisions a fresh workspace; its paired teardown archives it once the
+      // staging project (which depends on this one) has finished.
+      teardown: 'staging-teardown',
+      use: { ...devices['Desktop Chrome'], baseURL: stagingBaseURL },
+    },
+    {
+      name: 'staging-teardown',
+      testDir: './e2e/staging',
+      testIgnore: [],
+      testMatch: /.*\.teardown\.ts/,
       use: { ...devices['Desktop Chrome'], baseURL: stagingBaseURL },
     },
     {

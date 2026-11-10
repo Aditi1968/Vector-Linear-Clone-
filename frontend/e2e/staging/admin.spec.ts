@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 import { expectMutation } from '../helpers'
+import { workspaceSlug } from '../workspace'
 
 /**
  * Admin cluster against live staging: members, environments, label groups,
@@ -12,7 +13,7 @@ import { expectMutation } from '../helpers'
  * with errors fails here with the op name.
  */
 
-const SLUG = 'e2e-playground'
+const SLUG = workspaceSlug()
 
 /** A fresh ISO timestamp — unique per call, safe inside an accessible name. */
 const stamp = () => new Date().toISOString()
