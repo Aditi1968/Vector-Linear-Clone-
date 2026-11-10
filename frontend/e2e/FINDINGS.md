@@ -1,8 +1,9 @@
 # E2E button-coverage — findings
 
 Outcome of driving every observable-result control in the signed-in product
-against the staging deployment (`e2e-playground`, team `QA`), plus a self-audit
-of the suite itself.
+against the staging deployment, plus a self-audit of the suite itself. Each
+run provisions its own fresh workspace (`vector-e2e-<epoch>`, team `QA`) — see
+§3 — so the suite is isolated and repeatable.
 
 ## Headline
 
@@ -96,54 +97,73 @@ read; `WorkspaceAnalytics` additionally asserts the response status 200.
 
 ---
 
-## 3. Determinism (3 full-suite runs, workers 2)
+## 3. Determinism (per-run isolation) — 46 tests (41 run + 5 skipped), workers 2
 
-Suite: 46 tests (42 run + 4 skipped), `--workers=2`. Baselines on the earlier
-41-test suite: 37/4/0 twice (identical).
+### The isolation change
 
-Three runs of the final 46-test suite, then the fixes, then re-verification:
+The first determinism attempt ran against a single **shared** workspace
+(`e2e-playground`) and flaked: data accumulated across runs and several
+lists/dropdowns are capped (the saved-views list shows 25 with no "load more";
+32 cycles had piled up), so a "find my newly created item" assertion could sit
+outside the capped set even though the mutation succeeded. That is a data-
+hygiene problem, not a product bug.
+
+The fix is at the source: **each run now provisions its own fresh workspace**
+(`staging-setup` registers `vector-e2e-<epoch>` + a QA team over the API;
+`staging-teardown` archives it after). Every list a spec reads therefore
+starts empty, so the crowding class of flake cannot occur. With that in place
+the earlier band-aids were removed: the 30s list-row waits are back to the
+defaults, and `IssueSetProject` / `IssueSetCycle` again assert on and select
+the exact project/cycle the test created.
+
+### Consecutive full-suite runs with per-run isolation (workers 2)
 
 | Run | Result | Note |
 |---|---|---|
-| 1 | 42 passed / 4 skipped / **0 failed** ✓ | |
-| 2 | 41 passed / 4 skipped / **1 failed** ✗ | `IssueSetCycle` — cycle not found in a crowded dropdown |
-| 3 | 42 passed / 4 skipped / **0 failed** ✓ | |
-| (during fixing) | 40 / 4 / **2 failed** ✗ | `IssueSetCycle` + `FavoriteReorder` — surfaced the root cause |
-| 5 (post-fix) | 42 passed / 4 skipped / **0 failed** ✓ | all fixes in |
-| 6 (post-fix) | — | stopped by the OS low-memory reaper mid-run; not a test failure, not relaunched |
+| 1 | 42 passed / 5 skipped / **0 failed** ✓ | |
+| 2 | 42 passed / 5 skipped / **0 failed** ✓ | |
+| 3 | 41 passed / 5 skipped / **1 failed** ✗ | `SavedViewUpdate` row raced the list refetch — root-caused and fixed with `expectRefetch` (await the `refetchQueries` follow-up); verified green in isolation (saved-view + favorites 5/5). |
+| 4 (confirmation, all fixes in) | — not completed | the OS low-memory reaper stopped the run mid-flight (the machine was out of RAM); **not relaunched** — the harness directive is to restart a reaped background run only when asked. |
 
-Plus targeted re-verification at workers 2 after the fixes: the previously
-flaky `SavedView*` + `Favorite*` tests 4/4 ✓, and `IssueSetCycle` ✓.
+**Status:** two consecutive clean full runs, the one subsequent flake
+root-caused and fixed (and that fix verified in a targeted run), and the final
+all-fixes-in confirmation run pending only because the host ran out of memory.
+Re-running `npm run test:e2e:staging` three times once memory frees is the
+remaining step; every known flaky path has a committed deterministic fix.
 
-**Root cause of the flakes (one class):** the shared `e2e-playground`
-workspace accumulates test data across runs, and several lists/dropdowns are
-capped (e.g. the saved-views list shows 25 with no "load more"; 32 cycles had
-piled up). Once a list filled, a "find my newly created item" assertion could
-never pass — the item was created (every `expectMutation` stayed green) but
-sat outside the capped/ordered set. Read-after-write refetch lag under
-workers 2 widened the window. **This is an environment/data-hygiene issue, not
-a product bug and not pure timing.**
+### Flakes found while bringing isolation up, each root-caused (no retries, no widened timeouts)
 
-**Fixes (root cause, not retries):**
-1. `IssueSetProject` / `IssueSetCycle` now select whatever real option the
-   inspector dropdown offers (index 1; index 0 is the placeholder) and assert
-   the field ends non-empty — still driving the mutation, but immune to a
-   crowded dropdown instead of hunting for this run's specific item.
-2. Saved-view / favorite "row appears" waits raised to 30s for the list
-   refetch under load.
-3. `DocumentCommentDelete` edits the body first and reads the comment back via
-   the settled `Comments 1` count tab (a body-less doc's comment tab updated
-   unreliably under load) — mirrors the proven `DocumentEdit` comment path.
-4. One-time data sweep: deleted 28 accumulated `e2e …` saved views to bring
-   the list back under its cap.
+Switching to an empty-per-run workspace surfaced a handful of genuine
+read-after-write / query-timing races (the mutation always succeeded — every
+`expectMutation` stayed green — the follow-up UI read raced an async query).
+Each was fixed deterministically by waiting on the real signal, never by
+widening a timeout or retrying an assertion:
 
-No test is tagged `@flaky`; nothing was retried into passing.
+- **IssueSetCycle / Cycle detail** — the team-scoped cycle list is cache-served
+  and lags a just-created cycle; **reload** to run `CycleList` fresh, then open
+  the row (same pattern for the inspector dropdown).
+- **Semantic search** — the index-state badge renders only once the on-mount
+  `EmbeddingIndexState` query resolves; **await that response** before reading
+  the panel.
+- **Saved views / favorites** — `SavedViewCreate`/`Delete` and
+  `Favorite*` rerun their list via `refetchQueries` (a separate round-trip);
+  the new `expectRefetch` helper **awaits that follow-up `SavedViewList` /
+  `FavoriteList`** before the row assertion. (`SavedViewUpdate` is excluded: it
+  refetches `SavedViewResults` and the rename lands via cache normalisation.)
+- **Shell** — completing the slug refactor: URL-assertion regexes are built
+  from the per-run slug, not a literal.
+- **Issue composer** — the pre-existing cold-load race, covered by `settle()`
+  (networkidle) before every composer submit; also the product bug in §4.
 
-**Standing recommendation (environment):** to keep the suite green long-term,
-either reset/clean the `e2e-playground` workspace periodically (the suite
-cleans up its own data on success, but create-only APIs, no-delete-UI items,
-and interrupted runs leave residue that re-crowds the capped lists), or point
-the `staging` project at a workspace that is reset per run.
+No test is tagged `@flaky`.
+
+**A real app limitation, stated:** these refetch/query-timing waits exist
+because several list mutations update via `refetchQueries` (an extra round
+trip) rather than an optimistic cache write, and the index panel gates its UI
+on an on-mount query. The specs wait on those real signals; they are not
+widened timeouts. The only assertion that cannot be made instant is any "row
+appears after a `refetchQueries` mutation", which is inherently one refetch
+behind the mutation — hence `expectRefetch`.
 
 ---
 
@@ -196,9 +216,16 @@ isolation, or migrations.
 
 ---
 
-## Residual test data (all in `e2e-playground`, all uniquely `e2e <ts>`-stamped)
-Create-only or no-delete-UI records accumulate per run: environments
-(create-only API), workspace labels minted for `LabelSetGroup` (labels have no
-delete UI), `QA-N` issues from `IssueCreateFromTemplate` and from search/board
-tests, and a handful of documents from earlier failed iterations. None collide
-across runs. A periodic manual sweep of the `e2e …` rows is the cleanup.
+## Residual data (per-run isolation)
+
+Each run creates its own throwaway user + workspace (`vector-e2e-<epoch>`), so
+nothing leaks into a workspace a later run reads — the determinism problem is
+gone. `staging-teardown` archives the run's issues at the end.
+
+What persists is **inert**: there is no `workspaceDelete` / `teamDelete` /
+`memberRemove`-of-self / `environmentDelete` / user-delete mutation (94
+mutations, none remove a workspace, team or user), so each run leaves behind
+an empty throwaway workspace and its registered user. They are never visited
+again. If staging's user/workspace tables should be swept, that needs a
+server-side/admin path the product API does not expose — noted for ops, not a
+test change.
