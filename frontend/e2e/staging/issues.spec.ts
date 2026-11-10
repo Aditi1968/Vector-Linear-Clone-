@@ -161,6 +161,9 @@ test.describe('/e2e-playground/issues — inspector', () => {
   })
 
   test('IssueSetCycle: assign a freshly created cycle', async ({ page }) => {
+    // Creates a cycle + an issue, then waits (with reloads) for the cycle to
+    // reach the inspector's cached list — generous for a cold instance.
+    test.setTimeout(120_000)
     const stamp = new Date().toISOString()
     const cycleName = `e2e cycle ${stamp}`
 
@@ -181,17 +184,20 @@ test.describe('/e2e-playground/issues — inspector', () => {
     await cycleDialog.getByRole('button', { name: 'Create cycle' }).click()
     await cycleCreated
 
-    let detail = await createAndOpenIssue(page, `e2e ${stamp}`)
-    // The inspector's Cycle list is served from cache and does not include a
-    // cycle created moments earlier until something forces a refetch; a reload
-    // runs the team-cycles query fresh.
-    await page.reload()
-    detail = page.getByRole('complementary', { name: 'Issue detail' })
-    await expect(detail).toBeVisible()
-    await settle(page)
-
+    const detail = await createAndOpenIssue(page, `e2e ${stamp}`)
     const cycle = detail.getByRole('combobox', { name: 'Cycle' })
-    await expect(cycle.getByRole('option', { name: cycleName })).toBeAttached()
+    const cycleOption = cycle.getByRole('option', { name: cycleName })
+
+    // The inspector's Cycle list is served from cache and does not include a
+    // cycle created moments earlier until a refetch runs; a reload runs the
+    // team-cycles query fresh. Under concurrent load one reload can still race
+    // the refetch, so reload-and-check until the new cycle's option is present.
+    await expect(async () => {
+      await page.reload()
+      await expect(detail).toBeVisible()
+      await settle(page)
+      await expect(cycleOption).toBeAttached({ timeout: 5000 })
+    }).toPass({ timeout: 60_000 })
 
     const set = expectMutation(page, 'IssueSetCycle')
     await cycle.selectOption({ label: cycleName })
