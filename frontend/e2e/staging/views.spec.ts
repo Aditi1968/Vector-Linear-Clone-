@@ -24,7 +24,11 @@ async function createSavedView(page: Page, name: string): Promise<void> {
   const created = expectMutation(page, 'SavedViewCreate')
   await dialog.getByRole('button', { name: 'Create view' }).click()
   await created
-  await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible()
+  // The saved-views list refetches after create; under concurrent workers=2
+  // load against the small instance that can take well over the default 10s.
+  await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible({
+    timeout: 30_000,
+  })
 }
 
 /** Delete a saved view by name on the saved-views screen. */
@@ -53,7 +57,9 @@ test.describe('saved views', () => {
     const created = expectMutation(page, 'SavedViewCreate')
     await newDialog.getByRole('button', { name: 'Create view' }).click()
     await created
-    await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible()
+    await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible({
+      timeout: 30_000,
+    })
 
     // Update (rename via Edit view...)
     await page.getByRole('button', { name: `Actions on ${name}` }).click()
@@ -63,7 +69,9 @@ test.describe('saved views', () => {
     const updated = expectMutation(page, 'SavedViewUpdate')
     await editDialog.getByRole('button', { name: 'Save changes' }).click()
     await updated
-    await expect(page.getByRole('button', { name: `Actions on ${renamed}` })).toBeVisible()
+    await expect(page.getByRole('button', { name: `Actions on ${renamed}` })).toBeVisible({
+      timeout: 30_000,
+    })
 
     // Delete
     await page.getByRole('button', { name: `Actions on ${renamed}` }).click()
@@ -89,7 +97,9 @@ test.describe('favorites', () => {
     const added = expectMutation(page, 'FavoriteAdd')
     await page.getByRole('menuitem', { name: viewName }).click()
     await added
-    await expect(page.getByRole('button', { name: `Actions on ${viewName}` })).toBeVisible()
+    await expect(page.getByRole('button', { name: `Actions on ${viewName}` })).toBeVisible({
+      timeout: 30_000,
+    })
 
     await page.getByRole('button', { name: `Actions on ${viewName}` }).click()
     const removed = expectMutation(page, 'FavoriteRemove')
@@ -125,7 +135,9 @@ test.describe('favorites', () => {
       const added = expectMutation(page, 'FavoriteAdd')
       await page.getByRole('menuitem', { name }).click()
       await added
-      await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible()
+      await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible({
+        timeout: 30_000,
+      })
     }
 
     // Move the second one up: swaps it with the first (adjacent, both mine).

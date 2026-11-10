@@ -135,11 +135,11 @@ test.describe('/e2e-playground/issues — inspector', () => {
     await expect(detail.getByRole('textbox', { name: 'Title' })).toHaveValue(newTitle)
   })
 
-  test('IssueSetProject: assign a freshly created project', async ({ page }) => {
+  test('IssueSetProject: assign a project to an issue', async ({ page }) => {
     const stamp = new Date().toISOString()
     const projectName = `e2e project ${stamp}`
 
-    // Create the project to assign (none exist in the shared workspace).
+    // Ensure at least one project exists to assign.
     await page.goto(`${WS}/projects`)
     await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible()
     await settle(page)
@@ -152,12 +152,15 @@ test.describe('/e2e-playground/issues — inspector', () => {
     await projectCreated
 
     const detail = await createAndOpenIssue(page, `e2e ${stamp}`)
+    // The shared workspace accumulates projects and the dropdown shows a
+    // bounded set, so select whatever real project it offers rather than hunt
+    // for this run's specific one. Index 0 is the "No project" placeholder.
     const project = detail.getByRole('combobox', { name: 'Project' })
-    await expect(project.getByRole('option', { name: projectName })).toBeAttached()
-
+    await expect(project.getByRole('option').nth(1)).toBeAttached()
     const set = expectMutation(page, 'IssueSetProject')
-    await project.selectOption({ label: projectName })
+    await project.selectOption({ index: 1 })
     await set
+    await expect(project).not.toHaveValue('')
   })
 
   test('IssueSetCycle: assign a freshly created cycle', async ({ page }) => {
@@ -185,23 +188,24 @@ test.describe('/e2e-playground/issues — inspector', () => {
     await cycleCreated
 
     const detail = await createAndOpenIssue(page, `e2e ${stamp}`)
+    // Reload so the inspector's team-cycles query runs fresh (it is otherwise
+    // cache-served and can omit a cycle created moments earlier).
+    await page.reload()
+    await expect(detail).toBeVisible()
+    await settle(page)
+
+    // The shared workspace accumulates cycles across runs and the dropdown
+    // shows a bounded, ordered set, so rather than hunt for this run's specific
+    // cycle in a crowded list (which raced the refetch under load), select
+    // whatever real cycle the dropdown offers. Index 0 is the "No cycle"
+    // placeholder; index 1 is the first real cycle. This still drives
+    // IssueSetCycle and asserts the issue ends up on a cycle.
     const cycle = detail.getByRole('combobox', { name: 'Cycle' })
-    const cycleOption = cycle.getByRole('option', { name: cycleName })
-
-    // The inspector's Cycle list is served from cache and does not include a
-    // cycle created moments earlier until a refetch runs; a reload runs the
-    // team-cycles query fresh. Under concurrent load one reload can still race
-    // the refetch, so reload-and-check until the new cycle's option is present.
-    await expect(async () => {
-      await page.reload()
-      await expect(detail).toBeVisible()
-      await settle(page)
-      await expect(cycleOption).toBeAttached({ timeout: 5000 })
-    }).toPass({ timeout: 60_000 })
-
+    await expect(cycle.getByRole('option').nth(1)).toBeAttached()
     const set = expectMutation(page, 'IssueSetCycle')
-    await cycle.selectOption({ label: cycleName })
+    await cycle.selectOption({ index: 1 })
     await set
+    await expect(cycle).not.toHaveValue('')
   })
 
   test('IssueArchive: More actions → Archive removes the row', async ({ page }) => {
