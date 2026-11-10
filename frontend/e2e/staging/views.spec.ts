@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
-import { expectMutation } from '../helpers'
+import { expectMutation, expectRefetch } from '../helpers'
 import { workspaceSlug } from '../workspace'
 
 /**
@@ -23,8 +23,10 @@ async function createSavedView(page: Page, name: string): Promise<void> {
   const dialog = page.getByRole('dialog', { name: 'New saved view' })
   await dialog.getByLabel('Name', { exact: true }).fill(name)
   const created = expectMutation(page, 'SavedViewCreate')
+  const listed = expectRefetch(page, 'SavedViewList')
   await dialog.getByRole('button', { name: 'Create view' }).click()
   await created
+  await listed
   await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible()
 }
 
@@ -52,8 +54,10 @@ test.describe('saved views', () => {
     const newDialog = page.getByRole('dialog', { name: 'New saved view' })
     await newDialog.getByLabel('Name', { exact: true }).fill(name)
     const created = expectMutation(page, 'SavedViewCreate')
+    const listedAfterCreate = expectRefetch(page, 'SavedViewList')
     await newDialog.getByRole('button', { name: 'Create view' }).click()
     await created
+    await listedAfterCreate
     await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible()
 
     // Update (rename via Edit view...)
@@ -61,6 +65,9 @@ test.describe('saved views', () => {
     await page.getByRole('menuitem', { name: 'Edit view...' }).click()
     const editDialog = page.getByRole('dialog', { name: 'Edit saved view' })
     await editDialog.getByLabel('Name', { exact: true }).fill(renamed)
+    // SavedViewUpdate refetches SavedViewResults, not SavedViewList; the rename
+    // appears via Apollo cache normalisation once the mutation response lands,
+    // so there is no list refetch to await here.
     const updated = expectMutation(page, 'SavedViewUpdate')
     await editDialog.getByRole('button', { name: 'Save changes' }).click()
     await updated
@@ -69,8 +76,10 @@ test.describe('saved views', () => {
     // Delete
     await page.getByRole('button', { name: `Actions on ${renamed}` }).click()
     const deleted = expectMutation(page, 'SavedViewDelete')
+    const listedAfterDelete = expectRefetch(page, 'SavedViewList')
     await page.getByRole('menuitem', { name: 'Delete view' }).click()
     await deleted
+    await listedAfterDelete
     await expect(
       page.getByRole('button', { name: `Actions on ${renamed}` }),
     ).toHaveCount(0)
@@ -88,14 +97,18 @@ test.describe('favorites', () => {
     // trigger's accessible name is the text, not the label.
     await page.getByRole('button', { name: 'Add favorite' }).click()
     const added = expectMutation(page, 'FavoriteAdd')
+    const listedAfterAdd = expectRefetch(page, 'FavoriteList')
     await page.getByRole('menuitem', { name: viewName }).click()
     await added
+    await listedAfterAdd
     await expect(page.getByRole('button', { name: `Actions on ${viewName}` })).toBeVisible()
 
     await page.getByRole('button', { name: `Actions on ${viewName}` }).click()
     const removed = expectMutation(page, 'FavoriteRemove')
+    const listedAfterRemove = expectRefetch(page, 'FavoriteList')
     await page.getByRole('menuitem', { name: 'Remove from favorites' }).click()
     await removed
+    await listedAfterRemove
     await expect(
       page.getByRole('button', { name: `Actions on ${viewName}` }),
     ).toHaveCount(0)
@@ -124,8 +137,10 @@ test.describe('favorites', () => {
       await page.goto(`${WS}/favorites`)
       await page.getByRole('button', { name: 'Add favorite' }).click()
       const added = expectMutation(page, 'FavoriteAdd')
+      const listed = expectRefetch(page, 'FavoriteList')
       await page.getByRole('menuitem', { name }).click()
       await added
+      await listed
       await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible()
     }
 

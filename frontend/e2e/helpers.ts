@@ -36,6 +36,27 @@ export function expectMutation<T = Record<string, unknown>>(
     })
 }
 
+/**
+ * Wait for a query that a mutation reran via Apollo `refetchQueries`.
+ *
+ * Several list mutations (saved views, favorites) don't update the cache in
+ * place; they rerun the list query by name, which is a *separate* round-trip
+ * that lands after the mutation's own response. A "row appears / disappears"
+ * assertion made right after `await <mutation>` therefore races that refetch,
+ * and under concurrent load against a small instance the refetch can exceed
+ * the default assertion timeout. Awaiting the refetch first makes the
+ * assertion deterministic without widening any timeout.
+ *
+ * Same wait + 200/no-errors check as `expectMutation`; named for intent. Set
+ * it up BEFORE the click (alongside the mutation waiter) and await it after.
+ */
+export function expectRefetch<T = Record<string, unknown>>(
+  page: Page,
+  operationName: string,
+): Promise<T> {
+  return expectMutation<T>(page, operationName)
+}
+
 /** The `operationName` Apollo put in a request body, or undefined. */
 function requestOperationName(response: Response): string | undefined {
   try {
