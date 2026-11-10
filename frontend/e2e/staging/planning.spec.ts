@@ -173,16 +173,20 @@ test.describe('/e2e-playground/cycles', () => {
     await settle(page)
 
     // Cycles are team-scoped. Select the QA team by its option value (the label
-    // is "QA · <name>", whose exact text we do not want to hard-code).
-    const teamSelect = page.getByRole('combobox', { name: 'Team' })
-    const qaValue = await teamSelect
-      .locator('option', { hasText: 'QA' })
-      .first()
-      .getAttribute('value')
-    if (qaValue) {
-      await teamSelect.selectOption(qaValue)
-      await settle(page)
+    // is "QA · <name>", whose exact text we do not want to hard-code). The
+    // selection is screen state, not a URL param, so it is redone after reload.
+    const selectQaTeam = async (): Promise<void> => {
+      const teamSelect = page.getByRole('combobox', { name: 'Team' })
+      const qaValue = await teamSelect
+        .locator('option', { hasText: 'QA' })
+        .first()
+        .getAttribute('value')
+      if (qaValue) {
+        await teamSelect.selectOption(qaValue)
+        await settle(page)
+      }
     }
+    await selectQaTeam()
 
     // ---- CycleCreate (Number is prefilled; name + the datetime-local window)
     await page.getByRole('button', { name: 'New cycle' }).click()
@@ -196,7 +200,12 @@ test.describe('/e2e-playground/cycles', () => {
     await dialog.getByRole('button', { name: 'Create cycle' }).click()
     await created
 
-    // Open the detail page (the row link carries the cycle's name).
+    // The team-scoped cycle list is cache-served and can lag the create under
+    // concurrent load; a reload runs CycleList fresh. Re-select QA, then open
+    // the new cycle from its row link.
+    await page.reload()
+    await settle(page)
+    await selectQaTeam()
     await page.getByRole('link', { name: byTitle(cycleName) }).click()
     await settle(page)
     await expect(page.getByRole('button', { name: `Actions for ${cycleName}` })).toBeVisible()
