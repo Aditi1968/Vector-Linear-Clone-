@@ -207,6 +207,100 @@ test.describe('documents', () => {
       page.getByRole('button', { name: `Actions on ${renamed}` }),
     ).toHaveCount(0)
   })
+
+  test('DocumentCommentCreate then DocumentCommentDelete', async ({ page }) => {
+    test.setTimeout(90_000)
+    const title = unique('doc-comment')
+    // A token with no overlap with the title (the title contains the word
+    // "comment"), so getByText(commentBody) matches only the comment.
+    const commentBody = `e2e-cmt-${Math.random().toString(36).slice(2, 12)}`
+
+    await page.goto(`${WS}/documents`)
+    await page.getByRole('button', { name: 'New document' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New document' })
+    await dialog.getByLabel('Title', { exact: true }).fill(title)
+    const created = expectMutation(page, 'DocumentCreate')
+    await dialog.getByRole('button', { name: 'Create document' }).click()
+    await created
+
+    // Give the document a body first. The proven comment-read path
+    // (DocumentCommentCreate test above) runs against a document with a body;
+    // a body-less document's comment-count tab updates unreliably under
+    // concurrent load, so mirror the working path.
+    await page.getByRole('button', { name: 'Edit body' }).click()
+    await page.getByLabel('Document body', { exact: true }).fill(`body ${title}`)
+    const bodySaved = expectMutation(page, 'DocumentEdit')
+    await page.getByRole('button', { name: 'Save body' }).click()
+    await bodySaved
+
+    await page.getByRole('tab', { name: /^Comments/ }).click()
+    await page.getByLabel('Add a comment', { exact: true }).fill(commentBody)
+    const commented = expectMutation(page, 'DocumentCommentCreate')
+    await page.getByRole('button', { name: 'Comment', exact: true }).click()
+    await commented
+
+    // Posting resets the active tab to "Document" and bumps the Comments count;
+    // wait for that count (the refetch landed), then open it to see the comment.
+    await expect(page.getByRole('tab', { name: 'Comments 1' })).toBeVisible()
+    await page.getByRole('tab', { name: 'Comments 1' }).click()
+    await expect(page.getByText(commentBody)).toBeVisible()
+
+    // Delete the comment (DocumentCommentDelete). Its accessible name embeds the
+    // revision stamp, so match on the stable prefix.
+    const removed = expectMutation(page, 'DocumentCommentDelete')
+    await page.getByRole('button', { name: /^Delete the comment/ }).click()
+    await removed
+    await expect(page.getByText(commentBody)).toHaveCount(0)
+
+    // Clean up the document.
+    await page.getByRole('button', { name: `Actions on ${title}` }).click()
+    const deleted = expectMutation(page, 'DocumentDelete')
+    await page.getByRole('menuitem', { name: 'Delete document' }).click()
+    await deleted
+  })
+
+  test('DocumentRestore brings back a snapshotted version', async ({ page }) => {
+    test.setTimeout(90_000)
+    const title = unique('doc-restore')
+
+    await page.goto(`${WS}/documents`)
+    await page.getByRole('button', { name: 'New document' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New document' })
+    await dialog.getByLabel('Title', { exact: true }).fill(title)
+    const created = expectMutation(page, 'DocumentCreate')
+    await dialog.getByRole('button', { name: 'Create document' }).click()
+    await created
+
+    // First body save establishes "version one" content.
+    await page.getByRole('button', { name: 'Edit body' }).click()
+    await page.getByLabel('Document body', { exact: true }).fill(`version one ${title}`)
+    const firstSave = expectMutation(page, 'DocumentEdit')
+    await page.getByRole('button', { name: 'Save body' }).click()
+    await firstSave
+
+    // Second save keeps the CURRENT ("version one") text as a version before
+    // replacing it, so a real prior version exists to restore.
+    await page.getByRole('button', { name: 'Edit body' }).click()
+    await page.getByLabel('Document body', { exact: true }).fill(`version two ${title}`)
+    await page.getByRole('checkbox', { name: /Keep the current text as a version/ }).check()
+    const secondSave = expectMutation(page, 'DocumentEdit')
+    await page.getByRole('button', { name: 'Save body' }).click()
+    await secondSave
+
+    // The History tab now has that version.
+    await page.getByRole('tab', { name: /^History/ }).click()
+    const restore = page.getByRole('button', { name: /^Restore the version/ })
+    await expect(restore.first()).toBeVisible()
+    const restored = expectMutation(page, 'DocumentRestore')
+    await restore.first().click()
+    await restored
+
+    // Clean up.
+    await page.getByRole('button', { name: `Actions on ${title}` }).click()
+    const deleted = expectMutation(page, 'DocumentDelete')
+    await page.getByRole('menuitem', { name: 'Delete document' }).click()
+    await deleted
+  })
 })
 
 test.describe('search', () => {

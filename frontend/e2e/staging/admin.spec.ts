@@ -118,6 +118,108 @@ test.describe('/label-groups', () => {
 
     await expect(row).toBeHidden()
   })
+
+  test('LabelGroupUpdate renames a group', async ({ page }) => {
+    await page.goto(`/${SLUG}/label-groups`)
+    const name = `e2e ${stamp()}`
+    const renamed = `${name} renamed`
+
+    await page.getByRole('button', { name: 'New group' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New label group' })
+    await dialog.getByRole('textbox', { name: 'Group name' }).fill(name)
+    const created = expectMutation(page, 'LabelGroupCreate')
+    await dialog.getByRole('button', { name: 'Create group' }).click()
+    await created
+
+    const row = page.getByRole('button', { name: `${name} 0 labels`, exact: true })
+    await expect(row).toBeVisible()
+    const region = page.getByRole('region', { name, exact: true })
+    if (!(await region.isVisible())) await row.click()
+    await expect(region).toBeVisible()
+
+    // Edit group… → rename → Save changes (LabelGroupUpdate).
+    await region.getByRole('button', { name: /^Edit group/ }).click()
+    const editDialog = page.getByRole('dialog', { name: 'Edit label group' })
+    await editDialog.getByRole('textbox', { name: 'Group name' }).fill(renamed)
+    const updated = expectMutation(page, 'LabelGroupUpdate')
+    await editDialog.getByRole('button', { name: 'Save changes' }).click()
+    await updated
+
+    const renamedRow = page.getByRole('button', { name: `${renamed} 0 labels`, exact: true })
+    await expect(renamedRow).toBeVisible()
+
+    // Clean up.
+    const renamedRegion = page.getByRole('region', { name: renamed, exact: true })
+    if (!(await renamedRegion.isVisible())) await renamedRow.click()
+    const deleted = expectMutation(page, 'LabelGroupDelete')
+    await renamedRegion.getByRole('button', { name: 'Delete group' }).click()
+    await deleted
+    await expect(renamedRow).toBeHidden()
+  })
+
+  test('LabelSetGroup moves a label into a group and back out', async ({ page }) => {
+    // LabelSetGroup needs an ungrouped workspace label. The only label-create
+    // UI is the issue Labels panel, so mint one there first (LabelCreate), then
+    // group and ungroup it on the label-groups screen.
+    test.setTimeout(120_000)
+    const s = stamp()
+    const labelName = `e2e-lbl-${s.replace(/[:.]/g, '-')}`
+    const groupName = `e2e grp ${s}`
+
+    // --- mint an ungrouped label via a throwaway issue ---
+    await page.goto(`/${SLUG}/issues`)
+    await page.waitForLoadState('networkidle')
+    await page.getByRole('button', { name: 'New issue' }).click()
+    await page.waitForLoadState('networkidle')
+    await page.getByRole('textbox', { name: 'Title' }).fill(`e2e lbl-host ${s}`)
+    const issueCreated = expectMutation(page, 'IssueCreate')
+    await page.getByRole('button', { name: 'Create issue' }).click()
+    await issueCreated
+    await page.getByRole('link', { name: new RegExp(`e2e lbl-host ${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`) }).click()
+    const detail = page.getByRole('complementary', { name: 'Issue detail' })
+    const labels = detail.getByRole('region', { name: 'Labels' })
+    await labels.getByRole('button', { name: 'Add', exact: true }).click()
+    await page.getByRole('menuitem', { name: 'New label' }).click()
+    await labels.getByRole('textbox', { name: 'New label name' }).fill(labelName)
+    const labelCreated = expectMutation(page, 'LabelCreate')
+    await labels.getByRole('button', { name: 'Create', exact: true }).click()
+    await labelCreated
+    // Detach it from the issue so it is an ungrouped, unattached workspace label.
+    const detached = expectMutation(page, 'IssueLabelDetach')
+    await labels.getByRole('button', { name: `Remove ${labelName}` }).click()
+    await detached
+
+    // --- group it, then ungroup it ---
+    await page.goto(`/${SLUG}/label-groups`)
+    await page.getByRole('button', { name: 'New group' }).click()
+    const dialog = page.getByRole('dialog', { name: 'New label group' })
+    await dialog.getByRole('textbox', { name: 'Group name' }).fill(groupName)
+    const groupCreated = expectMutation(page, 'LabelGroupCreate')
+    await dialog.getByRole('button', { name: 'Create group' }).click()
+    await groupCreated
+
+    const row = page.getByRole('button', { name: `${groupName} 0 labels`, exact: true })
+    await expect(row).toBeVisible()
+    const region = page.getByRole('region', { name: groupName, exact: true })
+    if (!(await region.isVisible())) await row.click()
+
+    // Add to group (LabelSetGroup: label → this group).
+    await region.getByRole('combobox', { name: 'Ungrouped label' }).selectOption({ label: labelName })
+    const added = expectMutation(page, 'LabelSetGroup')
+    await region.getByRole('button', { name: 'Add to group' }).click()
+    await added
+    await expect(region.getByRole('button', { name: `Remove ${labelName}` })).toBeVisible()
+
+    // Remove from group (LabelSetGroup: label → null).
+    const removed = expectMutation(page, 'LabelSetGroup')
+    await region.getByRole('button', { name: `Remove ${labelName}` }).click()
+    await removed
+
+    // Clean up the group (the label persists — labels have no delete UI).
+    const deleted = expectMutation(page, 'LabelGroupDelete')
+    await region.getByRole('button', { name: 'Delete group' }).click()
+    await deleted
+  })
 })
 
 test.describe('/templates', () => {
@@ -163,6 +265,41 @@ test.describe('/templates', () => {
     await deleted
 
     await expect(actions).toBeHidden()
+  })
+
+  test('IssueTemplateUpdate renames a template', async ({ page }) => {
+    await page.goto(`/${SLUG}/templates`)
+    const s = stamp()
+    const name = `e2e ${s}`
+    const renamed = `${name} renamed`
+
+    await page.getByRole('button', { name: 'New template' }).click()
+    const createDialog = page.getByRole('dialog', { name: 'New template' })
+    await createDialog.getByRole('textbox', { name: 'Template name' }).fill(name)
+    await createDialog.getByRole('textbox', { name: 'Issue title' }).fill(`e2e issue ${s}`)
+    const created = expectMutation(page, 'IssueTemplateCreate')
+    await createDialog.getByRole('button', { name: 'Create template' }).click()
+    await created
+    await expect(page.getByRole('button', { name: `Actions on ${name}` })).toBeVisible()
+
+    // Actions on {name} → Edit template... → rename → Save changes.
+    await page.getByRole('button', { name: `Actions on ${name}` }).click()
+    await page.getByRole('menuitem', { name: /^Edit template/ }).click()
+    const editDialog = page.getByRole('dialog', { name: 'Edit template' })
+    await editDialog.getByRole('textbox', { name: 'Template name' }).fill(renamed)
+    const updated = expectMutation(page, 'IssueTemplateUpdate')
+    await editDialog.getByRole('button', { name: 'Save changes' }).click()
+    await updated
+
+    const renamedActions = page.getByRole('button', { name: `Actions on ${renamed}` })
+    await expect(renamedActions).toBeVisible()
+
+    // Clean up.
+    await renamedActions.click()
+    const deleted = expectMutation(page, 'IssueTemplateDelete')
+    await page.getByRole('menuitem', { name: 'Delete template' }).click()
+    await deleted
+    await expect(renamedActions).toBeHidden()
   })
 })
 
