@@ -5,7 +5,7 @@ import { expectMutation } from '../helpers'
 import { workspaceSlug } from '../workspace'
 
 /**
- * Shell chrome against live staging (the shared `e2e-playground` workspace,
+ * Shell chrome against live staging (the per-run workspace,
  * team key `QA`): the command palette, the sidebar nav, and the account menu's
  * logout. Mounted by `AppLayout` on every workspace route.
  *
@@ -95,7 +95,7 @@ test.describe('/e2e-playground shell — command palette', () => {
 
     // Clicking the row navigates to that issue's detail view.
     await result.click()
-    await expect(page).toHaveURL(/\/e2e-playground\/issues\/.+/)
+    await expect(page).toHaveURL(new RegExp(escapeRegExp(WS) + '/issues/.+'))
     await expect(
       page.getByRole('complementary', { name: 'Issue detail' }),
     ).toBeVisible()
@@ -115,7 +115,7 @@ test.describe('/e2e-playground shell — command palette', () => {
     await expect(goTo).toBeVisible()
     await goTo.click()
 
-    await expect(page).toHaveURL(/\/e2e-playground\/projects$/)
+    await expect(page).toHaveURL(new RegExp(escapeRegExp(WS) + '/projects$'))
     await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible()
   })
 })
@@ -126,9 +126,9 @@ test.describe('/e2e-playground shell — navigation (NAV, no mutation)', () => {
     await settle(page)
 
     const links: ReadonlyArray<[string, RegExp]> = [
-      ['Projects', /\/e2e-playground\/projects$/],
-      ['Members', /\/e2e-playground\/members$/],
-      ['All Issues', /\/e2e-playground\/issues$/],
+      ['Projects', new RegExp(escapeRegExp(WS) + '/projects$')],
+      ['Members', new RegExp(escapeRegExp(WS) + '/members$')],
+      ['All Issues', new RegExp(escapeRegExp(WS) + '/issues$')],
     ]
 
     for (const [name, url] of links) {

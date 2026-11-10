@@ -57,7 +57,8 @@ setup('provision a fresh isolated workspace', async ({ playwright }) => {
     return body.data as Record<string, any>
   }
 
-  const reg = await gql(REGISTER, { input: { email, password, name: 'E2E Run' } }, 'register')
+  // Display name: the members spec looks the owner up by "E2E Tester".
+  const reg = await gql(REGISTER, { input: { email, password, name: 'E2E Tester' } }, 'register')
   expect(reg.register.errors, 'register validation errors').toEqual([])
   expect(reg.register.user, 'register returned a user').not.toBeNull()
 

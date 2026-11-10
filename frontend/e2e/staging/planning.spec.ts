@@ -5,7 +5,7 @@ import { expectMutation } from '../helpers'
 import { workspaceSlug } from '../workspace'
 
 /**
- * Planning cluster against live staging (the shared `e2e-playground` workspace,
+ * Planning cluster against live staging (the per-run workspace,
  * team key `QA`): projects, cycles, initiatives, releases, roadmap. Every test
  * mints its own data named `e2e <ISO timestamp>` and asserts on that record,
  * never on counts or "first row", and cleans up what the API allows.

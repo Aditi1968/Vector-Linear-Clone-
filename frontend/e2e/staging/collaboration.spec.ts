@@ -6,7 +6,7 @@ import { workspaceSlug } from '../workspace'
 
 /**
  * Collaboration panels on the issue detail view against live staging (the
- * shared `e2e-playground` workspace, team key `QA`): Comments, Labels,
+ * per-run workspace, team key `QA`): Comments, Labels,
  * Relations and Sub-issues. Every test mints its own issue(s) named
  * `e2e <ISO timestamp>` and asserts on that record, never on counts or a
  * "first row".

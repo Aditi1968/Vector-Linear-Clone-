@@ -7,7 +7,7 @@ import { workspaceSlug } from '../workspace'
 /**
  * Views group against live staging: saved views, favorites, documents, search,
  * semantic search, analytics. Each test mints its own data named `e2e <ISO>`
- * and asserts on that item. Only the e2e-playground workspace is touched.
+ * and asserts on that item. Only this run's own workspace is touched.
  */
 
 const WS = `/${workspaceSlug()}`
