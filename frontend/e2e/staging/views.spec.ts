@@ -329,8 +329,25 @@ test.describe('search', () => {
 
 test.describe('semantic search', () => {
   test('EmbeddingsRefresh then SemanticIssueMatches returns', async ({ page }) => {
+    // The index panel's badge + button only render once EmbeddingIndexState
+    // (fired on mount) resolves; wait for that response so a slow query can't
+    // race the status assertion, then read the resolved panel.
+    const indexStateLoaded = page.waitForResponse(
+      (response) =>
+        response.url().includes('/graphql') &&
+        response.request().method() === 'POST' &&
+        (() => {
+          try {
+            return (
+              JSON.parse(response.request().postData() ?? '{}') as { operationName?: string }
+            ).operationName === 'EmbeddingIndexState'
+          } catch {
+            return false
+          }
+        })(),
+    )
     await page.goto(`${WS}/semantic-search`)
-    // Let the index panel resolve before deciding whether indexing is offered.
+    await indexStateLoaded
     await expect(page.getByText(/Enabled|Not available/)).toBeVisible()
 
     const indexBtn = page.getByRole('button', { name: 'Index a batch now' })
