@@ -888,9 +888,10 @@ jobs:
 
       - name: Install Chromium
         working-directory: frontend
-        # Chromium alone: playwright.config.ts declares one project, and
-        # `playwright test` fails outright on a browser it cannot find, so a
-        # future engine added there fails here rather than being skipped.
+        # Chromium alone: every project in playwright.config.ts uses the
+        # Chromium device, and `playwright test` fails outright on a browser it
+        # cannot find, so a future engine added there fails here rather than
+        # being skipped.
         #
         # --with-deps installs the shared libraries the browser needs. The
         # runner image usually already has them; when it does not, the failure
@@ -918,10 +919,18 @@ jobs:
 
       - name: Playwright
         working-directory: frontend
+        # `--project=chromium` pins this gate to the LOCAL suite against the
+        # docker-compose stack. playwright.config.ts also declares staging-setup
+        # / staging / staging-teardown projects that drive the deployed staging
+        # environment; those must never run here (they need staging secrets and
+        # a live deployment) and have their own scheduled workflow,
+        # .github/workflows/e2e-staging.yml. A bare `playwright test` would try
+        # to run them too.
+        #
         # No `--reporter` override: the config already writes both the list
         # output this log wants and the HTML report the failure path below
         # uploads.
-        run: npx playwright test
+        run: npx playwright test --project=chromium
 
       - name: Collect the stack's logs from a failed run
         if: failure()
