@@ -26,7 +26,18 @@ Collected specs in main tree: admin, views, issues (committed). Stalled worktree
 - **Issue composer cold-start race** (from views agent): `useCreateIssue.ts` files into `teams[0]` from `IssueWorkspaceContext`; submitting before that query resolves returns "This workspace has no team to file issues in." and fires NO mutation, though the QA team exists (sidebar uses a different query). Degraded/cosmetic, cold-start only. Verify + triage in Phase 4.
 - Inventory nit: shared `Menu` sets `label` as aria-label only when it has NO children; favorites header menu accessible name is "Add favorite" (not "Add a favorite").
 Note: agent worktrees branch from main (577b868), NOT this branch — they copy staging infra (config, helpers, .env, .auth, INVENTORY) from the main checkout and symlink node_modules via Node (powershell/cmd blocked by the worktree hook). Specs collected via copy to main `e2e/staging/<group>.spec.ts`.
-- [ ] 7. Merge, run `npm run test:e2e:staging`, de-flake; app bugs tagged `@bug`
+- [x] 6. All 6 groups done; specs collected + committed.
+- [x] 7. Merged suite run; de-flaked (crowding + read-after-write under workers=2). No `@bug` app-broken tests.
+
+## Phase 4 — Fix ✅
+- [x] 8. `e2e/FINDINGS.md` written (coverage audit, assertion depth, determinism, the one bug + fix review).
+- [x] 9. Fixed the composer cold-load bug (`51a124f`) with a regression test proven to fail pre-fix. No risky/auth/migration fixes needed.
+- [x] 10. Final report delivered; stopped before push.
+
+## Self-audit additions
+- Coverage: wrote the 5 missing mutation tests (`199a9db`).
+- Determinism: fixed IssueSetCycle/IssueSetProject crowding flakes + saved-view waits (`477cb84`, `3747cb4`); swept 28 accumulated saved views.
+- det6 reaped by OS low-memory reaper; not relaunched (awaiting user).
 
 Worktree recipe (proven): git worktree → PowerShell junction node_modules from main → copy e2e/.env → staging config resolves.
 
