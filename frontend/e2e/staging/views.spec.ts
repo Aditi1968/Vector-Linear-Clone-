@@ -16,6 +16,18 @@ function unique(label: string): string {
   return `e2e ${label} ${new Date().toISOString()}`
 }
 
+/**
+ * The length of a `FavoriteList` payload's `favorites` array, or -1 if absent.
+ * FavoriteList carries only ids (no name), so a refetch after Favorite* is
+ * gated on the expected *count* -- otherwise the wait can resolve on an earlier
+ * in-flight copy (e.g. the one `goto /favorites` fired) that predates the write,
+ * and the row assertion then races the real refetch.
+ */
+function favoriteCount(data: unknown): number {
+  const favorites = (data as { favorites?: unknown }).favorites
+  return Array.isArray(favorites) ? favorites.length : -1
+}
+
 /** Create a saved view by name on the saved-views screen, leaving it there. */
 async function createSavedView(page: Page, name: string): Promise<void> {
   await page.goto(`${WS}/saved-views`)
@@ -23,7 +35,7 @@ async function createSavedView(page: Page, name: string): Promise<void> {
   const dialog = page.getByRole('dialog', { name: 'New saved view' })
   await dialog.getByLabel('Name', { exact: true }).fill(name)
   const created = expectMutation(page, 'SavedViewCreate')
-  const listed = expectRefetch(page, 'SavedViewList')
+  const listed = expectRefetch(page, 'SavedViewList', (d) => JSON.stringify(d).includes(name))
   await dialog.getByRole('button', { name: 'Create view' }).click()
   await created
   await listed
@@ -54,7 +66,9 @@ test.describe('saved views', () => {
     const newDialog = page.getByRole('dialog', { name: 'New saved view' })
     await newDialog.getByLabel('Name', { exact: true }).fill(name)
     const created = expectMutation(page, 'SavedViewCreate')
-    const listedAfterCreate = expectRefetch(page, 'SavedViewList')
+    const listedAfterCreate = expectRefetch(page, 'SavedViewList', (d) =>
+      JSON.stringify(d).includes(name),
+    )
     await newDialog.getByRole('button', { name: 'Create view' }).click()
     await created
     await listedAfterCreate
@@ -67,16 +81,26 @@ test.describe('saved views', () => {
     await editDialog.getByLabel('Name', { exact: true }).fill(renamed)
     // SavedViewUpdate refetches SavedViewResults, not SavedViewList; the rename
     // appears via Apollo cache normalisation once the mutation response lands,
-    // so there is no list refetch to await here.
+    // so there is no list refetch to await here. Assert the *mutation payload*
+    // carries the renamed entity -- that response is what normalisation writes
+    // into SavedView:<id>, so once it contains the new name the row is bound to
+    // update. Waiting only for "a SavedViewUpdate response" would pass even if
+    // the server echoed the old name; this is the payload-level gate.
     const updated = expectMutation(page, 'SavedViewUpdate')
     await editDialog.getByRole('button', { name: 'Save changes' }).click()
-    await updated
+    expect(JSON.stringify(await updated), 'SavedViewUpdate: renamed entity in payload').toContain(
+      renamed,
+    )
     await expect(page.getByRole('button', { name: `Actions on ${renamed}` })).toBeVisible()
 
     // Delete
     await page.getByRole('button', { name: `Actions on ${renamed}` }).click()
     const deleted = expectMutation(page, 'SavedViewDelete')
-    const listedAfterDelete = expectRefetch(page, 'SavedViewList')
+    const listedAfterDelete = expectRefetch(
+      page,
+      'SavedViewList',
+      (d) => !JSON.stringify(d).includes(renamed),
+    )
     await page.getByRole('menuitem', { name: 'Delete view' }).click()
     await deleted
     await listedAfterDelete
@@ -97,7 +121,10 @@ test.describe('favorites', () => {
     // trigger's accessible name is the text, not the label.
     await page.getByRole('button', { name: 'Add favorite' }).click()
     const added = expectMutation(page, 'FavoriteAdd')
-    const listedAfterAdd = expectRefetch(page, 'FavoriteList')
+    // Gate on the favorite count: FavoriteList has no name to match, and a plain
+    // wait can resolve on the list query `goto` fired (0 favorites) before the
+    // add's refetch (1). The named row is still the real check below.
+    const listedAfterAdd = expectRefetch(page, 'FavoriteList', (d) => favoriteCount(d) >= 1)
     await page.getByRole('menuitem', { name: viewName }).click()
     await added
     await listedAfterAdd
@@ -105,7 +132,7 @@ test.describe('favorites', () => {
 
     await page.getByRole('button', { name: `Actions on ${viewName}` }).click()
     const removed = expectMutation(page, 'FavoriteRemove')
-    const listedAfterRemove = expectRefetch(page, 'FavoriteList')
+    const listedAfterRemove = expectRefetch(page, 'FavoriteList', (d) => favoriteCount(d) === 0)
     await page.getByRole('menuitem', { name: 'Remove from favorites' }).click()
     await removed
     await listedAfterRemove
@@ -133,11 +160,14 @@ test.describe('favorites', () => {
     await createSavedView(page, second)
 
     // Favorite both.
-    for (const name of [first, second]) {
+    for (const [index, name] of [first, second].entries()) {
       await page.goto(`${WS}/favorites`)
       await page.getByRole('button', { name: 'Add favorite' }).click()
       const added = expectMutation(page, 'FavoriteAdd')
-      const listed = expectRefetch(page, 'FavoriteList')
+      // Wait for the refetch that reflects *this* add (count = index + 1), not
+      // an earlier in-flight copy still showing the prior count.
+      const expectedCount = index + 1
+      const listed = expectRefetch(page, 'FavoriteList', (d) => favoriteCount(d) >= expectedCount)
       await page.getByRole('menuitem', { name }).click()
       await added
       await listed

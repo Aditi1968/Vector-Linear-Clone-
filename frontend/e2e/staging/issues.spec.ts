@@ -164,13 +164,18 @@ test.describe('/e2e-playground/issues — inspector', () => {
     const stamp = new Date().toISOString()
     const cycleName = `e2e cycle ${stamp}`
 
-    // The run's workspace is empty, so this is the only QA cycle.
     await page.goto(`${WS}/cycles`)
     await expect(page.getByRole('heading', { name: 'Cycles' })).toBeVisible()
     await settle(page)
     await page.getByRole('button', { name: 'New cycle' }).click()
     const cycleDialog = page.getByRole('dialog', { name: 'New cycle' })
     await cycleDialog.getByRole('textbox', { name: 'Name (optional)' }).fill(cycleName)
+    // Set a fixed, distinct number: the planning Cycle test also creates a
+    // cycle on this run's shared QA team, and the dialog's prefilled number
+    // (max+1, computed before the list settles) is "1" for both, which the
+    // per-team-unique-number rule then rejects for whichever runs second.
+    // 202 here, 101 in planning.spec.ts. (Valid range is 1..9999.)
+    await cycleDialog.getByRole('spinbutton', { name: 'Number' }).fill('202')
     // Starts/Ends are datetime-local inputs; a unique far-future window per
     // run avoids the team's no-overlap rule.
     const { starts, ends } = futureCycleWindow()

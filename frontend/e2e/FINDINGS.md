@@ -139,9 +139,10 @@ read-after-write / query-timing races (the mutation always succeeded — every
 Each was fixed deterministically by waiting on the real signal, never by
 widening a timeout or retrying an assertion:
 
-- **IssueSetCycle / Cycle detail** — the team-scoped cycle list is cache-served
-  and lags a just-created cycle; **reload** to run `CycleList` fresh, then open
-  the row (same pattern for the inspector dropdown).
+- **IssueSetCycle / Cycle detail** — a `reload` runs `CycleList`/the inspector's
+  team-cycles query fresh before reading it, so a just-created cycle is not
+  missed to a cache-served list. (This is *not* why the Cycle test flaked — see
+  §5, which traces that to a duplicate cycle number, not list lag.)
 - **Semantic search** — the index-state badge renders only once the on-mount
   `EmbeddingIndexState` query resolves; **await that response** before reading
   the panel.
@@ -203,6 +204,83 @@ was updated to resolve the context (its ready state) so Create is focusable.
 
 The staging specs encode the same race defensively with a `settle()`
 (networkidle) wait before every composer submit.
+
+---
+
+## 5. Two reported flakes, root-caused from traces (Cycle + SavedViewUpdate)
+
+Both failures had the same reported shape — *mutation returned 200, the list
+never reflected it* — and both traced to the **same blind spot in
+`expectMutation`**, not to a backend or cache bug.
+
+### Evidence (failing-run trace, `--trace on`, retries 0)
+
+`CycleCreate` request body sent `number: 1`, `name: "e2e cycle …13.155Z"`,
+`teamId: …QA`. Its **response** (HTTP 200):
+
+```json
+{"data":{"cycleCreate":{"cycle":null,
+  "errors":[{"field":"number","code":"DUPLICATE",
+             "message":"This team already has a cycle numbered 1"}]}}}
+```
+
+The follow-up `CycleList` returned exactly one cycle — `number 1`, name
+`…13.157Z` (the sibling test's cycle) — and the test was waiting for a link
+named `…13.155Z`, which was **never created** (`cycle: null`). So it is **not**
+case (a) stale refetch, **not** (b) DOM-vs-cache, and **not** (c) refetch
+ordering: the write *failed* at the business layer while looking like a success.
+
+### Root cause (a test bug, surfaced by a helper blind spot)
+
+1. **`expectMutation` only checked HTTP 200 + top-level GraphQL `errors`.**
+   Vector returns field-level validation failures in a **nested payload
+   `errors`** array (`cycleCreate.errors`) alongside a 200 and a null top-level
+   `errors`. The helper treated the rejected write as success, so the test ran
+   on to a 60 s wait for an effect that never happened — precisely the "looks
+   like it worked but the mutation came back with errors" case this suite
+   exists to catch.
+2. **Two tests collided on cycle number 1.** `IssueSetCycle` (issues.spec) and
+   `Cycle` (planning.spec) both create a cycle on this run's shared QA team and
+   both relied on the dialog's prefilled number. That prefill is `max(existing)
+   + 1` (`CycleListPage.tsx:137`) computed from whatever `cycles` is loaded when
+   the dialog opens; opened before the list settles it is `1` for both, and
+   cycle number is unique per team, so the second create is rejected `DUPLICATE`.
+
+`SavedViewUpdate` was the same failure *mode*: a 200 that might not be a real
+success slips past the old helper. Its trace shows the rename response is
+correct (the renamed entity is in `savedViewUpdate.savedView`, which Apollo
+normalises onto `SavedView:<id>` — no list refetch needed), so that occurrence
+was a transient; it is now gated explicitly (below).
+
+### Fixes (deterministic; no widened timeouts; nothing in auth/tenancy/migrations)
+
+- **`expectMutation` now fails fast on a nested payload `errors`** (`helpers.ts`,
+  `firstPayloadError` walks the payload). Any mutation across the suite that
+  "succeeds" with 200 but carries a validation error now fails with the
+  server's own message instead of a downstream timeout — the real regression
+  guard for this class.
+- **Both cycle tests set a fixed, distinct number** (101 in the Cycle lifecycle
+  test, 202 in `IssueSetCycle`) rather than trusting the prefill, so they can't
+  collide on the shared team. The workspace is fresh per run and only these two
+  tests create cycles, so fixed values are safe; they stay inside the server's
+  valid `1..9999` range.
+- **`expectRefetch` is now payload-aware** (`helpers.ts`): an optional predicate
+  waits for the list response that actually *contains* (or, for delete, no
+  longer contains) the row, not merely any response for that query — closing
+  the "an earlier in-flight copy of the same query resolves first" gap. Wired
+  into `SavedViewList` create/delete (`views.spec`). `FavoriteList` carries only
+  ids, not names, so it is gated on the favorite **count** instead (`favoriteCount`
+  helper) -- without which a Favorite* refetch can resolve on the list query that
+  `goto /favorites` fired, predating the write (this is what made `FavoriteReorder`
+  flake once per-run isolation left the prior add's favorite in the list).
+- **`SavedViewUpdate` rename now asserts the mutation payload carries the new
+  name** before the row assertion, so a server that echoed the old name (or a
+  payload error) fails the test at the write, not 10 s later.
+
+The dialog's prefill-before-list-settles is a minor client race (a human who
+opens *New cycle* instantly gets `1` too, and the server correctly rejects the
+dup); it is low severity, not auth/tenancy/migrations, and the tests no longer
+depend on it. Noted here, not fixed.
 
 ---
 

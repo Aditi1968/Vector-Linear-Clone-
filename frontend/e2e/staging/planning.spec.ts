@@ -188,10 +188,17 @@ test.describe('/e2e-playground/cycles', () => {
     }
     await selectQaTeam()
 
-    // ---- CycleCreate (Number is prefilled; name + the datetime-local window)
+    // ---- CycleCreate (name + a unique number + the datetime-local window)
     await page.getByRole('button', { name: 'New cycle' }).click()
     const dialog = page.getByRole('dialog', { name: 'New cycle' })
     await dialog.getByRole('textbox', { name: 'Name (optional)' }).fill(cycleName)
+    // The dialog prefills the number as max(existing)+1, computed from whatever
+    // is loaded when it opens; two cycle-creating tests share this run's QA team
+    // and both get "1" before the list settles, so the second collides on the
+    // per-team-unique number. Set a fixed, distinct number instead (the
+    // workspace is fresh per run and only these two tests create cycles):
+    // 101 here, 202 in issues.spec.ts IssueSetCycle. (Valid range is 1..9999.)
+    await dialog.getByRole('spinbutton', { name: 'Number' }).fill('101')
     const { starts, ends } = futureCycleWindow()
     await dialog.getByRole('textbox', { name: 'Starts' }).fill(starts)
     await dialog.getByRole('textbox', { name: 'Ends' }).fill(ends)
