@@ -29,3 +29,7 @@ dist-ssr
 # them, which is the only place they mean anything.
 playwright-report
 test-results
+
+# Local e2e credentials and saved Playwright sign-in state.
+e2e/.env
+e2e/.auth/

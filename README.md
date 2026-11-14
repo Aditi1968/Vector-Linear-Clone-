@@ -167,3 +167,72 @@ settings nor builds an app.
 python -m pytest -q              # default suite; no database required
 python -m pytest -q -m db        # PostgreSQL suite; requires Docker
 ```
+
+## End-to-end tests
+
+Playwright drives a real browser. Two suites live in `frontend/e2e`, selected
+by project.
+
+### Local — against the Docker Compose stack
+
+```bash
+docker compose up --build --wait          # repo root, in another shell
+cd frontend
+npm ci
+npx playwright install --with-deps chromium
+npx playwright test --project=chromium
+```
+
+The `chromium` project runs `frontend/e2e/journeys.spec.ts` — sign-up,
+onboarding, the session cookie travelling through nginx, and tenant isolation:
+the seam the layered unit/integration tests cannot see. This is the suite CI
+runs on every push and pull request.
+
+### Staging — against the deployed environment
+
+```bash
+cd frontend
+# frontend/e2e/.env (gitignored):
+#   E2E_BASE_URL=https://<your-staging-host>
+#   E2E_PASSWORD=<password for the throwaway users the suite registers>
+npm run test:e2e:staging
+```
+
+The `staging` project runs the button-coverage suite in
+`frontend/e2e/staging/`. **Each run provisions its own fresh workspace** —
+`staging-setup` registers a throwaway user (`vector-e2e-<epoch>@example.com`)
+and creates `vector-e2e-<epoch>` with a `QA` team over the GraphQL API — so
+runs are isolated and never collide; `staging-teardown` archives the run's
+issues afterward. It also runs nightly and on demand through
+`.github/workflows/e2e-staging.yml`, which reads the `E2E_BASE_URL` and
+`E2E_PASSWORD` repository secrets.
+
+### What's covered
+
+Every interactive control that fires a GraphQL mutation with an observable
+result, across all workspace routes: issues (create / update / archive, board
+move), collaboration (comments, labels, relations, sub-issues), planning
+(projects + milestones, cycles, initiatives, releases), admin (members,
+environments, label groups, templates), views (saved views, favorites,
+documents, search, analytics), and the shell (command palette, nav, logout).
+Each test asserts the mutation returned HTTP 200 with no GraphQL errors via the
+`expectMutation` helper — not merely that the DOM changed. The full inventory
+and results are in [`frontend/e2e/INVENTORY.md`](frontend/e2e/INVENTORY.md) and
+[`frontend/e2e/FINDINGS.md`](frontend/e2e/FINDINGS.md). A few controls are
+documented skips rather than gaps: triage intake, release creation and GitHub
+PR-automation need a connected GitHub install; some member actions need a
+second member.
+
+### Worked example: the bug this suite found
+
+Driving the issue composer surfaced a real race. On a cold load you could
+submit the **New issue** form before its team lookup resolved, and it failed
+with *"This workspace has no team to file issues in."* — a false error for a
+workspace that has a team — while firing no mutation at all. The fix gates the
+Create button on the real `IssueWorkspaceContext` loading state
+([`useCreateIssue.ts`](frontend/src/features/issues/api/useCreateIssue.ts),
+[`IssueComposer.tsx`](frontend/src/features/issues/components/IssueComposer.tsx)),
+and the regression test *"keeps Create disabled until the team lookup
+answers"* in
+[`create.test.tsx`](frontend/src/features/issues/create.test.tsx) fails on the
+pre-fix code.

@@ -29,3 +29,7 @@ CLAUDE.md
 # Frontend build artefacts (frontend/).
 node_modules/
 dist/
+
+# Local MCP tooling: server config and Playwright-MCP browser session dumps.
+.mcp.json
+.playwright-mcp/

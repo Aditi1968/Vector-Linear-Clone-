@@ -1,0 +1,83 @@
+name: E2E staging
+
+# The staging button-coverage suite, against the DEPLOYED staging environment
+# rather than a docker-compose stack. Kept out of the blocking CI workflow on
+# purpose: it talks to a live external deployment with real secrets and a
+# cold-starting free tier, so it is neither hermetic nor fast enough to gate a
+# pull request. It runs on demand and once a night instead.
+#
+# Each run provisions its own throwaway workspace (see
+# frontend/e2e/staging/auth.setup.ts), so runs never collide.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # 07:00 UTC daily. A nightly signal that staging still serves the whole
+    # product surface, decoupled from any deploy.
+    - cron: "0 7 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  # One staging run at a time: they share the deployment, and a second run
+  # mid-flight would race the first. Never cancel a run in progress.
+  group: e2e-staging
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  e2e-staging:
+    name: Button coverage against staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install locked dependencies
+        working-directory: frontend
+        env:
+          # Skip the three-engine download in `npm ci`'s install script; the
+          # next step fetches the one browser the suite uses.
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: npm ci
+
+      - name: Install Chromium
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the staging suite
+        working-directory: frontend
+        env:
+          # Supplied by repository secrets (see README "End-to-end tests").
+          # E2E_BASE_URL  — the staging deployment's base URL.
+          # E2E_PASSWORD  — password for the throwaway users each run registers.
+          # No E2E_EMAIL: the suite generates a fresh unique email per run.
+          E2E_BASE_URL: ${{ secrets.E2E_BASE_URL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+        run: npm run test:e2e:staging
+
+      - name: Upload the Playwright report
+        # always(): the report is worth keeping on a pass (proof) and on a fail
+        # (the trace + screenshot of where it gave up). It does not make the job
+        # pass — the step above already decided that.
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: playwright-report-staging
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 14

@@ -23,6 +23,17 @@ const NO_TEAM = 'This workspace has no team to file issues in.'
 export interface UseCreateIssueResult {
   createIssue: (draft: IssueDraft) => Promise<IssueSaveOutcome>
   isSubmitting: boolean
+  /**
+   * The team lookup has not answered yet, so there is no team to file into.
+   *
+   * This is the "disabled state rather than a rejected submission" the note
+   * above promises: while it is true the composer disables its submit, so a
+   * fast submit on a cold load cannot fire against an undefined team and come
+   * back with NO_TEAM for a workspace that in fact has one. A workspace that
+   * genuinely has no teams is a different thing -- `isPreparing` is false once
+   * the lookup answers with none, and the NO_TEAM outcome still reports it.
+   */
+  isPreparing: boolean
 }
 
 /**
@@ -52,7 +63,7 @@ export interface UseCreateIssueResult {
  */
 export function useCreateIssue(): UseCreateIssueResult {
   const workspaceSlug = useWorkspaceSlug()
-  const { teams } = useWorkspaceContext()
+  const { teams, isLoading } = useWorkspaceContext()
 
   // ponytail: first team wins. Replace with a picker (or a remembered
   // default) when a workspace in this product routinely has more than one.
@@ -91,5 +102,5 @@ export function useCreateIssue(): UseCreateIssueResult {
     [mutate, teamId, workspaceSlug],
   )
 
-  return { createIssue, isSubmitting: loading }
+  return { createIssue, isSubmitting: loading, isPreparing: isLoading }
 }
