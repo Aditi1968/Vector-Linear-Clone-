@@ -1,6 +1,30 @@
 # Vector
 
-A Linear-style issue tracker, built as a backend learning project.
+Vector is a multi-tenant, Linear-style issue tracker: workspaces and teams, issues with
+cycles, projects, labels, relations and comments, full-text and semantic search, analytics,
+and a GitHub integration. The backend is FastAPI with a Strawberry GraphQL API over asyncpg
+and PostgreSQL 18 (pgvector for embeddings); the frontend is React 19 and TypeScript.
+
+**Live demo:** https://vector-staging-qd79.onrender.com
+
+## Highlights
+
+- **Tenant isolation enforced in the schema and in CI.** Every tenant-scoped row carries a
+  `workspace_id` and hangs off a composite foreign key through it
+  (`migrations/002_tenancy.sql`), so a child can never point at a parent in another workspace.
+  A build gate (`tests/test_repository_tenancy_gate.py`) fails if any SQL statement in
+  `app/repositories/` omits the `workspace_id` predicate, so the next query to forget it is
+  caught before merge rather than in production.
+- **A correct work queue, not a cron.** Embedding-index jobs are claimed with
+  `FOR UPDATE SKIP LOCKED` (`app/repositories/embedding_jobs.py`), so any number of workers can
+  drain the queue concurrently and no job is ever handed out twice.
+- **Hybrid search by rank fusion.** Full-text (`tsvector`) and vector (pgvector) retrieval are
+  combined with Reciprocal Rank Fusion (`app/domain/semantic_search.py`, `RRF_K = 60`) rather
+  than a weighted score, which avoids inventing a conversion between two incomparable scales.
+- **Heavily tested.** 2,674 backend tests (pytest) and 679 frontend tests (vitest), plus the
+  tenancy gate above.
+- **Real end-to-end coverage.** A 46-test Playwright suite drives the actual product against a
+  deployed staging environment, each run in its own throwaway workspace (`frontend/e2e/`).
 
 ## Run the whole thing locally
 

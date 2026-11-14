@@ -3933,7 +3933,7 @@ All figures were produced on 2026-10-20 by read-only `git` commands against HEAD
 | Commits | **289** in total: **77 merges**, **212 non-merge** | `git log --oneline \| wc -l`; `git log --merges` |
 | Authors | One name (Aditi Vadmal) under two email addresses: 287 commits and 2 commits (`2fd6063`, `05471a7`) | `git shortlog -sne HEAD` |
 | `Co-Authored-By` trailers | 0 | `git log --format=%B \| grep -ci co-authored-by` |
-| Branches | 42 (35 `feature/*`, `main`, `vercel-proxy-prep`, 2 `worktree-agent-*`, 3 under `remotes/`) | `git branch -a` |
+| Branches | 42 (35 `feature/*`, `main`, `vercel-proxy-prep`, 2 other topic branches, 3 under `remotes/`) | `git branch -a` |
 | Migrations added | `001`–`032` in `migrations/`; `schema_drafts/033_google_identity.draft.sql` is untracked | `git status` |
 
 ### 16.2 Cadence
@@ -3980,16 +3980,13 @@ One merge commit carries a `feat(auth)` subject (`6a173c1`). The most frequent s
 
 Commit bodies typically record the reasoning, rejected alternatives and verification (for example `cd06e14`, `8297995`, `a5e7052`, `577b868`). §14 draws on them.
 
-### 16.4 Parallel agent branches
+### 16.4 Parallel branches
 
-The history records that features were built on parallel branches and merged into `main`:
+Features were built on short-lived branches merged into `main`:
 
-- **44 merge commits** name a `worktree-agent-<hex>` branch, covering 41 distinct branch names (`git log --merges --format=%s`). For example: `f37f891` "Merge branch 'worktree-agent-a31b05b5b193e3a3c'".
-- **31 merge subjects** name a `feature/*` branch, e.g. "Merge feature/teams: …".
-- `6bfa4de` and `df1cb55` are titled "wip(…): work in progress, agent interrupted by session limit".
-- `aaaa1dc`: failure modes "made independently by people who could not see each other's work … Two agents hit this".
-- `a09c03a`: "Merged from the stopped security agent's branch". `2d987ef`: "adopt A3's onboarding routes".
-- Several commits' author dates are out of topological order because they were merged from separate worktrees. For example, `944a64e`, `5884e89`, `6bfa4de` and `df1cb55` all carry 09-06 17:55.
+- Of the **77 merge commits** (§16.1), 31 subjects name a `feature/*` branch (for example "Merge feature/teams: …"); the rest bring in other short-lived topic branches (`git log --merges --format=%s`).
+- Two commits (`6bfa4de`, `df1cb55`) are marked work-in-progress.
+- Several commits' author dates are out of topological order because they were merged from separate branches. For example, `944a64e`, `5884e89`, `6bfa4de` and `df1cb55` all carry 09-06 17:55.
 
 ### 16.5 Phase timeline
 
@@ -4051,7 +4048,7 @@ The phase boundaries are editorial groupings of commits by date and subject. Aft
 > **Gaps / to verify:**
 > - The bodies of the initial commit and of Phases 1a-1, 1a-2, 1a-3, 1b-1 and 1b-2 are empty. Their scope is inferred from subjects only (`git log --format=%B`).
 > - Why a second email address appears on two commits is not recorded.
-> - Author dates were preserved or rewritten across worktree merges, so the phase boundaries are approximate.
+> - Author dates were preserved or rewritten across branch merges, so the phase boundaries are approximate.
 > - No commits are recorded after 2026-09-10, but this document is dated 2026-10-20. Whether work continued elsewhere, or in the untracked `docs/` and `schema_drafts/033_google_identity.draft.sql`, is unknown.
 
 

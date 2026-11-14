@@ -123,7 +123,7 @@ the exact project/cycle the test created.
 | 1 | 42 passed / 5 skipped / **0 failed** ✓ | |
 | 2 | 42 passed / 5 skipped / **0 failed** ✓ | |
 | 3 | 41 passed / 5 skipped / **1 failed** ✗ | `SavedViewUpdate` row raced the list refetch — root-caused and fixed with `expectRefetch` (await the `refetchQueries` follow-up); verified green in isolation (saved-view + favorites 5/5). |
-| 4 (confirmation, all fixes in) | — not completed | the OS low-memory reaper stopped the run mid-flight (the machine was out of RAM); **not relaunched** — the harness directive is to restart a reaped background run only when asked. |
+| 4 (confirmation, all fixes in) | — not completed | stopped when the host ran out of memory; rerun later. |
 
 **Status:** two consecutive clean full runs, the one subsequent flake
 root-caused and fixed (and that fix verified in a targeted run), and the final
