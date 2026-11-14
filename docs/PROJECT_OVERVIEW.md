@@ -3877,7 +3877,6 @@ How to read these tables:
 | `certifi` is imported directly but only installed transitively | `scripts/inspect_deployment_db.py` line 32; absent from `requirements.in` |
 | `uv.lock` is tracked but empty (`version`, `revision`, `requires-python` only), and `pyproject.toml` has no `[project]` table | `uv.lock` |
 | `app/logging.py` contains only `# TODO: structlog`. Nothing calls `structlog.configure`, `basicConfig` or `dictConfig` in `app/`, even though `structlog.get_logger` is used. | `app/logging.py:3` |
-| `check_db.py` calls itself "Temporary" (Phase 0) but is still tracked at the repo root | `check_db.py:1` |
 | Migration 017 declares UNIQUE constraints over exactly the primary-key columns, which PostgreSQL backs with a second index. The comment says the PK is "named here for the reader rather than declared twice". | `migrations/017_github_development.sql:203` (`github_pull_requests_workspace_repository_number_key`), `:309` (`github_commits_workspace_repository_sha_key`). The migration is immutable, so a fix would need a new migration. |
 | No pruning of `github_deliveries`, `slack_event_deliveries` or terminal `domain_events` | `-- ponytail: no pruning job` comments in `migrations/017_github_development.sql` and `027_domain_events.sql`, and a "nothing here prunes it" comment in `014_slack_integration.sql`; no `DELETE FROM` these tables in `app/` |
 | `frontend/codegen.ts` declares `enumsAsTypes: true` twice in one object | `grep -c enumsAsTypes frontend/codegen.ts` → 2 |
@@ -4297,7 +4296,6 @@ vector/
 ├── DEPLOYMENT_ENV_VARS.md     Every deployment environment variable (names, purpose), Neon/Render notes
 ├── Dockerfile                 3-stage API image: build SPA, build venv, runtime (migrate then uvicorn)
 ├── README.md                  Run/deploy instructions (partly stale; see §15)
-├── check_db.py                Self-described "temporary" pool connectivity check (Phase 0)
 ├── docker-compose.yml         db (pgvector pg18) → migrate → api → web (nginx) stack
 ├── pyproject.toml             pytest, ruff and mypy configuration (no [project] table)
 ├── render.yaml                Render blueprint: one free Docker web service "vector-staging"

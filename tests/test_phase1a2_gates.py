@@ -419,7 +419,7 @@ def test_ruff_walks_every_python_file_in_the_repository():
 
 
 def test_ruff_covers_the_directories_outside_the_application_package():
-    """`scripts/`, `tests/` and `check_db.py` are code too.
+    """`scripts/` and `tests/` are code too.
 
     Named individually rather than left to the comparison above, because
     this is the specific narrowing worth refusing: the application package
@@ -428,7 +428,6 @@ def test_ruff_covers_the_directories_outside_the_application_package():
     """
     checked = _tracked_python_files()
 
-    assert "check_db.py" in checked
     assert any(path.startswith("scripts/") for path in checked)
     assert any(path.startswith("tests/") for path in checked)
 
@@ -517,8 +516,8 @@ def test_no_type_ignore_is_a_bare_one():
         "KNOWN GAP, DELIBERATELY RECORDED AS A FAILING EXPECTATION. "
         "mypy is scoped to `files = ['app']` and CI runs `mypy app/`, so "
         "scripts/apply_migration.py -- the migration ledger, ~800 lines, the "
-        "code with the most expensive failure mode in the repository -- and "
-        "check_db.py are type-checked by nothing. Verified by injecting "
+        "code with the most expensive failure mode in the repository -- is "
+        "type-checked by nothing. Verified by injecting "
         "`_bad: int = 'not an int'` into scripts/apply_migration.py: mypy "
         "still reported 'Success: no issues found in 32 source files'. "
         "Widen the scope, then delete this marker."
@@ -528,7 +527,7 @@ def test_mypy_also_checks_the_migration_runner():
     mypy = _pyproject()["tool"]["mypy"]
     files = set(mypy.get("files", []))
 
-    assert {"scripts", "check_db.py"} <= files
+    assert {"scripts"} <= files
 
 
 # --------------------------------------------------------------------------
